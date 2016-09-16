@@ -2,7 +2,7 @@
 Utilities of the Blue Geo library
 '''
 
-from blueRaster import *
+from raster import *
 import math
 
 

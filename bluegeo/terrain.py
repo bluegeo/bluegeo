@@ -2,8 +2,8 @@
 Terrain analysis functions
 '''
 
-from blueRaster import *
-import blueutil as util
+from raster import *
+import util
 import spatial
 import numpy.ma as ma
 import math

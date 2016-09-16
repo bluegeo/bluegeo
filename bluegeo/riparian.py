@@ -7,10 +7,10 @@ Compute riparian connectivity and risk
 2.  def steep slope contributing- sensitvity
 '''
 
-from blueRaster import *
+from raster import *
 from terrain import *
 from spatial import *
-import blueutil as util
+import util
 import math
 
 

@@ -2,8 +2,8 @@
 Functions for completing custom spatial filters
 '''
 
-from blueRaster import *
-import blueutil as util
+from raster import *
+import util
 import scipy.ndimage as scifilter
 
 
