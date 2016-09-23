@@ -5,6 +5,7 @@ import os
 import shutil
 import multiprocessing
 
+# Check which drivers avaialble, prefer GDAL
 try:
     from osgeo.gdalconst import *
     from osgeo import gdal
