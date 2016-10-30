@@ -7,10 +7,10 @@ Compute riparian connectivity and risk
 2.  def steep slope contributing- sensitvity
 '''
 
-from ..raster import *
-from ..terrain import *
-from ..spatial import *
-from . import util
+from raster import *
+from terrain import *
+from spatial import *
+import util
 import math
 
 
@@ -339,46 +339,70 @@ def riparianDelineation(dem, slope_raster, streams, min_cut_slope,
     return benches
 
 
-def cumefftask(args):
-    af, tile, nodata, th, sa = args
-    xoff, yoff, win_xsize, win_ysize = tile
-    mma = numpy.load(af, mmap_mode='r+')
-    ina = numpy.load(sa, mmap_mode='r')
-    a = numpy.copy(ina[yoff:yoff + win_ysize, xoff:xoff + win_xsize])
-    a /= th
-    a[(a > 1) | (a == 0)] = nodata
-    mma[yoff:yoff + win_ysize, xoff:xoff + win_xsize] = a
-    mma.flush()
+def cumulativeEffectiveness(stream_raster, fa_dilation,
+                            slope_dilation, tree_height=50):
+    '''
+    Define zones of riparian cumulative effectiveness.
 
-
-def cumulativeEffectiveness(stream_raster, tree_height=45):
-    '''Define zone of riparian cumulative effectiveness'''
+    '''
     # Read input
     util.parseInput(stream_raster)
+    util.parseInput(fa_dilation)
+    util.parseInput(slope_dilation)
     # Compute distance
     dist = streamDistance(stream_raster)
     dist.changeDataType('float32')
-    root = raster(dist)
-    litter = raster(dist)
+    # Buffer width is associated with contributing area
+    conta = fa_dilation.load('r+')
+    dista = dist.load('r+')
+    # Scale contributing area
+    m = conta != fa_dilation.nodata[0]
+    conta[m] = numpy.sqrt(conta[m]) / numpy.sqrt(numpy.max(conta[m][dista[m] <= tree_height]))
+    # Scale Distance
+    m = dista != dist.nodata[0]
+    dista[m] /= tree_height
+    # Create similarity index
+    m = m & (conta != 0) & (conta != fa_dilation.nodata[0])
+    dista[m] = dista[m] / conta[m]
+    dista[dista > 1] = dist.nodata[0]
+    dista[~m] = dist.nodata[0]
+    del conta
+    del dista
+    # Index slope dilation
+    sl = slope_dilation.load('r+')
+    m = sl != slope_dilation.nodata[0]
+    sl[m] /= numpy.percentile(sl[m], 85)
+    sl[(sl > 1) & m] = 1
+    sl[m] = 1 - sl[m]
+    # Shade is equal to dist
     shade = raster(dist)
-    coarse = raster(dist)
-    # Shade
-    shade.runTiles(cumefftask, args=(tree_height, dist.array))
-    # Coarse Wood
-    coarse.runTiles(cumefftask, args=(tree_height, dist.array))
-    # Litter Fall
-    litter.runTiles(cumefftask, args=(tree_height * 0.6, dist.array))
-    # Root Strength
-    root.nodata = [-1]
-    a = root.load('r+')
-    a[a < 0.25 * tree_height] = 0
-    a[a >= 0.25 * tree_height] = 1
-    s = dist.load(in_memory=True)
-    a[s == 0] = root.nodata[0]
-    a[s > tree_height] = root.nodata[0]
-    a.flush()
+    a = shade.load('r+')
+    m = a != shade.nodata[0]
+    a[m] = 1 - a[m]
     del a
-    print "Complete Cumulative Effectiveness Calculations"
+    # Litter
+    litter = raster(dist)
+    la = litter.load('r+')
+    la[m][la[m] > 0.6] = litter.nodata[0]
+    m = la != litter.nodata[0]
+    la[m] /= 0.6
+    la[m] = (1 - la[m]) * sl[m]
+    del la
+    # Coarse
+    coarse = raster(dist)
+    co = coarse.load('r+')
+    m = co != coarse.nodata[0]
+    co[m] = (1 - co[m]) * sl[m]
+    del co
+    # Root
+    root = raster(dist)
+    a = root.load('r+')
+    m = a != root.nodata[0]
+    a[a < 0.25] = root.nodata[0]
+    a[a >= 0.25] = 1
+    m = a != root.nodata[0]
+    a[m] *= sl[m]
+    del a
     return root, litter, shade, coarse
 
 
