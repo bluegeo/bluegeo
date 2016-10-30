@@ -184,6 +184,56 @@ def meanfilter(data, neighborhood=(3, 3), iterations=1):
     return output
 
 
+def meanDilateTask(args):
+    af, tile, nodata, nbrhood = args
+    xoff, yoff, win_xsize, win_ysize = tile
+    mma = numpy.load(af, mmap_mode='r+')
+    # set up neighborhood
+    islice, jslice, insislice, insjslice = util.tileHood(tile, nbrhood,
+                                                         mma.shape)
+    a = numpy.copy(mma[islice, jslice])
+    if numpy.all(a == nodata):
+        return
+    datamask = a != nodata
+    # Find nodata mask
+    nodatamask = ~scifilter.binary_dilation(datamask)
+    view = util.getWindowViews(a, nbrhood)
+    itop, ibot, jleft, jright = util.getViewInsertLocation(nbrhood)
+    out = numpy.zeros(shape=a.shape, dtype='float32')
+    cnt = numpy.zeros(shape=a.shape, dtype='int8')
+    for i in range(nbrhood[0]):
+        for j in range(nbrhood[1]):
+            m = view[i][j] != nodata
+            out[itop:ibot, jleft:jright][m] += view[i][j][m]
+            cnt[itop:ibot, jleft:jright][m] += 1
+    m = cnt != 0
+    out[m] /= cnt[m]
+    out[datamask] = a[datamask]
+    out[nodatamask] = nodata
+    mma[yoff:yoff + win_ysize, xoff:xoff + win_xsize] =\
+        out[insislice, insjslice]
+    del mma
+
+
+def meanDilate(data, iterations=1):
+    '''
+    Compute a mean (uniform) filter to dilate the extent of a dataset.
+    '''
+    util.parseInput(data)
+    output = raster(data)
+    output.changeDataType('float32')
+    # Collect edges for replacement
+    a = output.load('r')
+    edges = (a[0, :].copy(), a[-1, :].copy(), a[:, 0].copy(), a[:, -1].copy())
+    for i in range(iterations):
+        output.runTiles(meanDilateTask, args=((3, 3),))
+    a = output.load('r+')
+    a[0, :], a[-1, :], a[:, 0], a[:, -1] = edges
+    del a
+    print "Completed a mean dilation %i times" % (iterations)
+    return output
+
+
 def modetask(args):
     af, tile, nodata, nbrhood, iterations, sa = args
     xoff, yoff, win_xsize, win_ysize = tile

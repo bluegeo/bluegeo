@@ -7,40 +7,18 @@ Compute riparian connectivity and risk
 2.  def steep slope contributing- sensitvity
 '''
 
-from raster import *
-from terrain import *
-from spatial import *
-import util
+from ..raster import *
+from ..terrain import *
+from ..spatial import *
+from . import util
 import math
 
 
-def heightAboveStream(streams, slope_surface, max_height):
+def dilateAttribute(attr, iterations):
     '''
-    Compute a buffer around streams until a max_height is reached.
-    TODO: fix to manage memory
+    Perform an approximate mean dilation of stream attributes
     '''
-    util.parseInput(streams)
-    util.parseInput(slope_surface)
-    # Apply iterative convolution after setting streams to a plane
-
-
-def addCrossings(dem, surface_roughness=None, roughness_threshold=.25):
-    '''
-    Burn in crossings (culverts, bridges, etc.) to a dem
-    '''
-    util.parseInput(dem)
-    if surface_roughness is None:
-        surface_roughness = roughness(dem)
-    # Find low roughness regions
-    rough = surface_roughness.load('r')
-    inds = numpy.where(rough < roughness_threshold)
-    inds = [inds[0].tolist(), inds[1].tolist()]
-    # Perpare output
-
-    # Iterate rough regions and burn in crossings
-    while len(inds[0]) > 0:
-        i_, _i, j_, _j = util.getSlice(inds[0][0], inds[1][0])
-        del inds[0][0], inds[1][0]
+    return meanDilate(attr, iterations=iterations)
 
 
 def streamSlope(streams, dem):
