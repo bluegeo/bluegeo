@@ -21,6 +21,7 @@ class domain(object):
         print "Computing transmissivity"
         knodata = k.nodata[0]
         bnodata = b.nodata[0]
+        self.template = raster(k)
         k = k.load(in_memory=True)
         b = b.load(in_memory=True)
         self.domain = (k != knodata) & (b != bnodata) & (k != 0) & (b != 0)
@@ -78,7 +79,7 @@ class domain(object):
         elif type == 'head-dependent':
             pass
 
-    def solve(self, max_iter=100, tolerance=1E-6):
+    def solve(self, max_iter=100, tolerance=1E-6, show_convergence=False):
         '''Calculate a head surface using current parameter set'''
         # Apply constant head
         if hasattr(self, 'constantmask'):
@@ -155,10 +156,11 @@ class domain(object):
             # Update heads
             self.head = h
 
-        plt.plot(convergence)
-        plt.ylabel('Residual')
-        plt.xlabel('Iteration')
-        plt.show()
+        if show_convergence:
+            plt.plot(convergence)
+            plt.ylabel('Residual')
+            plt.xlabel('Iteration')
+            plt.show()
 
     def view(self, attr='head'):
         '''View the current head surface'''
@@ -168,3 +170,16 @@ class domain(object):
         im = ax.imshow(a, cmap='terrain')
         fig.colorbar(im)
         plt.show()
+
+    def saveAsRaster(self, outpath, attr='head', nodata=-99999):
+        '''Save to a raster file'''
+        a = self.template.load('r+')
+        if attr == 'Q':
+            # Calculate Q
+            
+            a[:] = q
+        else:
+            a[:] = self.__dict__[attr]
+        del a
+        self.template.nodata = [nodata]
+        self.template.saveRaster(outpath)
