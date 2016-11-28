@@ -150,7 +150,8 @@ class raster(object):
             self.activeBand = band
             ds = newfile.create_dataset(str(band), self.shape,
                                         dtype=self.dtype,
-                                        compression=compression)
+                                        compression=compression,
+                                        chunks=True)
             for a, s in self.iterchunks(ds.chunks):
                 ds[s] = a
             del ds
@@ -232,7 +233,7 @@ class raster(object):
             ds = self.ds
             return ds.GetRasterBand(self.band).ReadAsArray()
         else:
-            return self.band[:]
+            return self.ds[str(self.band)][:]
 
     def iterchunks(self, custom_chunks=None):
         if custom_chunks is None:
@@ -244,7 +245,7 @@ class raster(object):
                 # Reverse to match numpy index notation
                 chunks = (chunks[1], chunks[0])
             else:
-                chunks = self.ds.chunks
+                chunks = self.ds[str(self.band)].chunks
         else:
             try:
                 chunks = map(int, custom_chunks)
@@ -375,3 +376,32 @@ class raster(object):
         else:
             raise RasterError('Cannot read the input raster data type "%s"' %
                               dtype)
+
+    def astype(self, dtype):
+        '''Change the data type of self'''
+        try:
+            dtype = dtype.lower()
+            assert dtype in ['bool', 'int8', 'uint8', 'int16', 'uint16',
+                             'int32', 'uint32', 'int64', 'uint64', 'float32',
+                             'float64']
+        except:
+            raise RasterError('Unrecognizable data type "%s"' % dtype)
+        self.dtype = dtype
+        if self.format == 'gdal' or self.mode == 'r':
+            # Need to create a copy
+            self.copy_ds(dtype)
+        else:
+            # Change current file
+            ds = self.ds
+            for band in self.bands:
+                self.activeBand = band
+                newband = ds.create_dataset(str(band) + '_',
+                                            dtype=self.dtype,
+                                            shape=self.shape,
+                                            chunks=True)
+                for a, s in self.iterchunks():
+                    newband[s] = a
+                del newband
+                del ds[str(band)]
+                ds[str(band)] = ds[str(band) + '_']
+                del ds[str(band) + '_']
