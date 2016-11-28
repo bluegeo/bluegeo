@@ -167,6 +167,19 @@ class raster(object):
                 val = 'None'
             ds.attrs[key] = val
 
+    def save_gdal_raster(self, output_path):
+        '''
+        Save current instance to a gdal-raster.
+        Future- add for support of more file types.
+        '''
+        # Check path
+        if output_path.split('.')[-1] != 'tif':
+            output_path = output_path + '.tif'
+
+        # Create data source
+        driver = gdal.GetDriverByName('GTiff')
+        ds
+
     def copy_ds(self, file_suffix, template=None):
         '''
         Create a copy of the underlying dataset to use for writing
@@ -263,41 +276,48 @@ class raster(object):
                 s = (slice(ych[0], ych[1]), slice(xch[0], xch[1]))
                 yield self[s[0], s[1]], s
 
+    @staticmethod
+    def gdal_args_from_slice(s, shape):
+        '''Supplementary to __getitem__ and __setitem__'''
+        if type(s) == int:
+            xoff = 0
+            yoff = s
+            win_xsize = shape[1]
+            win_ysize = 1
+        elif type(s) == tuple:
+            if type(s[0]) == int:
+                yoff = s[0]
+                win_ysize = 1
+            else:
+                yoff = s[0].start
+                start = yoff
+                if start is None:
+                    start = 0
+                    yoff = 0
+                stop = s[0].stop
+                if stop is None:
+                    stop = shape[0]
+                win_ysize = stop - start
+            if type(s[1]) == int:
+                xoff = s[1]
+                win_xsize = 1
+            else:
+                xoff = s[1].start
+                start = xoff
+                if start is None:
+                    start = 0
+                    xoff = 0
+                stop = s[1].stop
+                if stop is None:
+                    stop = shape[1]
+                win_xsize = stop - start
+        return xoff, yoff, win_xsize, win_ysize
+
     def __getitem__(self, s):
         if self.format == 'gdal':
             # Tease gdal band args from s
-            if type(s) == int:
-                xoff = 0
-                yoff = s
-                win_xsize = self.shape[1]
-                win_ysize = 1
-            elif type(s) == tuple:
-                if type(s[0]) == int:
-                    yoff = s[0]
-                    win_ysize = 1
-                else:
-                    yoff = s[0].start
-                    start = yoff
-                    if start is None:
-                        start = 0
-                        yoff = 0
-                    stop = s[0].stop
-                    if stop is None:
-                        stop = self.shape[0]
-                    win_ysize = stop - start
-                if type(s[1]) == int:
-                    xoff = s[1]
-                    win_xsize = 1
-                else:
-                    xoff = s[1].start
-                    start = xoff
-                    if start is None:
-                        start = 0
-                        xoff = 0
-                    stop = s[1].stop
-                    if stop is None:
-                        stop = self.shape[1]
-                    win_xsize = stop - start
+            xoff, yoff, win_xsize, win_ysize =\
+                self.gdal_args_from_slice(s, self.shape)
             ds = self.ds
             return ds.GetRasterBand(self.band).ReadAsArray(xoff=xoff,
                                                            yoff=yoff,
@@ -311,44 +331,14 @@ class raster(object):
             raise RasterError('Dataset open as read-only.')
         a = numpy.array(a)
         if self.format == 'gdal':
-            # Tease gdal band args from s
-            if type(s) == int:
-                xoff = 0
-                yoff = s
-                win_xsize = self.shape[1]
-                win_ysize = 1
-            elif type(s) == tuple:
-                if type(s[0]) == int:
-                    yoff = s[0]
-                    win_ysize = 1
-                else:
-                    yoff = s[0].start
-                    start = s[0].start
-                    if start is None:
-                        start = 0
-                        yoff = 0
-                    stop = s[0].stop
-                    if stop is None:
-                        stop = self.shape[0]
-                    win_ysize = stop - start
-                if type(s[1]) == int:
-                    xoff = s[1]
-                    win_xsize = 1
-                else:
-                    xoff = s[1].start
-                    start = xoff
-                    if start is None:
-                        start = 0
-                        xoff = 0
-                    stop = s[1].stop
-                    if stop is None:
-                        stop = self.shape[1]
-                    win_xsize = stop - start
+            xoff, yoff, win_xsize, win_ysize =\
+                self.gdal_args_from_slice(s, self.shape)
             if (a.size > 1 and
                     (win_ysize != a.shape[0] or win_xsize != a.shape[1])):
                 raise RasterError('Raster data of the shape %s cannot be'
                                   ' replaced with array of shape %s' %
                                   ((win_ysize, win_xsize), a.shape))
+            # Broadcast for scalar (future add axis-based broadcasting)
             if a.size == 1:
                 a = numpy.full((win_ysize, win_xsize), a, a.dtype)
             ds = self.ds
@@ -379,6 +369,7 @@ class raster(object):
 
     def astype(self, dtype):
         '''Change the data type of self'''
+        # Check the input
         try:
             dtype = dtype.lower()
             assert dtype in ['bool', 'int8', 'uint8', 'int16', 'uint16',
@@ -386,6 +377,12 @@ class raster(object):
                              'float64']
         except:
             raise RasterError('Unrecognizable data type "%s"' % dtype)
+
+        # Ensure they are already not the same
+        if dtype == self.dtype:
+            return
+
+        # Complete casting
         self.dtype = dtype
         if self.format == 'gdal' or self.mode == 'r':
             # Need to create a copy
