@@ -6,13 +6,14 @@ Raster data interfacing and manipulation library
 import os
 from datetime import datetime
 import numpy
-from osgeo import gdal, osr
+from osgeo import gdal, osr, gdalconst
 import h5py
 
 
 class RasterError(Exception):
     '''Custom Exception'''
     pass
+
 
 class raster(object):
     """
@@ -41,7 +42,7 @@ class raster(object):
     create a copy of the raster for writing if
     a function that requires modification is called.
     """
-    def __init__(self, data, mode='r'):
+    def __init__(self, data, mode='r', **kwargs):
         # Record mode
         if mode in ['r', 'r+', 'w']:
             self.mode = mode
@@ -52,29 +53,29 @@ class raster(object):
         if isinstance(data, basestring):
             # If in 'w' mode, write a new file
             if self.mode == 'w':
-                self.save(data)
+                self.save(data, kwargs)
             # Check if data is a valid file
             elif not os.path.isfile(data):
                 raise RasterError('%s is not a file' % data)
             else:
-                # Try for a gdal dataset
-                ds = gdal.Open(data)
+                # Try an HDF5 data source
                 try:
-                    gt = ds.GetGeoTransform()
-                    assert gt != (0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
-                    self.load_from_gdal(ds)
-                    self.format = 'gdal'
+                    ds = h5py.File(data)
+                    self.load_from_hdf5(ds)
+                    self.format = 'HDF5'
                 except:
-                    # Try an HDF5 data source
+                    # Try for a gdal dataset
+                    ds = gdal.Open(data)
                     try:
-                        ds = h5py.File(data)
-                        self.load_from_hdf5(ds)
-                        self.format = 'HDF5'
+                        gt = ds.GetGeoTransform()
+                        assert gt != (0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+                        self.load_from_gdal(ds)
+                        self.format = 'gdal'
                     except:
                         raise RasterError('Unable to open dataset %s' % data)
         # If not a string, maybe an osgeo dataset?
         elif isinstance(data, gdal.Dataset):
-            self.load_from_gdal(ds)
+            self.load_from_gdal(data)
             self.format = 'gdal'
         # ...or an h5py dataset
         elif isinstance(data, h5py.File):
@@ -83,7 +84,7 @@ class raster(object):
         # ...or a raster instance
         elif isinstance(data, raster):
             # Create a copy of the instance, except for dataset
-            self.copy_ds('copy')
+            self.copy_ds('copy', data)
 
         # Populate other attributes
         self.activeBand = 1
@@ -111,17 +112,20 @@ class raster(object):
             self.nodataValues.append(nd)
         self.path = ds.GetFileList()[0]
 
-    def load_from_HDF5(self, ds):
+    def load_from_hdf5(self, ds):
         '''Load attributes from an HDF5 file'''
         d = {}
         for key, val in ds.attrs.iteritems():
             if not isinstance(val, numpy.ndarray) and val == 'None':
                 val = None
             d[key] = val
+        current_mode = self.mode
         self.__dict__.update(d)
-        self.path = ds.name
+        self.mode = current_mode
+        self.shape = tuple(self.shape)
+        self.path = str(ds.filename)
 
-    def save(self, output_path, compression='lzf'):
+    def save(self, output_path, compression='lzf', **kwargs):
         '''
         Save to a new file, and use with self
         '''
@@ -132,74 +136,89 @@ class raster(object):
         # Check path
         if output_path.split('.')[-1] != 'h5':
             output_path = output_path + '.h5'
-        self.path = output_path
 
         # Change mode to read/write
         self.mode = 'r+'
 
         # Create new HDF5 file
-        newfile = h5py.File(output_path, 'w')
+        newfile = h5py.File(output_path, mode='w')
 
         # Copy data from data source to new file
+        # TODO use kwargs to make empty raster
         prvb = self.activeBand
         for band in self.bands:
             self.activeBand = band
-            newfile.create_dataset(str(band), self.shape, dtype=self.dtype,
-                                   compression=compression)
-            for a, s in self.iterchunks:
-                self[s] = a
+            ds = newfile.create_dataset(str(band), self.shape,
+                                        dtype=self.dtype,
+                                        compression=compression)
+            for a, s in self.iterchunks(ds.chunks):
+                ds[s] = a
+            del ds
         del newfile
         self.activeBand = prvb
         self.format = 'HDF5'
+        self.path = output_path
 
         # Add attributes
-        for key, val in self.__dict__:
+        ds = self.ds
+        for key, val in self.__dict__.iteritems():
             if val is None:
                 val = 'None'
-            self.ds.attrs[key] = val
+            ds.attrs[key] = val
 
-    def copy_ds(self, file_suffix):
+    def copy_ds(self, file_suffix, template=None):
         '''
         Create a copy of the underlying dataset to use for writing
-        if the current mode is 'r', or self is instantiated using
-        another raster instance.  Defaults to HDF5 format.
+        temporarily.  Used when mode is 'r' and procesing is required,
+        or self is instantiated using another raster instance.
+        Defaults to HDF5 format.
         '''
+        # Use another dataset as a template if specified
+        if template is not None:
+            self.__dict__.update(template.__dict__)
+
         # Create output dataset
         now = datetime.now()
-        absname = '%s_%s_%s.h5' % (os.path.basename(self.path),
-                                   str(file_suffix),
-                                   datetime.toordinal(now))
-        path = os.path.join(os.path.dirname(self.path), absname)
+
+        def getabsname(i):
+            return '%s_%s_%s_%i.h5' % (os.path.basename(self.path),
+                                       str(file_suffix),
+                                       datetime.toordinal(now), i)
+        i = 1
+        path = os.path.join(os.path.dirname(self.path), getabsname(i))
+        while os.path.isfile(path):
+            i += 1
+            path = os.path.join(os.path.dirname(self.path), getabsname(i))
 
         # Create HDF5 file and datasets
-        self.save(self.path, None)
-
-        # Add temporary file creations to garbage collector
-        if hasattr(self, garbage):
-            self.garbage.append(self.path)
-        else:
-            self.garbage = [self.path]
+        self.save(path, None)
 
     @property
     def nodata(self):
-        return self.nodataValues[self.activeBand - 1]
+        return self.nodataValues[self.band - 1]
 
     @property
     def ds(self):
+        if self.mode not in ['r', 'r+']:
+            raise RasterError('Unrecognized file mode "%s"' % self.mode)
         if self.format == 'gdal':
-            return gdal.Open(self.path)
+            if self.mode == 'r':
+                mode = gdalconst.GA_ReadOnly
+            else:
+                mode = gdalconst.GA_Update
+            return gdal.Open(self.path, mode)
         else:
-            return h5py.File(self.path)
+            return h5py.File(self.path, mode=self.mode)
 
     @property
     def band(self):
         try:
             b = int(self.activeBand)
-            assert self.activeBand <= self.bandCount and self.activeBand > 0
+            assert b <= self.bandCount and b > 0
         except:
             raise RasterError('Active band "%s" cannot be accessed' %
                               self.activeBand)
-        return self.activeBand
+        return b
 
     @property
     def bands(self):
@@ -210,8 +229,8 @@ class raster(object):
     def array(self):
         '''**all data in memory**'''
         if self.format == 'gdal':
-            band = self.ds.GetRasterBand(self.band)
-            return band.ReadAsArray()
+            ds = self.ds
+            return ds.GetRasterBand(self.band).ReadAsArray()
         else:
             return self.band[:]
 
@@ -219,8 +238,11 @@ class raster(object):
         if custom_chunks is None:
             # Regenerate chunk slices in case data have changed
             if self.format == 'gdal':
-                band = self.ds.GetRasterBand(self.band)
+                ds = self.ds
+                band = ds.GetRasterBand(self.band)
                 chunks = band.GetBlockSize()
+                # Reverse to match numpy index notation
+                chunks = (chunks[1], chunks[0])
             else:
                 chunks = self.ds.chunks
         else:
@@ -238,7 +260,7 @@ class raster(object):
         for ych in ychunks:
             for xch in xchunks:
                 s = (slice(ych[0], ych[1]), slice(xch[0], xch[1]))
-                yield (self[s[0], s[1]], s)
+                yield self[s[0], s[1]], s
 
     def __getitem__(self, s):
         if self.format == 'gdal':
@@ -254,19 +276,34 @@ class raster(object):
                     win_ysize = 1
                 else:
                     yoff = s[0].start
-                    win_ysize = s[0].stop - s[0].start
+                    start = yoff
+                    if start is None:
+                        start = 0
+                        yoff = 0
+                    stop = s[0].stop
+                    if stop is None:
+                        stop = self.shape[0]
+                    win_ysize = stop - start
                 if type(s[1]) == int:
                     xoff = s[1]
                     win_xsize = 1
                 else:
                     xoff = s[1].start
-                    win_xsize = s[1].stop - s[1].start
-            band = self.ds.GetRasterBand(self.band)
-            return band.ReadAsArray(xoff=xoff, yoff=yoff,
-                                    win_xsize=win_xsize,
-                                    win_ysize=win_ysize)
+                    start = xoff
+                    if start is None:
+                        start = 0
+                        xoff = 0
+                    stop = s[1].stop
+                    if stop is None:
+                        stop = self.shape[1]
+                    win_xsize = stop - start
+            ds = self.ds
+            return ds.GetRasterBand(self.band).ReadAsArray(xoff=xoff,
+                                                           yoff=yoff,
+                                                           win_xsize=win_xsize,
+                                                           win_ysize=win_ysize)
         else:
-            return self.band[s]
+            return self.ds[str(self.band)][s]
 
     def __setitem__(self, s, a):
         if self.mode == 'r':
@@ -285,29 +322,41 @@ class raster(object):
                     win_ysize = 1
                 else:
                     yoff = s[0].start
-                    win_ysize = s[0].stop - s[0].start
+                    start = s[0].start
+                    if start is None:
+                        start = 0
+                        yoff = 0
+                    stop = s[0].stop
+                    if stop is None:
+                        stop = self.shape[0]
+                    win_ysize = stop - start
                 if type(s[1]) == int:
                     xoff = s[1]
                     win_xsize = 1
                 else:
                     xoff = s[1].start
-                    win_xsize = s[1].stop - s[1].start
-            if ((win_ysize != a.shape[0] or win_xsize != a.shape[1]) and
-                    a.size > 1):
+                    start = xoff
+                    if start is None:
+                        start = 0
+                        xoff = 0
+                    stop = s[1].stop
+                    if stop is None:
+                        stop = self.shape[1]
+                    win_xsize = stop - start
+            if (a.size > 1 and
+                    (win_ysize != a.shape[0] or win_xsize != a.shape[1])):
                 raise RasterError('Raster data of the shape %s cannot be'
                                   ' replaced with array of shape %s' %
                                   ((win_ysize, win_xsize), a.shape))
             if a.size == 1:
                 a = numpy.full((win_ysize, win_xsize), a, a.dtype)
-            band = self.ds.GetRasterBand(self.band)
-            band.WriteArray(a, xoff=xoff, yoff=yoff)
+            ds = self.ds
+            ds.GetRasterBand(self.band).WriteArray(a, xoff=xoff, yoff=yoff)
         else:
-            self.band[s] = a
-
-    def __del__(self):
-        # Collect garbage
-        if hasattr(self, 'garbage'):
-            os.remove(self.garbage)
+            try:
+                self.ds[str(self.band)][s] = a
+            except:
+                raise RasterError('Dataset open as read-only.')
 
     @staticmethod
     def get_data_specs(dtype, shape):
