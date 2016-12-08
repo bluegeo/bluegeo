@@ -215,7 +215,6 @@ class raster(object):
             self.activeBand = 1
             prvb = 1
         for band in self.bands:
-            self.activeBand = band
             ds = newfile.create_dataset(str(band), self.shape,
                                         dtype=self.dtype,
                                         compression=compression,
@@ -273,7 +272,6 @@ class raster(object):
 
         # Add data and nodata attributes
         for band in self.bands:
-            self.activeBand = band
             outraster.activeBand = band
             ds = outraster.ds
             band = ds.GetRasterBand(outraster.band)
@@ -332,6 +330,7 @@ class raster(object):
     @property
     def bands(self):
         for i in range(1, self.bandCount + 1):
+            self.activeBand = i
             yield i
 
     @property
@@ -582,7 +581,6 @@ class raster(object):
             # Change current file
             ds = self.ds
             for band in self.bands:
-                self.activeBand = band
                 newband = ds.create_dataset(str(band) + '_',
                                             dtype=self.dtype,
                                             shape=self.shape,
@@ -720,7 +718,6 @@ class raster(object):
         outds = raster(path, mode='w', **kwargs)
         for band in outds.bands:
             outds.activeBand = band
-            self.activeBand = band
             outds[insert_slice] = self[self_slice]
         self.__dict__.update(outds.__dict__)
 
@@ -906,7 +903,6 @@ class raster(object):
                                           csy, output_srs, (256, 256))
         # Set/fill nodata value
         for band in out_raster.bands:
-            out_raster.activeBand = band
             ds = out_raster.ds
             band = ds.GetRasterBand(out_raster.band)
             band.SetNoDataValue(self.nodata)
