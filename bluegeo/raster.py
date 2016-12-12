@@ -4,8 +4,11 @@ Raster data interfacing and manipulation library
 '''
 
 import os
+import numbers
+import decimal
 from datetime import datetime
 import numpy
+import numexpr as ne
 from osgeo import gdal, osr, gdalconst
 import h5py
 
@@ -89,6 +92,16 @@ class raster(object):
 
         # Populate other attributes
         self.activeBand = 1
+        # Set default interpolation- this should be changed manually to
+        #   configure all interpolations of this raster.  Use one of:
+        #     'bilinear',
+        #     'nearest',
+        #     'cubic',
+        #     'cubic spline',
+        #     'lanczos',
+        #     'mean',
+        #     'mode'
+        self.interpolationMethod = 'nearest'
 
     def load_from_gdal(self, ds):
         '''Load attributes from a gdal raster'''
@@ -349,8 +362,14 @@ class raster(object):
             ds = self.ds
             band = ds.GetRasterBand(self.band)
             chunks = band.GetBlockSize()
-            # Reverse to match numpy index notation
-            chunks = (chunks[1], chunks[0])
+            # If no blocks exist, a single scanline will result- change this
+            if chunks[0] == self.shape[1] and chunks[1] == 1:
+                lines = int((256 * 256 * self.itemsize) /
+                            (self.shape[0] * self.itemsize))
+                chunks = (lines, self.shape[1])
+            else:
+                # Reverse to match numpy index notation
+                chunks = (chunks[1], chunks[0])
         else:
             try:
                 chunks = self.ds[str(self.band)].chunks
@@ -363,9 +382,25 @@ class raster(object):
         return chunks
 
     @property
-    def itemsize(dtype):
+    def itemsize(self):
         '''Return number of bytes/element for a specific dtype'''
-        return numpy.dtype(dtype).itemsize
+        return numpy.dtype(self.dtype).itemsize
+
+    @property
+    def interpolation(self):
+        interp_methods = {
+            'bilinear': gdalconst.GRA_Bilinear,
+            'nearest': gdalconst.GRA_NearestNeighbour,
+            'cubic': gdalconst.GRA_Cubic,
+            'cubic spline': gdalconst.GRA_CubicSpline,
+            'lanczos': gdalconst.GRA_Lanczos,
+            'mean': gdalconst.GRA_Average,
+            'mode': gdalconst.GRA_Mode
+        }
+        try:
+            return interp_methods[self.interpolationMethod]
+        except KeyError:
+            raise RasterError('Unrecognized interpolation method %s' % name)
 
     def use_chunks(self, memory):
         '''
@@ -417,104 +452,6 @@ class raster(object):
             for xch in xchunks:
                 s = (slice(ych[0], ych[1]), slice(xch[0], xch[1]))
                 yield self[s[0], s[1]], s
-
-    @staticmethod
-    def gdal_args_from_slice(s, shape):
-        '''Supplementary to __getitem__ and __setitem__'''
-        if type(s) == int:
-            xoff = 0
-            yoff = s
-            win_xsize = shape[1]
-            win_ysize = 1
-        elif type(s) == tuple:
-            if type(s[0]) == int:
-                yoff = s[0]
-                win_ysize = 1
-            elif s[0] is None:
-                yoff = 0
-                win_ysize = shape[0]
-            else:
-                yoff = s[0].start
-                start = yoff
-                if start is None:
-                    start = 0
-                    yoff = 0
-                stop = s[0].stop
-                if stop is None:
-                    stop = shape[0]
-                win_ysize = stop - start
-            if type(s[1]) == int:
-                xoff = s[1]
-                win_xsize = 1
-            elif s[1] is None:
-                xoff = 0
-                win_xsize = shape[1]
-            else:
-                xoff = s[1].start
-                start = xoff
-                if start is None:
-                    start = 0
-                    xoff = 0
-                stop = s[1].stop
-                if stop is None:
-                    stop = shape[1]
-                win_xsize = stop - start
-        elif type(s) == slice:
-            xoff = 0
-            win_xsize = shape[1]
-            if s.start is None:
-                yoff = 0
-            else:
-                yoff = s.start
-            if s.stop is None:
-                stop = shape[0]
-            else:
-                stop = s.stop
-            win_ysize = stop - yoff
-        return xoff, yoff, win_xsize, win_ysize
-
-    def __getitem__(self, s):
-        if self.format == 'gdal':
-            # Tease gdal band args from s
-            try:
-                xoff, yoff, win_xsize, win_ysize =\
-                    self.gdal_args_from_slice(s, self.shape)
-            except:
-                raise RasterError('Boolean and array indexing currently'
-                                  ' unsupported for GDAL raster data sources.'
-                                  ' Convert to HDF5 to use this'
-                                  ' functionality.')
-            ds = self.ds
-            return ds.GetRasterBand(self.band).ReadAsArray(xoff=xoff,
-                                                           yoff=yoff,
-                                                           win_xsize=win_xsize,
-                                                           win_ysize=win_ysize)
-        else:
-            return self.ds[str(self.band)][s]
-
-    def __setitem__(self, s, a):
-        if self.mode == 'r':
-            raise RasterError('Dataset open as read-only.')
-        if type(a) != numpy.ndarray:
-            a = numpy.array(a)
-        if self.format == 'gdal':
-            xoff, yoff, win_xsize, win_ysize =\
-                self.gdal_args_from_slice(s, self.shape)
-            if (a.size > 1 and
-                    (win_ysize != a.shape[0] or win_xsize != a.shape[1])):
-                raise RasterError('Raster data of the shape %s cannot be'
-                                  ' replaced with array of shape %s' %
-                                  ((win_ysize, win_xsize), a.shape))
-            # Broadcast for scalar (future add axis-based broadcasting)
-            if a.size == 1:
-                a = numpy.full((win_ysize, win_xsize), a, a.dtype)
-            ds = self.ds
-            ds.GetRasterBand(self.band).WriteArray(a, xoff=xoff, yoff=yoff)
-        else:
-            try:
-                self.ds[str(self.band)][s] = a
-            except:
-                raise RasterError('Dataset open as read-only.')
 
     @staticmethod
     def get_data_specs(dtype, shape):
@@ -592,14 +529,21 @@ class raster(object):
                 ds[str(band)] = ds[str(band) + '_']
                 del ds[str(band) + '_']
 
-    def match_raster(self, input_raster, interpolation='nearest',
-                     tolerance=1E-09):
+    def define_projection(self, projection, overwrite=False):
+        '''Define the raster projection'''
+        if (self.projection != '' and
+                self.projection is not None) and not overwrite:
+            raise RasterError('The current raster already has a spatial'
+                              ' reference, use "overwrite=True" to replace.')
+        self.projection = self.parse_projection(projection)
+
+    def match_raster(self, input_raster, tolerance=1E-09):
         '''
         Align extent and cells with another raster
         '''
         def isclose(input, values):
             values = [(val - tolerance, val + tolerance) for val in values]
-            if all([lower < input < upper for lower, upper in values]):
+            if any([lower < input < upper for lower, upper in values]):
                 return True
             else:
                 return False
@@ -627,14 +571,15 @@ class raster(object):
             self.change_extent(inrast_bbox)
         else:
             # Transform required
+            print "Transforming to match rasters..."
             if samesrs:
                 self.transform(csx=inrast.csx, csy=inrast.csy,
-                               bbox=inrast_bbox, interpolation=interpolation)
+                               bbox=inrast_bbox,
+                               interpolation=self.interpolation)
             else:
-                print "Transforming to match rasters..."
                 self.transform(csx=inrast.csx, csy=inrast.csy,
                                projection=inrast, bbox=inrast_bbox,
-                               interpolation=interpolation)
+                               interpolation=self.interpolation)
 
     def slice_from_bbox(self, bbox):
         '''
@@ -703,6 +648,11 @@ class raster(object):
         # Get slices
         self_slice, insert_slice, shape, bbox = self.slice_from_bbox(bbox)
 
+        # Check if no change
+        if all([self.top == bbox[0], self.bottom == bbox[1],
+                self.left == bbox[2], self.right == bbox[3]]):
+            return
+
         # Create output dataset with new extent, and transfer self to it
         path = self.generate_name('change_extent', 'h5', True)
         kwargs = {
@@ -737,16 +687,6 @@ class raster(object):
         "bbox": bounding box for output (top, bottom, left, right)
             Note- if projection specified, bbox must be in the output
             coordinate system
-
-        "interpolation": resample interpolation technique.  Use one of:
-            'bilinear',
-            'nearest',
-            'cubic',
-            'cubic spline',
-            'lanczos',
-            'mean',
-            'mode'
-
         '''
         def expand_extent(csx, csy, bbox, shape):
             '''Expand extent to snap to cell size'''
@@ -912,11 +852,8 @@ class raster(object):
                 shape = (shape[3], shape[2])
                 out_raster[s] = numpy.full(shape, self.nodata, self.dtype)
 
-        # Complete transform
-        interpolation = self.get_interpolation(kwargs.get('interpolation',
-                                                          'nearest'))
         outds = out_raster.ds
-        gdal.ReprojectImage(inds, outds, insrs, outsrs, interpolation)
+        gdal.ReprojectImage(inds, outds, insrs, outsrs, self.interpolation)
         del inds, outds
 
         # Change type to gdal and path to new raster
@@ -962,19 +899,20 @@ class raster(object):
         else:
             comp = 'COMPRESS=NONE'
         # If the chunk size is the same as the raster size the TIFF driver
-        #   goes bonkers, so remove it.
-        if chunks[1] == shape[1]:
-            blockysize = 'BLOCKYSIZE=0'
-        else:
-            blockysize = 'BLOCKYSIZE=%s' % chunks[0]
-        if chunks[0] == shape[0]:
-            blockxsize = 'BLOCKXSIZE=0'
+        #   goes bonkers, so do not tile in this case.
+        if chunks[1] == shape[1] or chunks[0] == shape[0]:
+            blockxsize, blockysize, tiled = ('BLOCKXSIZE=0', 'BLOCKYSIZE=0',
+                                             'TILED=NO')
         else:
             blockxsize = 'BLOCKXSIZE=%s' % chunks[1]
-        parszOptions = ['TILED=YES', blockysize, blockxsize, comp]
+            blockysize = 'BLOCKYSIZE=%s' % chunks[0]
+            tiled = 'TILED=YES'
+        parszOptions = [tiled, blockysize, blockxsize, comp]
         ds = driver.Create(output_path, shape[1], shape[0],
                            bands, raster.get_gdal_dtype(dtype),
                            parszOptions)
+        if ds is None:
+            raise RasterError('GDAL error trying to create new raster.')
         ds.SetGeoTransform((left, float(csx), 0, top, 0, csy * -1.))
         projection = raster.parse_projection(projection)
         if projection is None:
@@ -983,22 +921,6 @@ class raster(object):
         outraster = raster(ds, mode='r+')
         del ds
         return outraster
-
-    @staticmethod
-    def get_interpolation(name):
-        interp_methods = {
-            'bilinear': gdalconst.GRA_Bilinear,
-            'nearest': gdalconst.GRA_NearestNeighbour,
-            'cubic': gdalconst.GRA_Cubic,
-            'cubic spline': gdalconst.GRA_CubicSpline,
-            'lanczos': gdalconst.GRA_Lanczos,
-            'mean': gdalconst.GRA_Average,
-            'mode': gdalconst.GRA_Mode
-        }
-        try:
-            return interp_methods[name]
-        except KeyError:
-            raise RasterError('Unrecognized interpolation method %s' % name)
 
     @staticmethod
     def parse_projection(projection):
@@ -1028,6 +950,390 @@ class raster(object):
         else:
             raise_re()
         return outwkt
+
+    @staticmethod
+    def gdal_args_from_slice(s, shape):
+        '''Supplementary to __getitem__ and __setitem__'''
+        if type(s) == int:
+            xoff = 0
+            yoff = s
+            win_xsize = shape[1]
+            win_ysize = 1
+        elif type(s) == tuple:
+            if type(s[0]) == int:
+                yoff = s[0]
+                win_ysize = 1
+            elif s[0] is None:
+                yoff = 0
+                win_ysize = shape[0]
+            else:
+                yoff = s[0].start
+                start = yoff
+                if start is None:
+                    start = 0
+                    yoff = 0
+                stop = s[0].stop
+                if stop is None:
+                    stop = shape[0]
+                win_ysize = stop - start
+            if type(s[1]) == int:
+                xoff = s[1]
+                win_xsize = 1
+            elif s[1] is None:
+                xoff = 0
+                win_xsize = shape[1]
+            else:
+                xoff = s[1].start
+                start = xoff
+                if start is None:
+                    start = 0
+                    xoff = 0
+                stop = s[1].stop
+                if stop is None:
+                    stop = shape[1]
+                win_xsize = stop - start
+        elif type(s) == slice:
+            xoff = 0
+            win_xsize = shape[1]
+            if s.start is None:
+                yoff = 0
+            else:
+                yoff = s.start
+            if s.stop is None:
+                stop = shape[0]
+            else:
+                stop = s.stop
+            win_ysize = stop - yoff
+        return xoff, yoff, win_xsize, win_ysize
+
+    def __getitem__(self, s):
+        if self.format == 'gdal':
+            # Tease gdal band args from s
+            try:
+                xoff, yoff, win_xsize, win_ysize =\
+                    self.gdal_args_from_slice(s, self.shape)
+            except:
+                raise RasterError('Boolean and array indexing currently'
+                                  ' unsupported for GDAL raster data sources.'
+                                  ' Convert to HDF5 to use this'
+                                  ' functionality.')
+            ds = self.ds
+            return ds.GetRasterBand(self.band).ReadAsArray(xoff=xoff,
+                                                           yoff=yoff,
+                                                           win_xsize=win_xsize,
+                                                           win_ysize=win_ysize)
+        else:
+            return self.ds[str(self.band)][s]
+
+    def __setitem__(self, s, a):
+        if self.mode == 'r':
+            raise RasterError('Dataset open as read-only.')
+        if type(a) != numpy.ndarray:
+            a = numpy.array(a)
+        if self.format == 'gdal':
+            xoff, yoff, win_xsize, win_ysize =\
+                self.gdal_args_from_slice(s, self.shape)
+            if (a.size > 1 and
+                    (win_ysize != a.shape[0] or win_xsize != a.shape[1])):
+                raise RasterError('Raster data of the shape %s cannot be'
+                                  ' replaced with array of shape %s' %
+                                  ((win_ysize, win_xsize), a.shape))
+            # Broadcast for scalar (future add axis-based broadcasting)
+            if a.size == 1:
+                a = numpy.full((win_ysize, win_xsize), a, a.dtype)
+            ds = self.ds
+            ds.GetRasterBand(self.band).WriteArray(a, xoff=xoff, yoff=yoff)
+        else:
+            try:
+                self.ds[str(self.band)][s] = a
+            except:
+                raise RasterError('Dataset open as read-only.')
+
+    def __add__(self, r):
+        try:
+            if all([isinstance(x, numbers.Number)
+                    for x in (0, 0.0, 0j, decimal.Decimal(r))]):
+                num = True
+        except:
+            if not isinstance(r, raster):
+                raise RasterError('Expected a number or raster instance while'
+                                  ' using the "+" operator')
+            num = False
+        out = raster(r)
+        out.match_raster(self)
+        outnd = out.nodata
+        nd = self.nodata
+        if num:
+            for a, s in out.iterchunks():
+                out[s] = ne.evaluate('where(a!=outnd,a+r,outnd)')
+        else:
+            for a, s in self.iterchunks():
+                b = out[s]
+                out[s] = ne.evaluate('where((a!=nd)&(b!=outnd),a+b,outnd)')
+            return out
+
+    def __iadd__(self, r):
+        if self.mode == 'r':
+            raise RasterError('Dataset open as read-only.')
+        try:
+            if all([isinstance(x, numbers.Number)
+                    for x in (0, 0.0, 0j, decimal.Decimal(r))]):
+                nd = self.nodata
+                for a, s in self.iterchunks():
+                    self[s] = ne.evaluate('where(a!=nd,a+r,nd)')
+        except:
+            if not isinstance(r, raster):
+                raise RasterError('Expected a number or raster instance while'
+                                  ' using the "+=" operator')
+            r.match_raster(self)
+            rnd = r.nodata
+            nd = self.nodata
+            for a, s in self.iterchunks():
+                b = r[s]
+                self[s] = ne.evaluate('where((a!=nd)&(b!=rnd),a+b,nd)')
+
+    def __sub__(self, r):
+        try:
+            if all([isinstance(x, numbers.Number)
+                    for x in (0, 0.0, 0j, decimal.Decimal(r))]):
+                num = True
+        except:
+            if not isinstance(r, raster):
+                raise RasterError('Expected a number or raster instance while'
+                                  ' using the "-" operator')
+            num = False
+        out = raster(r)
+        out.match_raster(self)
+        outnd = out.nodata
+        nd = self.nodata
+        if num:
+            for a, s in out.iterchunks():
+                out[s] = ne.evaluate('where(a!=outnd,a-r,outnd)')
+        else:
+            for a, s in self.iterchunks():
+                b = out[s]
+                out[s] = ne.evaluate('where((a!=nd)&(b!=outnd),a-b,outnd)')
+            return out
+
+    def __isub__(self, r):
+        if self.mode == 'r':
+            raise RasterError('Dataset open as read-only.')
+        try:
+            if all([isinstance(x, numbers.Number)
+                    for x in (0, 0.0, 0j, decimal.Decimal(r))]):
+                nd = self.nodata
+                for a, s in self.iterchunks():
+                    self[s] = ne.evaluate('where(a!=nd,a-r,nd)')
+        except:
+            if not isinstance(r, raster):
+                raise RasterError('Expected a number or raster instance while'
+                                  ' using the "-=" operator')
+            r.match_raster(self)
+            rnd = r.nodata
+            nd = self.nodata
+            for a, s in self.iterchunks():
+                b = r[s]
+                self[s] = ne.evaluate('where((a!=nd)&(b!=rnd),a-b,nd)')
+
+    def __div__(self, r):
+        try:
+            if all([isinstance(x, numbers.Number)
+                    for x in (0, 0.0, 0j, decimal.Decimal(r))]):
+                num = True
+        except:
+            if not isinstance(r, raster):
+                raise RasterError('Expected a number or raster instance while'
+                                  ' using the "/" operator')
+            num = False
+        out = raster(r)
+        out.match_raster(self)
+        outnd = out.nodata
+        nd = self.nodata
+        if num:
+            for a, s in out.iterchunks():
+                out[s] = ne.evaluate('where(a!=outnd,a/r,outnd)')
+        else:
+            for a, s in self.iterchunks():
+                b = out[s]
+                out[s] = ne.evaluate('where((a!=nd)&(b!=outnd),a/b,outnd)')
+            return out
+
+    def __idiv__(self, r):
+        if self.mode == 'r':
+            raise RasterError('Dataset open as read-only.')
+        try:
+            if all([isinstance(x, numbers.Number)
+                    for x in (0, 0.0, 0j, decimal.Decimal(r))]):
+                nd = self.nodata
+                for a, s in self.iterchunks():
+                    self[s] = ne.evaluate('where(a!=nd,a/r,nd)')
+        except:
+            if not isinstance(r, raster):
+                raise RasterError('Expected a number or raster instance while'
+                                  ' using the "/=" operator')
+            r.match_raster(self)
+            rnd = r.nodata
+            nd = self.nodata
+            for a, s in self.iterchunks():
+                b = r[s]
+                self[s] = ne.evaluate('where((a!=nd)&(b!=rnd),a/b,nd)')
+
+    def __mul__(self, r):
+        try:
+            if all([isinstance(x, numbers.Number)
+                    for x in (0, 0.0, 0j, decimal.Decimal(r))]):
+                num = True
+        except:
+            if not isinstance(r, raster):
+                raise RasterError('Expected a number or raster instance while'
+                                  ' using the "*" operator')
+            num = False
+        out = raster(r)
+        out.match_raster(self)
+        outnd = out.nodata
+        nd = self.nodata
+        if num:
+            for a, s in out.iterchunks():
+                out[s] = ne.evaluate('where(a!=outnd,a*r,outnd)')
+        else:
+            for a, s in self.iterchunks():
+                b = out[s]
+                out[s] = ne.evaluate('where((a!=nd)&(b!=outnd),a*b,outnd)')
+            return out
+
+    def __imul__(self, r):
+        if self.mode == 'r':
+            raise RasterError('Dataset open as read-only.')
+        try:
+            if all([isinstance(x, numbers.Number)
+                    for x in (0, 0.0, 0j, decimal.Decimal(r))]):
+                nd = self.nodata
+                for a, s in self.iterchunks():
+                    self[s] = ne.evaluate('where(a!=nd,a*r,nd)')
+        except:
+            if not isinstance(r, raster):
+                raise RasterError('Expected a number or raster instance while'
+                                  ' using the "*=" operator')
+            r.match_raster(self)
+            rnd = r.nodata
+            nd = self.nodata
+            for a, s in self.iterchunks():
+                b = r[s]
+                self[s] = ne.evaluate('where((a!=nd)&(b!=rnd),a*b,nd)')
+
+    def __pow__(self, r):
+        try:
+            if all([isinstance(x, numbers.Number)
+                    for x in (0, 0.0, 0j, decimal.Decimal(r))]):
+                num = True
+        except:
+            if not isinstance(r, raster):
+                raise RasterError('Expected a number or raster instance while'
+                                  ' using the "**" operator')
+            num = False
+        out = raster(r)
+        out.match_raster(self)
+        outnd = out.nodata
+        nd = self.nodata
+        if num:
+            for a, s in out.iterchunks():
+                out[s] = ne.evaluate('where(a!=outnd,a**r,outnd)')
+        else:
+            for a, s in self.iterchunks():
+                b = out[s]
+                out[s] = ne.evaluate('where((a!=nd)&(b!=outnd),a**b,outnd)')
+            return out
+
+    def __ipow__(self, r):
+        if self.mode == 'r':
+            raise RasterError('Dataset open as read-only.')
+        try:
+            if all([isinstance(x, numbers.Number)
+                    for x in (0, 0.0, 0j, decimal.Decimal(r))]):
+                nd = self.nodata
+                for a, s in self.iterchunks():
+                    self[s] = ne.evaluate('where(a!=nd,a**r,nd)')
+        except:
+            if not isinstance(r, raster):
+                raise RasterError('Expected a number or raster instance while'
+                                  ' using the "**=" operator')
+            r.match_raster(self)
+            rnd = r.nodata
+            nd = self.nodata
+            for a, s in self.iterchunks():
+                b = r[s]
+                self[s] = ne.evaluate('where((a!=nd)&(b!=rnd),a**b,nd)')
+
+    def __mod__(self, r):
+        try:
+            if all([isinstance(x, numbers.Number)
+                    for x in (0, 0.0, 0j, decimal.Decimal(r))]):
+                nd = self.nodata
+                for a, s in self.iterchunks():
+                    self[s] = ne.evaluate('where(a!=nd,a%r,nd)')
+        except:
+            if not isinstance(r, raster):
+                raise RasterError('Expected a number or raster instance while'
+                                  ' using the "+" operator')
+        out = raster(r)
+        out.match_raster(self)
+        nd = self.nodata
+        outnd = out.nodata
+        for a, s in self.iterchunks():
+            b = out[s]
+            out[s] = ne.evaluate('where((a!=nd)&(b!=outnd),a%b,outnd)')
+        return out
+
+    def __eq__(self, r):
+        if not isinstance(r, raster):
+            raise RasterError('Expected a raster instance while using the "=="'
+                              ' operator')
+        # Compare spatial reference
+        insrs = osr.SpatialReference()
+        insrs.ImportFromWkt(self.projection)
+        outsrs = osr.SpatialReference()
+        outsrs.ImportFromWkt(r.projection)
+        samesrs = insrs.IsSame(outsrs)
+
+        # Compare spatial dimensions and data
+        if all([self.csx == r.csx, self.csy == r.csy,
+               self.top == r.top, self.bottom == r.bottom,
+               self.left == r.left, self.right == r.right,
+               self.dtype == r.dtype, self.bandCount == r.bandCount, samesrs]):
+            # Compare data
+            for band in self.bands:
+                r.activeBand = band
+                for a, s in self.iterchunks():
+                    if not numpy.all(a == r[s]):
+                        return False
+            return True
+        else:
+            return False
+
+    def __ne__(self, r):
+        if self == r:
+            return False
+        else:
+            return True
+
+    def __repr__(self):
+        insr = osr.SpatialReference(wkt=self.projection)
+        return ('A happy raster named %s of house %s\n'
+                '    Bands               : %s\n'
+                '    Shape               : %s rows, %s columns\n'
+                '    Cell Size           : %s (x), %s (y)\n'
+                '    Extent              : %s\n'
+                '    Data Type           : %s\n'
+                '    Projection          : %s\n'
+                '    Datum               : %s\n'
+                '    Active Band         : %s\n'
+                '    Interpolation Method: %s'
+                '' % (os.path.basename(self.path), self.format.upper(),
+                      self.bandCount, self.shape[0], self.shape[1], self.csx,
+                      self.csy, (self.top, self.bottom, self.left, self.right),
+                      self.dtype, insr.GetAttrValue('projcs'),
+                      insr.GetAttrValue('datum'), self.activeBand,
+                      self.interpolationMethod))
 
     def __del__(self):
         if hasattr(self, 'garbage'):
