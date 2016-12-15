@@ -947,21 +947,17 @@ class raster(object):
             sr = osr.SpatialReference()
             sr.ImportFromWkt(projection)
             outwkt = sr.ExportToWkt()
-            if outwkt == '':
-                raise_re()
         elif isinstance(projection, osr.SpatialReference):
             return projection.ExportToWkt()
         elif isinstance(projection, int):
             sr = osr.SpatialReference()
             sr.ImportFromEPSG(projection)
             outwkt = sr.ExportToWkt()
-            if outwkt == '':
-                raise_re()
         elif isinstance(projection, raster):
             # Return attribute from raster instance
             return projection.projection
-        elif projection is None:
-            return None
+        elif projection is None or projection == '':
+            outwkt = ''
         else:
             raise_re()
         return outwkt
@@ -1086,7 +1082,7 @@ class raster(object):
             # It's a scalar
             if self.useChunks:
                 # Compute over chunks
-                for a, s in out.iterchunks():
+                for a, s in self.iterchunks():
                     if self.aMethod == 'ne':
                         out[s] = ne.evaluate('where(a!=nd,a%sr,outnd)' % op)
                     elif self.aMethod == 'np':
@@ -1107,7 +1103,7 @@ class raster(object):
                     a[~m] = outnd
                     out[:] = a
         else:
-            # It's another raster
+            # Congratulations! It's a raster
             if self.useChunks:
                 # Compute over chunks
                 for a, s in self.iterchunks():
@@ -1145,29 +1141,37 @@ class raster(object):
         try:
             if all([isinstance(x, numbers.Number)
                     for x in (0, 0.0, 0j, decimal.Decimal(r))]):
-                nd = self.nodata
-                if self.useChunks:
-                    for a, s in self.iterchunks():
-                        if self.aMethod == 'ne':
-                            self[s] = ne.evaluate('where(a!=nd,a%sr,nd)' % op)
-                        elif self.aMethod == 'np':
-                            m = a != nd
-                            b = a[m]
-                            a[m] = eval('b%sr' % op)
-                            self[s] = a
-                else:
-                    a = self.array
-                    if self.aMethod == 'ne':
-                        self[:] = ne.evaluate('where(a!=nd,a%sr,nd)' % op)
-                    elif self.aMethod == 'np':
-                        m = a != nd
-                        b = a[m]
-                        a[m] = eval('b%sr' % op)
-                        self[:] = a
+                num = True
         except:
             if not isinstance(r, raster):
                 raise RasterError('Expected a number or raster instance while'
                                   ' using the "%s=" operator')
+            num = False
+
+        # r is a scalar
+        if num:
+            nd = self.nodata
+            if self.useChunks:
+                for a, s in self.iterchunks():
+                    if self.aMethod == 'ne':
+                        self[s] = ne.evaluate('where(a!=nd,a%sr,nd)' % op)
+                    elif self.aMethod == 'np':
+                        m = a != nd
+                        b = a[m]
+                        a[m] = eval('b%sr' % op)
+                        self[s] = a
+            else:
+                a = self.array
+                if self.aMethod == 'ne':
+                    self[:] = ne.evaluate('where(a!=nd,a%sr,nd)' % op)
+                elif self.aMethod == 'np':
+                    m = a != nd
+                    b = a[m]
+                    a[m] = eval('b%sr' % op)
+                    self[:] = a
+
+        # r is another raster
+        else:
             r.match_raster(self)
             rnd = r.nodata
             nd = self.nodata
@@ -1295,6 +1299,7 @@ class raster(object):
 
     def __del__(self):
         if hasattr(self, 'garbage'):
+            import os
             for f in self.garbage:
                 try:
                     os.remove(f)
