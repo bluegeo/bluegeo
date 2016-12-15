@@ -1075,8 +1075,11 @@ class raster(object):
                 raise RasterError('Expected a number or raster instance while'
                                   ' using the "%s" operator' % op)
             num = False
-        out = r
-        out.match_raster(self)
+        if num:
+            out = raster(self)
+        else:
+            out = r
+            out.match_raster(self)
         outnd = out.nodata
         nd = self.nodata
         if num:
