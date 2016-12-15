@@ -8,9 +8,13 @@ import numbers
 import decimal
 from datetime import datetime
 import numpy
-import numexpr as ne
 from osgeo import gdal, osr, gdalconst
 import h5py
+try:
+    import numexpr as ne
+    numexpr_ = True
+except ImportError:
+    numexpr_ = False
 
 
 class RasterError(Exception):
@@ -102,6 +106,11 @@ class raster(object):
         #     'mean',
         #     'mode'
         self.interpolationMethod = 'nearest'
+        self.useChunks = True
+        if numexpr_:
+            self.aMethod = 'ne'
+        else:
+            self.aMethod = 'np'
 
     def load_from_gdal(self, ds):
         '''Load attributes from a gdal raster'''
@@ -116,9 +125,11 @@ class raster(object):
         self.right = self.left + (self.csx * self.shape[1])
         self.bandCount = ds.RasterCount
         band = ds.GetRasterBand(1)
-        self.dtype, self.size =\
-            self.get_data_specs(gdal.GetDataTypeName(band.DataType),
-                                self.shape)
+        dtype = gdal.GetDataTypeName(band.DataType)
+        if dtype.lower() == 'byte':
+            self.dtype = 'uint8'
+        else:
+            self.dtype = dtype.lower()
         self.nodataValues = []
         for i in range(1, self.bandCount + 1):
             band = ds.GetRasterBand(i)
@@ -139,7 +150,7 @@ class raster(object):
         self.shape = tuple(self.shape)
         self.path = str(ds.filename)
 
-    def save(self, output_path, compression='lzf', iterblocks=True, **kwargs):
+    def save(self, output_path, compression='lzf', empty=False, **kwargs):
         '''
         Save to a new file, and use with self
         '''
@@ -239,7 +250,7 @@ class raster(object):
                     else:
                         ds[:] = data
                 else:
-                    if iterblocks:
+                    if self.useChunks:
                         for a, s in self.iterchunks():
                             shape_ = self.gdal_args_from_slice(s, self.shape)
                             shape_ = (shape_[3], shape_[2])
@@ -247,11 +258,12 @@ class raster(object):
                     else:
                         ds[:] = numpy.full(self.shape, self.nodata, self.dtype)
             else:
-                if iterblocks:
-                    for a, s in self.iterchunks():
-                        ds[s] = a
-                else:
-                    ds[:] = self.array
+                if not empty:
+                    if self.useChunks:
+                        for a, s in self.iterchunks():
+                            ds[s] = a
+                    else:
+                        ds[:] = self.array
             del ds
         del newfile
         self.format = 'HDF5'
@@ -267,7 +279,7 @@ class raster(object):
                 val = 'None'
             ds.attrs[key] = val
 
-    def save_gdal_raster(self, output_path, compress=True, iterblocks=True):
+    def save_gdal_raster(self, output_path, compress=True):
         '''
         Save current instance to a gdal-raster.
         Future- add for support of more file types.
@@ -281,7 +293,7 @@ class raster(object):
                                          self.bandCount, self.dtype,
                                          self.left, self.top, self.csx,
                                          self.csy, self.projection,
-                                         self.chunks, compress, iterblocks)
+                                         self.chunks, compress)
 
         # Add data and nodata attributes
         for band in self.bands:
@@ -290,14 +302,14 @@ class raster(object):
             band = ds.GetRasterBand(outraster.band)
             band.SetNoDataValue(self.nodata)
             del band, ds
-            if iterblocks:
+            if self.useChunks:
                 for a, s in self.iterchunks():
                     outraster[s] = a
             else:
                 outraster[:] = self.array
         del outraster
 
-    def copy_ds(self, file_suffix, template=None, iterblocks=True):
+    def copy_ds(self, file_suffix, template=None):
         '''
         Create a copy of the underlying dataset to use for writing
         temporarily.  Used when mode is 'r' and procesing is required,
@@ -311,7 +323,12 @@ class raster(object):
         path = self.generate_name(file_suffix, 'h5', True)
 
         # Create HDF5 file and datasets
-        self.save(path, None, iterblocks=iterblocks)
+        self.save(path, None, empty=True)
+
+    @property
+    def size(self):
+        return (self.itemsize * self.shape[0] * self.shape[1] *
+                self.bandCount / 1E9)
 
     @property
     def nodata(self):
@@ -326,9 +343,17 @@ class raster(object):
                 mode = gdalconst.GA_ReadOnly
             else:
                 mode = gdalconst.GA_Update
-            return gdal.Open(self.path, mode)
+            ds = gdal.Open(self.path, mode)
+            if ds is None:
+                raise RasterError('Oops...the raster %s is now missing.' %
+                                  self.path)
+            return ds
         else:
-            return h5py.File(self.path, mode=self.mode)
+            try:
+                return h5py.File(self.path, mode=self.mode)
+            except:
+                raise RasterError('Oops...the raster %s is now missing.' %
+                                  self.path)
 
     @property
     def band(self):
@@ -400,7 +425,8 @@ class raster(object):
         try:
             return interp_methods[self.interpolationMethod]
         except KeyError:
-            raise RasterError('Unrecognized interpolation method %s' % name)
+            raise RasterError('Unrecognized interpolation method %s' %
+                              self.interpolationMethod)
 
     def use_chunks(self, memory):
         '''
@@ -411,7 +437,13 @@ class raster(object):
         else:
             return False
 
-    def iterchunks(self, custom_chunks=None, fill_cache=True):
+    def iterchunks(self, custom_chunks=None, fill_cache=True, expand=0):
+        '''
+        Generate an array and slice over the dataset.
+            custom_chunks: tuple, (height, width)
+            fill_cache: Return as many tiles as can fit in GDAL cache
+            expand: Number of extra rows/cols on all sides
+        '''
         if custom_chunks is None:
             # Regenerate chunks
             chunks = self.chunks
@@ -444,32 +476,20 @@ class raster(object):
 
         ychunks = range(0, self.shape[0], chunks_i) + [self.shape[0]]
         xchunks = range(0, self.shape[1], chunks_j) + [self.shape[1]]
-        ychunks = zip(ychunks[:-1], ychunks[1:])
-        xchunks = zip(xchunks[:-1], xchunks[1:])
+        ychunks = zip(numpy.array(ychunks[:-1]) - expand,
+                      numpy.array(ychunks[1:]) + expand)
+        ychunks[0] = (0, ychunks[0][1])
+        ychunks[-1] = (ychunks[-1][0], self.shape[0])
+        xchunks = zip(numpy.array(xchunks[:-1]) - expand,
+                      numpy.array(xchunks[1:]) + expand)
+        xchunks[0] = (0, xchunks[0][1])
+        xchunks[-1] = (xchunks[-1][0], self.shape[1])
 
         # Create a generator out of slices
         for ych in ychunks:
             for xch in xchunks:
                 s = (slice(ych[0], ych[1]), slice(xch[0], xch[1]))
                 yield self[s[0], s[1]], s
-
-    @staticmethod
-    def get_data_specs(dtype, shape):
-        if dtype.lower() == 'uint8':
-            return 'uint8', (float(shape[0]) * shape[1]) / 1E9
-        elif dtype.lower() == 'bool':
-            return 'bool', (float(shape[0]) * shape[1]) / 1E9 / 8
-        elif dtype.lower() in ['byte', 'int8']:
-            return 'int8', (float(shape[0]) * shape[1]) / 1E9
-        elif dtype.lower() in ['uint16', 'int16']:
-            return dtype.lower(), (2. * float(shape[0]) * shape[1]) / 1E9
-        elif dtype.lower() in ['uint32', 'int32', 'float32']:
-            return dtype.lower(), (4. * float(shape[0]) * shape[1]) / 1E9
-        elif dtype.lower() in ['float64', 'int64', 'uint64']:
-            return dtype.lower(), (8. * float(shape[0]) * shape[1]) / 1E9
-        else:
-            raise RasterError('Cannot read the input raster data type "%s"' %
-                              dtype)
 
     @staticmethod
     def get_gdal_dtype(dtype):
@@ -507,27 +527,22 @@ class raster(object):
 
         # Ensure they are already not the same
         if dtype == self.dtype:
-            return
+            return self
+
+        # Create a copy with new data type
+        prvdtype = self.dtype
+        self.dtype = dtype
+        out = raster(self)
+        self.dtype = prvdtype
 
         # Complete casting
-        self.dtype = dtype
-        if self.format == 'gdal' or self.mode == 'r':
-            # Need to create a copy
-            self.copy_ds(dtype)
-        else:
-            # Change current file
-            ds = self.ds
-            for band in self.bands:
-                newband = ds.create_dataset(str(band) + '_',
-                                            dtype=self.dtype,
-                                            shape=self.shape,
-                                            chunks=True)
-                for a, s in self.iterchunks():
-                    newband[s] = a
-                del newband
-                del ds[str(band)]
-                ds[str(band)] = ds[str(band) + '_']
-                del ds[str(band) + '_']
+        for band in self.bands:
+            out.activeBand = band
+            for a, s in self.iterchunks():
+                out[s] = a.astype(dtype)
+
+        # Return casted raster
+        return out
 
     def define_projection(self, projection, overwrite=False):
         '''Define the raster projection'''
@@ -891,7 +906,7 @@ class raster(object):
 
     @staticmethod
     def new_gdal_raster(output_path, shape, bands, dtype, left, top, csx, csy,
-                        projection, chunks, compress=True, iterblocks=True):
+                        projection, chunks, compress=True):
         '''Generate a new gdal raster dataset'''
         driver = gdal.GetDriverByName('GTiff')
         if compress:
@@ -1047,242 +1062,174 @@ class raster(object):
             try:
                 self.ds[str(self.band)][s] = a
             except:
-                raise RasterError('Dataset open as read-only.')
+                raise RasterError('Error writing raster data. Check that mode'
+                                  ' is "r+" and that the arrays match.')
+
+    def perform_operation(self, r, op):
+        try:
+            if all([isinstance(x, numbers.Number)
+                    for x in (0, 0.0, 0j, decimal.Decimal(r))]):
+                num = True
+        except:
+            if not isinstance(r, raster):
+                raise RasterError('Expected a number or raster instance while'
+                                  ' using the "%s" operator' % op)
+            num = False
+        out = r
+        out.match_raster(self)
+        outnd = out.nodata
+        nd = self.nodata
+        if num:
+            # It's a scalar
+            if self.useChunks:
+                # Compute over chunks
+                for a, s in out.iterchunks():
+                    if self.aMethod == 'ne':
+                        out[s] = ne.evaluate('where(a!=nd,a%sr,outnd)' % op)
+                    elif self.aMethod == 'np':
+                        m = a != nd
+                        b = a[m]
+                        a[m] = eval('b%sr' % op)
+                        a[~m] = outnd
+                        out[s] = a
+            else:
+                # Load into memory, then compute
+                a = self.array
+                if self.aMethod == 'ne':
+                    out[:] = ne.evaluate('where(a!=nd,a%sr,outnd)' % op)
+                elif self.aMethod == 'np':
+                    m = a != nd
+                    b = a[m]
+                    a[m] = eval('b%sr' % op)
+                    a[~m] = outnd
+                    out[:] = a
+        else:
+            # It's another raster
+            if self.useChunks:
+                # Compute over chunks
+                for a, s in self.iterchunks():
+                    b = out[s]
+                    if self.aMethod == 'ne':
+                        out[s] = ne.evaluate('where((a!=nd)&(b!=outnd),a%sb,'
+                                             'outnd)' % op)
+                    elif self.aMethod == 'np':
+                        m = (a != nd) & (b != outnd)
+                        b = b[m]
+                        c = a[m]
+                        a[m] = eval('c%sb' % op)
+                        a[~m] = outnd
+                        out[s] = a
+            else:
+                # Load into memory, then compute
+                a = self.array
+                b = out.array
+                if self.aMethod == 'ne':
+                    out[:] = ne.evaluate('where((a!=nd)&(b!=outnd),a%sb,'
+                                         'outnd)' % op)
+                elif self.aMethod == 'np':
+                    m = (a != nd) & (b != outnd)
+                    b = b[m]
+                    c = a[m]
+                    a[m] = eval('c%sb' % op)
+                    a[~m] = outnd
+                    out[:] = a
+        return out
+
+    def perform_i_operation(self, r, op):
+        if self.mode == 'r':
+            raise RasterError('%s open as read-only.' %
+                              os.path.basename(self.path))
+        try:
+            if all([isinstance(x, numbers.Number)
+                    for x in (0, 0.0, 0j, decimal.Decimal(r))]):
+                nd = self.nodata
+                if self.useChunks:
+                    for a, s in self.iterchunks():
+                        if self.aMethod == 'ne':
+                            self[s] = ne.evaluate('where(a!=nd,a%sr,nd)' % op)
+                        elif self.aMethod == 'np':
+                            m = a != nd
+                            b = a[m]
+                            a[m] = eval('b%sr' % op)
+                            self[s] = a
+                else:
+                    a = self.array
+                    if self.aMethod == 'ne':
+                        self[:] = ne.evaluate('where(a!=nd,a%sr,nd)' % op)
+                    elif self.aMethod == 'np':
+                        m = a != nd
+                        b = a[m]
+                        a[m] = eval('b%sr' % op)
+                        self[:] = a
+        except:
+            if not isinstance(r, raster):
+                raise RasterError('Expected a number or raster instance while'
+                                  ' using the "%s=" operator')
+            r.match_raster(self)
+            rnd = r.nodata
+            nd = self.nodata
+            if self.useChunks:
+                for a, s in self.iterchunks():
+                    b = r[s]
+                    if self.aMethod == 'ne':
+                        self[s] = ne.evaluate('where((a!=nd)&(b!=rnd),a%sb,nd)'
+                                              % op)
+                    elif self.aMethod == 'np':
+                        m = (a != nd) & (b != rnd)
+                        b = b[m]
+                        c = a[m]
+                        a[m] = eval('c%sb' % op)
+                        self[s] = a
+            else:
+                a = self.array
+                b = r.array
+                if self.aMethod == 'ne':
+                    self[:] = ne.evaluate('where((a!=nd)&(b!=rnd),a%sb,nd)'
+                                          % op)
+                elif self.aMethod == 'np':
+                    m = (a != nd) & (b != rnd)
+                    b = b[m]
+                    c = a[m]
+                    a[m] = eval('c%sb' % op)
+                    self[:] = a
 
     def __add__(self, r):
-        try:
-            if all([isinstance(x, numbers.Number)
-                    for x in (0, 0.0, 0j, decimal.Decimal(r))]):
-                num = True
-        except:
-            if not isinstance(r, raster):
-                raise RasterError('Expected a number or raster instance while'
-                                  ' using the "+" operator')
-            num = False
-        out = raster(r)
-        out.match_raster(self)
-        outnd = out.nodata
-        nd = self.nodata
-        if num:
-            for a, s in out.iterchunks():
-                out[s] = ne.evaluate('where(a!=outnd,a+r,outnd)')
-        else:
-            for a, s in self.iterchunks():
-                b = out[s]
-                out[s] = ne.evaluate('where((a!=nd)&(b!=outnd),a+b,outnd)')
-            return out
+        return self.perform_operation(r, '+')
 
     def __iadd__(self, r):
-        if self.mode == 'r':
-            raise RasterError('Dataset open as read-only.')
-        try:
-            if all([isinstance(x, numbers.Number)
-                    for x in (0, 0.0, 0j, decimal.Decimal(r))]):
-                nd = self.nodata
-                for a, s in self.iterchunks():
-                    self[s] = ne.evaluate('where(a!=nd,a+r,nd)')
-        except:
-            if not isinstance(r, raster):
-                raise RasterError('Expected a number or raster instance while'
-                                  ' using the "+=" operator')
-            r.match_raster(self)
-            rnd = r.nodata
-            nd = self.nodata
-            for a, s in self.iterchunks():
-                b = r[s]
-                self[s] = ne.evaluate('where((a!=nd)&(b!=rnd),a+b,nd)')
+        self.perform_i_operation(r, '+')
+        return self
 
     def __sub__(self, r):
-        try:
-            if all([isinstance(x, numbers.Number)
-                    for x in (0, 0.0, 0j, decimal.Decimal(r))]):
-                num = True
-        except:
-            if not isinstance(r, raster):
-                raise RasterError('Expected a number or raster instance while'
-                                  ' using the "-" operator')
-            num = False
-        out = raster(r)
-        out.match_raster(self)
-        outnd = out.nodata
-        nd = self.nodata
-        if num:
-            for a, s in out.iterchunks():
-                out[s] = ne.evaluate('where(a!=outnd,a-r,outnd)')
-        else:
-            for a, s in self.iterchunks():
-                b = out[s]
-                out[s] = ne.evaluate('where((a!=nd)&(b!=outnd),a-b,outnd)')
-            return out
+        return self.perform_operation(r, '-')
 
     def __isub__(self, r):
-        if self.mode == 'r':
-            raise RasterError('Dataset open as read-only.')
-        try:
-            if all([isinstance(x, numbers.Number)
-                    for x in (0, 0.0, 0j, decimal.Decimal(r))]):
-                nd = self.nodata
-                for a, s in self.iterchunks():
-                    self[s] = ne.evaluate('where(a!=nd,a-r,nd)')
-        except:
-            if not isinstance(r, raster):
-                raise RasterError('Expected a number or raster instance while'
-                                  ' using the "-=" operator')
-            r.match_raster(self)
-            rnd = r.nodata
-            nd = self.nodata
-            for a, s in self.iterchunks():
-                b = r[s]
-                self[s] = ne.evaluate('where((a!=nd)&(b!=rnd),a-b,nd)')
+        self.perform_i_operation(r, '-')
+        return self
 
     def __div__(self, r):
-        try:
-            if all([isinstance(x, numbers.Number)
-                    for x in (0, 0.0, 0j, decimal.Decimal(r))]):
-                num = True
-        except:
-            if not isinstance(r, raster):
-                raise RasterError('Expected a number or raster instance while'
-                                  ' using the "/" operator')
-            num = False
-        out = raster(r)
-        out.match_raster(self)
-        outnd = out.nodata
-        nd = self.nodata
-        if num:
-            for a, s in out.iterchunks():
-                out[s] = ne.evaluate('where(a!=outnd,a/r,outnd)')
-        else:
-            for a, s in self.iterchunks():
-                b = out[s]
-                out[s] = ne.evaluate('where((a!=nd)&(b!=outnd),a/b,outnd)')
-            return out
+        return self.perform_operation(r, '/')
 
     def __idiv__(self, r):
-        if self.mode == 'r':
-            raise RasterError('Dataset open as read-only.')
-        try:
-            if all([isinstance(x, numbers.Number)
-                    for x in (0, 0.0, 0j, decimal.Decimal(r))]):
-                nd = self.nodata
-                for a, s in self.iterchunks():
-                    self[s] = ne.evaluate('where(a!=nd,a/r,nd)')
-        except:
-            if not isinstance(r, raster):
-                raise RasterError('Expected a number or raster instance while'
-                                  ' using the "/=" operator')
-            r.match_raster(self)
-            rnd = r.nodata
-            nd = self.nodata
-            for a, s in self.iterchunks():
-                b = r[s]
-                self[s] = ne.evaluate('where((a!=nd)&(b!=rnd),a/b,nd)')
+        self.perform_i_operation(r, '/')
+        return self
 
     def __mul__(self, r):
-        try:
-            if all([isinstance(x, numbers.Number)
-                    for x in (0, 0.0, 0j, decimal.Decimal(r))]):
-                num = True
-        except:
-            if not isinstance(r, raster):
-                raise RasterError('Expected a number or raster instance while'
-                                  ' using the "*" operator')
-            num = False
-        out = raster(r)
-        out.match_raster(self)
-        outnd = out.nodata
-        nd = self.nodata
-        if num:
-            for a, s in out.iterchunks():
-                out[s] = ne.evaluate('where(a!=outnd,a*r,outnd)')
-        else:
-            for a, s in self.iterchunks():
-                b = out[s]
-                out[s] = ne.evaluate('where((a!=nd)&(b!=outnd),a*b,outnd)')
-            return out
+        return self.perform_operation(r, '*')
 
     def __imul__(self, r):
-        if self.mode == 'r':
-            raise RasterError('Dataset open as read-only.')
-        try:
-            if all([isinstance(x, numbers.Number)
-                    for x in (0, 0.0, 0j, decimal.Decimal(r))]):
-                nd = self.nodata
-                for a, s in self.iterchunks():
-                    self[s] = ne.evaluate('where(a!=nd,a*r,nd)')
-        except:
-            if not isinstance(r, raster):
-                raise RasterError('Expected a number or raster instance while'
-                                  ' using the "*=" operator')
-            r.match_raster(self)
-            rnd = r.nodata
-            nd = self.nodata
-            for a, s in self.iterchunks():
-                b = r[s]
-                self[s] = ne.evaluate('where((a!=nd)&(b!=rnd),a*b,nd)')
+        self.perform_i_operation(r, '*')
+        return self
 
     def __pow__(self, r):
-        try:
-            if all([isinstance(x, numbers.Number)
-                    for x in (0, 0.0, 0j, decimal.Decimal(r))]):
-                num = True
-        except:
-            if not isinstance(r, raster):
-                raise RasterError('Expected a number or raster instance while'
-                                  ' using the "**" operator')
-            num = False
-        out = raster(r)
-        out.match_raster(self)
-        outnd = out.nodata
-        nd = self.nodata
-        if num:
-            for a, s in out.iterchunks():
-                out[s] = ne.evaluate('where(a!=outnd,a**r,outnd)')
-        else:
-            for a, s in self.iterchunks():
-                b = out[s]
-                out[s] = ne.evaluate('where((a!=nd)&(b!=outnd),a**b,outnd)')
-            return out
+        return self.perform_operation(r, '**')
 
     def __ipow__(self, r):
-        if self.mode == 'r':
-            raise RasterError('Dataset open as read-only.')
-        try:
-            if all([isinstance(x, numbers.Number)
-                    for x in (0, 0.0, 0j, decimal.Decimal(r))]):
-                nd = self.nodata
-                for a, s in self.iterchunks():
-                    self[s] = ne.evaluate('where(a!=nd,a**r,nd)')
-        except:
-            if not isinstance(r, raster):
-                raise RasterError('Expected a number or raster instance while'
-                                  ' using the "**=" operator')
-            r.match_raster(self)
-            rnd = r.nodata
-            nd = self.nodata
-            for a, s in self.iterchunks():
-                b = r[s]
-                self[s] = ne.evaluate('where((a!=nd)&(b!=rnd),a**b,nd)')
+        self.perform_i_operation(r, '**')
+        return self
 
     def __mod__(self, r):
-        try:
-            if all([isinstance(x, numbers.Number)
-                    for x in (0, 0.0, 0j, decimal.Decimal(r))]):
-                nd = self.nodata
-                for a, s in self.iterchunks():
-                    self[s] = ne.evaluate('where(a!=nd,a%r,nd)')
-        except:
-            if not isinstance(r, raster):
-                raise RasterError('Expected a number or raster instance while'
-                                  ' using the "+" operator')
-        out = raster(r)
-        out.match_raster(self)
-        nd = self.nodata
-        outnd = out.nodata
-        for a, s in self.iterchunks():
-            b = out[s]
-            out[s] = ne.evaluate('where((a!=nd)&(b!=outnd),a%b,outnd)')
-        return out
+        return self.perform_operation(r, '%')
 
     def __eq__(self, r):
         if not isinstance(r, raster):
@@ -1318,27 +1265,35 @@ class raster(object):
 
     def __repr__(self):
         insr = osr.SpatialReference(wkt=self.projection)
+        methods = {
+            'ne': 'numexpr (Parallel, CPU cache-optimized)',
+            'np': 'numpy (single-threaded, vectorized)'
+        }
         return ('A happy raster named %s of house %s\n'
                 '    Bands               : %s\n'
                 '    Shape               : %s rows, %s columns\n'
                 '    Cell Size           : %s (x), %s (y)\n'
                 '    Extent              : %s\n'
                 '    Data Type           : %s\n'
+                '    Uncompressed Size   : %s GB\n'
                 '    Projection          : %s\n'
                 '    Datum               : %s\n'
                 '    Active Band         : %s\n'
-                '    Interpolation Method: %s'
+                '    Interpolation Method: %s\n'
+                '    Using Chunks        : %s\n'
+                '    Calculation Method  : %s'
                 '' % (os.path.basename(self.path), self.format.upper(),
                       self.bandCount, self.shape[0], self.shape[1], self.csx,
                       self.csy, (self.top, self.bottom, self.left, self.right),
-                      self.dtype, insr.GetAttrValue('projcs'),
-                      insr.GetAttrValue('datum'), self.activeBand,
-                      self.interpolationMethod))
+                      self.dtype, round(self.size, 3),
+                      insr.GetAttrValue('projcs'), insr.GetAttrValue('datum'),
+                      self.activeBand, self.interpolationMethod,
+                      self.useChunks, methods[self.aMethod]))
 
     def __del__(self):
         if hasattr(self, 'garbage'):
             for f in self.garbage:
                 try:
                     os.remove(f)
-                except:
-                    print "Could not clean up file %s" % (f)
+                except Exception as e:
+                    print "Could not clean up file %s because %s" % (f, e)
