@@ -1074,8 +1074,11 @@ class raster(object):
         if num:
             out = raster(self)
         else:
+            r.match_raster(self)
             out = r
-            out.match_raster(self)
+            # Check if no copy made
+            if r.path == out.path:
+                out = raster(r)
         outnd = out.nodata
         nd = self.nodata
         if num:
@@ -1107,7 +1110,7 @@ class raster(object):
             if self.useChunks:
                 # Compute over chunks
                 for a, s in self.iterchunks():
-                    b = out[s]
+                    b = r[s]
                     if self.aMethod == 'ne':
                         out[s] = ne.evaluate('where((a!=nd)&(b!=outnd),a%sb,'
                                              'outnd)' % op)
@@ -1121,7 +1124,7 @@ class raster(object):
             else:
                 # Load into memory, then compute
                 a = self.array
-                b = out.array
+                b = r.array
                 if self.aMethod == 'ne':
                     out[:] = ne.evaluate('where((a!=nd)&(b!=outnd),a%sb,'
                                          'outnd)' % op)
