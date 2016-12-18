@@ -1,196 +1,279 @@
 '''
-Terrain analysis functions
+Terrain and Hydrologic routing analysis
+
+Blue Geosimulation, 2016
 '''
 
 from raster import *
 import util
-import spatial
 import numpy.ma as ma
 import math
+import sys
 
 
-def slopetask(args):
-    af, tile, nodata, sa, output, exag, csx, csy = args
-    xoff, yoff, win_xsize, win_ysize = tile
-    mma = numpy.load(af, mmap_mode='r+')
-    ina = numpy.load(sa, mmap_mode='r')
-    # set up neighborhood
-    islice, jslice, insislice, insjslice = util.tileHood(tile, (3, 3),
-                                                         mma.shape)
-    a = numpy.copy(ina[islice, jslice])
-    if numpy.all(a == nodata):
-        return
-    a = ma.masked_equal(a, nodata)
-    a *= float(exag)
-    #  ___ ___ ___   ___ ___ ___
-    # |_dx|___|dx_| |_dy|2dy|dy_|
-    # |2dx|___|2dx| |___|___|___|
-    # |_dx|___|dx_| |_dy|2dy|dy_|
-    #
-    dx = ((a[:-2, :-2] + (2 * a[1:-1, :-2]) + a[2:, :-2]) -
-          (a[2:, 2:] + (2 * a[1:-1, 2:]) + a[:-2, 2:])) / (8 * csx)
-    dy = ((a[:-2, :-2] + (2 * a[:-2, 1:-1]) + a[:-2, 2:]) -
-          (a[2:, :-2] + (2 * a[2:, 1:-1]) + a[2:, 2:])) / (8 * csy)
-    if output == 'percent rise':
-        dx = numpy.sqrt((dx**2) + (dy**2)) * 100
-    else:
-        dx = numpy.arctan(numpy.sqrt((dx**2) + (dy**2))) * (180. / math.pi)
-    a[1:-1, 1:-1] = dx
-    a[numpy.isnan(a)] = nodata
-    mma[yoff:yoff + win_ysize, xoff:xoff + win_xsize] =\
-        ma.filled(a[insislice, insjslice], nodata)
-    mma.flush()
+# Put a handle on the mower
+if sys.platform.startswith('linux'):
+    import mower
+    grassbin = '/usr/local/bin/grass70'
+elif sys.platform.startswith('win'):
+    import mower_win  # <-- Ad hoc adaptation of mower for testing in a win env
+    grassbin = r'C:\Program Files\GRASS GIS 7.0.5\grass70.bat'
 
 
-def slope(surface, exag=1, units='degrees'):
-    '''compute slope in "degrees" or "percent rise"'''
-    util.parseInput(surface)
-    slope = raster(surface)
-    slope.changeDataType('float32')
-    slope.runTiles(slopetask, args=(surface.array, units, exag, slope.csx,
-                                    slope.csy))
-    a = slope.load('r+')
-    a[0, :] = slope.nodata[0]
-    a[-1, :] = slope.nodata[0]
-    a[:, 0] = slope.nodata[0]
-    a[:, -1] = slope.nodata[0]
-    a.flush()
-    return slope
-
-
-def aspecttask(args):
+class topo(raster):
     '''
-    Compute aspect as a compass (360 > a >= 0)
-    or pi (pi > a >= -pi)
+    Topographic analysis using a continuous surface (child of raster)
     '''
-    af, tile, nodata, sa, output, exag, csx, csy = args
-    xoff, yoff, win_xsize, win_ysize = tile
-    mma = numpy.load(af, mmap_mode='r+')
-    ina = numpy.load(sa, mmap_mode='r')
-    # set up neighborhood
-    islice, jslice, insislice, insjslice = util.tileHood(tile, (3, 3),
-                                                         mma.shape)
-    a = numpy.copy(ina[islice, jslice])
-    if numpy.all(a == nodata):
-        return
-    a = ma.masked_equal(a, nodata)
-    a *= float(exag)
-    #  ___ ___ ___   ___ ___ ___
-    # |_dx|___|dx_| |_dy|2dy|dy_|
-    # |2dx|___|2dx| |___|___|___|
-    # |_dx|___|dx_| |_dy|2dy|dy_|
-    #
-    dx = ((a[:-2, :-2] + (2 * a[1:-1, :-2]) + a[2:, :-2]) -
-          (a[2:, 2:] + (2 * a[1:-1, 2:]) + a[:-2, 2:])) / (8 * csx)
-    dy = ((a[:-2, :-2] + (2 * a[:-2, 1:-1]) + a[:-2, 2:]) -
-          (a[2:, :-2] + (2 * a[2:, 1:-1]) + a[2:, 2:])) / (8 * csy)
-    dx = numpy.arctan2(dx, dy)
-    if output == 'compass':
-        dx = numpy.degrees(dx) * -1
-        dx[dx < 0] += 360
-    a[1:-1, 1:-1] = dx
-    a[numpy.isnan(a)] = nodata
-    mma[yoff:yoff + win_ysize, xoff:xoff + win_xsize] =\
-        ma.filled(a[insislice, insjslice], nodata)
-    mma.flush()
+    def __init__(self, surface):
+        # Open and change to float if not already
+        if isinstance(surface, raster):
+            self.__dict__.update(surface.__dict__)
+        else:
+            super(topo, self).__init__(surface)
+        self = self.astype('float32')
+        # Change interpolation method unless otherwise specified
+        self.interpolationMethod = 'bilinear'
+
+    @staticmethod
+    def truncate_slice(s, size):
+        i, j = size
+        ifr = int(math.ceil((i - 1) / 2.))
+        jfr = int(math.ceil((j - 1) / 2.))
+        ito = int((i - 1) / 2)
+        jto = int((j - 1) / 2)
+        s_ = s[0].start + ifr
+        s__ = s[1].start + jfr
+        _s = s[0].stop - ito
+        __s = s[1].stop - jto
+        return (slice(s_, _s), slice(s__, __s))
+
+    @staticmethod
+    def get_window_views(a, size):
+        '''
+        Get a "shaped" list of views into "a" to retrieve
+        neighbouring cells in the form of "size."
+        Note: asymmetrical shapes will be propagated
+            up and left.
+        '''
+        i_offset = (size[0] - 1) * -1
+        j_offset = (size[1] - 1) * -1
+        output = []
+        for i in range(i_offset, 1):
+            output.append([])
+            _i = abs(i_offset) + i
+            if i == 0:
+                i = None
+            for j in range(j_offset, 1):
+                _j = abs(j_offset) + j
+                if j == 0:
+                    j = None
+                output[-1].append(a[_i:i, _j:j])
+        return output
+
+    @staticmethod
+    def window_local_dict(views, prefix='a'):
+        '''
+        Create a local dictionary with variable names to craft a numexpr
+        expression using offsets of a moving window
+        '''
+        return {'%s%s_%s' % (prefix, i, j): views[i][j]
+                for i in range(len(views))
+                for j in range(len(views[i]))}
+
+    def slope(self, units='degrees', exaggeration=None):
+        '''
+        Compute topographic slope over a 9-cell neighbourhood.
+        For "units" use "degrees" or "percent rise"
+        '''
+        def eval_slope(a):
+            # Create a mask of nodata values
+            nd = self.nodata
+            mask = a != nd
+            # Apply exaggeration
+            if exaggeration is not None:
+                a = ne.evaluate('where(mask,a*exaggeration,nd)')
+
+            # Add mask to local dictionary
+            local_dict = self.window_local_dict(
+                self.get_window_views(mask, (3, 3)), 'm'
+            )
+            # Add surface data
+            local_dict.update(self.window_local_dict(
+                self.get_window_views(a, (3, 3)), 'a')
+            )
+            # Add other variables
+            local_dict.update({'csx': self.csx, 'csy': self.csy, 'nd': nd,
+                               'pi': math.pi})
+
+            # Compute slope
+            bool_exp = '&'.join([key for key in local_dict.keys()
+                                 if 'm' in key])
+            if units == 'degrees':
+                calc_exp = '''
+                    arctan(sqrt(
+                                ((((a0_0+(2*a1_0)+a2_0)-
+                                   (a2_2+(2*a1_2)+a0_2))/(8*csx))**2)+
+                                ((((a0_0+(2*a0_1)+a0_2)-
+                                   (a2_0+(2*a2_1)+a2_2))/(8*csy))**2)
+                                )
+                           )*(180./pi)
+                '''
+            else:
+                calc_exp = '''
+                    sqrt(((((a0_0+(2*a1_0)+a2_0)-
+                            (a2_2+(2*a1_2)+a0_2))/(8*csx))**2)+
+                         ((((a0_0+(2*a0_1)+a0_2)-
+                            (a2_0+(2*a2_1)+a2_2))/(8*csy))**2)
+                        )*100
+                '''
+            return ne.evaluate('where(%s,%s,nd)' % (bool_exp.replace(' ', ''),
+                                                    calc_exp.replace(' ', '')),
+                               local_dict=local_dict)
+
+        # Allocate output
+        slope_raster = raster(self, output_descriptor='slope')
+        if self.useChunks:
+            # Iterate chunks and calculate slope
+            for a, s in self.iterchunks(expand=(3, 3)):
+                s_ = self.truncate_slice(s, (3, 3))
+                slope_raster[s_] = eval_slope(a)
+        else:
+            # Calculate over all data
+            slope_raster[1:-1, 1:-1] = eval_slope(self.array)
+
+        # Change outer rows/cols to nodata
+        slope_raster[0, :] = self.nodata
+        slope_raster[-1, :] = self.nodata
+        slope_raster[:, 0] = self.nodata
+        slope_raster[:, -1] = self.nodata
+        return topo(slope_raster)
 
 
-def aspect(surface, exag=1, units='compass'):
-    util.parseInput(surface)
-    dem = raster(surface)
-    dem.changeDataType('float32')
-    dem.runTiles(aspecttask, args=(surface.array, units, exag, dem.csx,
-                                   dem.csy))
-    a = dem.load('r+')
-    a[0, :] = dem.nodata[0]
-    a[-1, :] = dem.nodata[0]
-    a[:, 0] = dem.nodata[0]
-    a[:, -1] = dem.nodata[0]
-    a.flush()
-    return dem
+    def aspect(self):
+        '''
+        Compute aspect as a compass (360 > a >= 0)
+        or pi (pi > a >= -pi)
+        '''
+        def eval_aspect(a):
+            # Create a mask of nodata values
+            nd = self.nodata
+            mask = a != nd
+
+            # Add mask to local dictionary
+            local_dict = self.window_local_dict(
+                self.get_window_views(mask, (3, 3)), 'm'
+            )
+            # Add surface data
+            local_dict.update(self.window_local_dict(
+                self.get_window_views(a, (3, 3)), 'a')
+            )
+            # Add other variables
+            local_dict.update({'csx': self.csx, 'csy': self.csy, 'nd': nd,
+                               'pi': math.pi})
+
+            # Compute slope
+            bool_exp = '&'.join([key for key in local_dict.keys()
+                                 if 'm' in key])
+            calc_exp = '''
+                arctan2((((a0_0+(2*a1_0)+a2_0)-
+                          (a2_2+(2*a1_2)+a0_2)))/(8*csx)),
+                        ((((a0_0+(2*a0_1)+a0_2)-
+                           (a2_0+(2*a2_1)+a2_2))/(8*csy)))*(-180./pi)
+            '''
+            a = ne.evaluate('where(%s,%s,nd)' % (bool_exp, calc_exp),
+                            local_dict=local_dict)
+            return ne.evaluate('where((a<0)&(a!=nd),a+360,nd)')
+
+        # Allocate output
+        aspect_raster = raster(self, output_descriptor='aspect')
+        if self.useChunks:
+            # Iterate chunks and calculate aspect
+            for a, s in self.iterchunks(expand=(3, 3)):
+                s_ = self.truncate_slice(s, (3, 3))
+                aspect_raster[s_] = eval_aspect(a)
+        else:
+            # Calculate over all data
+            aspect_raster[1:-1, 1:-1] = eval_aspect(self.array)
+
+        # Change outer rows/cols to nodata
+        aspect_raster[0, :] = self.nodata
+        aspect_raster[-1, :] = self.nodata
+        aspect_raster[:, 0] = self.nodata
+        aspect_raster[:, -1] = self.nodata
+        return topo(aspect_raster)
 
 
-def roughnesstask(args):
-    af, tile, nodata, sa, method, nbrhood = args
-    xoff, yoff, win_xsize, win_ysize = tile
-    mma = numpy.load(af, mmap_mode='r+')
-    ina = numpy.load(sa, mmap_mode='r')
-    # set up neighborhood
-    islice, jslice, insislice, insjslice = util.tileHood(tile, nbrhood,
-                                                         mma.shape)
-    a = numpy.copy(ina[islice, jslice])
-    if numpy.all(a == nodata):
-        return
-    nodatamask = a == nodata
-    view = util.getWindowViews(a, nbrhood)
-    itop, ibot, jleft, jright = util.getViewInsertLocation(nbrhood)
-    # Normalize elevation over neighborhood
-    max_ = numpy.zeros(shape=a.shape, dtype='float32')
-    min_ = numpy.zeros(shape=a.shape, dtype='float32')
-    min_[~nodatamask] = numpy.max(a[~nodatamask])
-    # Max/Min filter
-    for i in range(nbrhood[0]):
-        for j in range(nbrhood[1]):
-            m = (view[i][j] != nodata) & (view[i][j] > max_[itop:ibot,
-                                                            jleft:jright])
-            max_[itop:ibot, jleft:jright][m] = view[i][j][m]
-            m = (view[i][j] != nodata) & (view[i][j] < min_[itop:ibot,
-                                                            jleft:jright])
-            min_[itop:ibot, jleft:jright][m] = view[i][j][m]
-    # Calculate mean over normalized elevations
-    rge = numpy.zeros(shape=a.shape, dtype='float32')
-    rge[~nodatamask] = max_[~nodatamask] - min_[~nodatamask]
-    del max_
-    mean = numpy.zeros(shape=a.shape, dtype='float32')
-    modal = numpy.zeros(shape=a.shape, dtype='int8')
-    rgemask = rge != 0
-    for i in range(nbrhood[0]):
-        for j in range(nbrhood[1]):
-            m = (view[i][j] != nodata) & rgemask[itop:ibot, jleft:jright]
-            mean[itop:ibot, jleft:jright][m] +=\
-                (view[i][j][m] -
-                 min_[itop:ibot, jleft:jright][m]) / rge[itop:ibot,
-                                                         jleft:jright][m]
-            modal[itop:ibot, jleft:jright][m] += 1
-    repl = ~nodatamask & (modal != 0)
-    mean[repl] /= modal[repl]
-    # Calculate standard deviation over normalized elevations
-    std = numpy.zeros(shape=a.shape, dtype='float32')
-    for i in range(nbrhood[0]):
-        for j in range(nbrhood[1]):
-            m = (view[i][j] != nodata) & rgemask[itop:ibot, jleft:jright]
-            std[itop:ibot, jleft:jright][m] +=\
-                (((view[i][j][m] - min_[itop:ibot, jleft:jright][m]) /
-                  rge[itop:ibot, jleft:jright][m]) - mean[itop:ibot,
-                                                          jleft:jright][m])**2
-    std[repl] /= modal[repl]
-    std[repl] = numpy.sqrt(std[repl])
-    std[~rgemask] = 0
-    std[nodatamask] = nodata
-    mma[yoff:yoff + win_ysize, xoff:xoff + win_xsize] =\
-        std[insislice, insjslice]
-    mma.flush()
+    def surface_roughness(self, method, size):
+        '''
+        Compute the roughness of a surface.
+        Methods are:
+        "std-elev": standard deviation of locally normalized elevation
+        '''
+        def eval_roughness(a):
+            nbrhood = size
+            nodatamask = a == nodata
+            view = util.getWindowViews(a, nbrhood)
+            itop, ibot, jleft, jright = util.getViewInsertLocation(nbrhood)
+            # Normalize elevation over neighborhood
+            max_ = numpy.zeros(shape=a.shape, dtype='float32')
+            min_ = numpy.zeros(shape=a.shape, dtype='float32')
+            min_[~nodatamask] = numpy.max(a[~nodatamask])
+            # Max/Min filter
+            for i in range(nbrhood[0]):
+                for j in range(nbrhood[1]):
+                    m = (view[i][j] != nodata) & (view[i][j] > max_[itop:ibot,
+                                                                    jleft:jright])
+                    max_[itop:ibot, jleft:jright][m] = view[i][j][m]
+                    m = (view[i][j] != nodata) & (view[i][j] < min_[itop:ibot,
+                                                                    jleft:jright])
+                    min_[itop:ibot, jleft:jright][m] = view[i][j][m]
+            # Calculate mean over normalized elevations
+            rge = numpy.zeros(shape=a.shape, dtype='float32')
+            rge[~nodatamask] = max_[~nodatamask] - min_[~nodatamask]
+            del max_
+            mean = numpy.zeros(shape=a.shape, dtype='float32')
+            modal = numpy.zeros(shape=a.shape, dtype='int8')
+            rgemask = rge != 0
+            for i in range(nbrhood[0]):
+                for j in range(nbrhood[1]):
+                    m = (view[i][j] != nodata) & rgemask[itop:ibot, jleft:jright]
+                    mean[itop:ibot, jleft:jright][m] +=\
+                        (view[i][j][m] -
+                         min_[itop:ibot, jleft:jright][m]) / rge[itop:ibot,
+                                                                 jleft:jright][m]
+                    modal[itop:ibot, jleft:jright][m] += 1
+            repl = ~nodatamask & (modal != 0)
+            mean[repl] /= modal[repl]
+            # Calculate standard deviation over normalized elevations
+            std = numpy.zeros(shape=a.shape, dtype='float32')
+            for i in range(nbrhood[0]):
+                for j in range(nbrhood[1]):
+                    m = (view[i][j] != nodata) & rgemask[itop:ibot, jleft:jright]
+                    std[itop:ibot, jleft:jright][m] +=\
+                        (((view[i][j][m] - min_[itop:ibot, jleft:jright][m]) /
+                          rge[itop:ibot, jleft:jright][m]) - mean[itop:ibot,
+                                                                  jleft:jright][m])**2
+            std[repl] /= modal[repl]
+            std[repl] = numpy.sqrt(std[repl])
+            std[~rgemask] = 0
+            std[nodatamask] = nodata
+            mma[yoff:yoff + win_ysize, xoff:xoff + win_xsize] =\
+                std[insislice, insjslice]
+            mma.flush()
 
+        # Allocate output
+        self.roughness_raster = raster(self.data)
+        if self.data.useChunks:
+            # Iterate chunks and calculate aspect
+            for a, s in self.data.iterchunks(expand=size):
+                s_ = self.truncate_slice(s, size)
+                self.roughness_raster[s_] = eval_roughness(a)
+        else:
+            # Calculate over all data
+            self.roughness_raster[1:-1, 1:-1] = eval_roughness(self.data.array)
 
-def roughness(surface, method='std-elev', neighborhood=(5, 5), smooth=False,
-              smooth_sigma=7):
-    '''
-    Compute the roughness of a surface.
-    Methods are:
-    "std-elev": standard deviation of locally normalized elevation
-    '''
-    util.parseInput(surface)
-    noise = raster(surface)
-    noise.changeDataType('float32')
-    noise.runTiles(roughnesstask, args=(surface.array, method, neighborhood))
-    a = noise.load('r+')
-    a[0, :] = noise.nodata[0]
-    a[-1, :] = noise.nodata[0]
-    a[:, 0] = noise.nodata[0]
-    a[:, -1] = noise.nodata[0]
-    a.flush()
-    if smooth:
-        from scipy.ndimage import gaussian_filter
-        mma = noise.load('r+')
-        gaussian_filter(noise, smooth_sigma, output=noise)
-    return noise
+        # Change outer rows/cols to nodata
+        # self.roughness_raster[0, :] = self.nodata
+        # self.roughness_raster[-1, :] = self.nodata
+        # self.roughness_raster[:, 0] = self.nodata
+        # self.roughness_raster[:, -1] = self.nodata
