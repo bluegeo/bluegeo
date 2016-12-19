@@ -13,11 +13,93 @@ import sys
 
 # Put a handle on the mower
 if sys.platform.startswith('linux'):
-    import mower
+    from mower import GrassSession
     grassbin = '/usr/local/bin/grass70'
-elif sys.platform.startswith('win'):
-    import mower_win  # <-- Ad hoc adaptation of mower for testing in a win env
-    grassbin = r'C:\Program Files\GRASS GIS 7.0.5\grass70.bat'
+# elif sys.platform.startswith('win'):
+#     # Ad hoc adaptation of mower for testing in a win env
+#     from mower_win import GrassSession
+#     grassbin = r'C:\Program Files\GRASS GIS 7.0.5\grass70.bat'
+
+
+class watershed(raster):
+    '''
+    Topographic routing and watershed delineation primarily using grass
+    '''
+    def __init__(self, surface):
+        # Open and change to float if not already
+        if isinstance(surface, raster):
+            self.__dict__.update(surface.__dict__)
+        else:
+            super(watershed, self).__init__(surface)
+        if 'float' not in self.dtype:
+            self = self.astype('float32')
+        # Change interpolation method unless otherwise specified
+        self.interpolationMethod = 'bilinear'
+
+    def create_external_datasource(self):
+        path = self.generate_name('copy', 'tif', True)
+        self.save_gdal_raster(path)
+        return path
+
+    def route(self):
+        '''
+        Return a single (D8) flow direction from 1 to 8, and positive flow
+        accumulation surface
+        '''
+        # Save a new raster if the data source format is not gdal
+        if self.format != 'gdal':
+            external = self.create_external_datasource()
+        else:
+            external = self.path
+
+        # Get paths for the outputs
+        fd_outpath = self.generate_name('fl_dir', 'tif', True)
+        fa_outpath = self.generate_name('fl_acc', 'tif', True)
+
+        # Perform analysis using grass session
+        with GrassSession(external, grassbin=grassbin, persist=False) as gs:
+            from grass.pygrass.modules.shortcuts import raster as graster
+            from grass.script import core as grass
+            graster.external(input=external, output='surface')
+            grass.run_command('r.watershed', elevation='surface',
+                              drainage='fd', accumulation='fa', flags="s")
+            graster.out_gdal('fd', format="GTiff", output=fd_outpath)
+            graster.out_gdal('fa', format="GTiff", output=fa_outpath)
+
+        return watershed(fd_outpath), watershed(fa_outpath)
+
+    def convergence(self, size=(5, 5)):
+        '''
+        Compute the relative convergence of flow vectors (uses flow
+        accumulation)
+        '''
+        def eval_conv(a):
+            # Create a mask of nodata values
+            nd = self.nodata
+            mask = a != nd
+
+            # Add mask to local dictionary
+            local_dict = window_local_dict(
+                get_window_views(mask, (3, 3)), 'm'
+            )
+            # Add surface data
+            local_dict.update(window_local_dict(
+                get_window_views(a, (3, 3)), 'a')
+            )
+            # Add other variables
+            local_dict.update({'csx': self.csx, 'csy': self.csy, 'nd': nd,
+                               'pi': math.pi})
+
+        # Allocate output
+        conv = raster(self, output_descriptor='conv')
+        if self.useChunks:
+            # Iterate chunks and calculate slope
+            for a, s in self.iterchunks(expand=size):
+                s_ = truncate_slice(s, size)
+                conv[s_] = eval_conv(a)
+        else:
+            # Calculate over all data
+            conv[:] = eval_conv(self.array)
 
 
 class topo(raster):
@@ -30,55 +112,10 @@ class topo(raster):
             self.__dict__.update(surface.__dict__)
         else:
             super(topo, self).__init__(surface)
-        self = self.astype('float32')
+        if 'float' not in self.dtype:
+            self = self.astype('float32')
         # Change interpolation method unless otherwise specified
         self.interpolationMethod = 'bilinear'
-
-    @staticmethod
-    def truncate_slice(s, size):
-        i, j = size
-        ifr = int(math.ceil((i - 1) / 2.))
-        jfr = int(math.ceil((j - 1) / 2.))
-        ito = int((i - 1) / 2)
-        jto = int((j - 1) / 2)
-        s_ = s[0].start + ifr
-        s__ = s[1].start + jfr
-        _s = s[0].stop - ito
-        __s = s[1].stop - jto
-        return (slice(s_, _s), slice(s__, __s))
-
-    @staticmethod
-    def get_window_views(a, size):
-        '''
-        Get a "shaped" list of views into "a" to retrieve
-        neighbouring cells in the form of "size."
-        Note: asymmetrical shapes will be propagated
-            up and left.
-        '''
-        i_offset = (size[0] - 1) * -1
-        j_offset = (size[1] - 1) * -1
-        output = []
-        for i in range(i_offset, 1):
-            output.append([])
-            _i = abs(i_offset) + i
-            if i == 0:
-                i = None
-            for j in range(j_offset, 1):
-                _j = abs(j_offset) + j
-                if j == 0:
-                    j = None
-                output[-1].append(a[_i:i, _j:j])
-        return output
-
-    @staticmethod
-    def window_local_dict(views, prefix='a'):
-        '''
-        Create a local dictionary with variable names to craft a numexpr
-        expression using offsets of a moving window
-        '''
-        return {'%s%s_%s' % (prefix, i, j): views[i][j]
-                for i in range(len(views))
-                for j in range(len(views[i]))}
 
     def slope(self, units='degrees', exaggeration=None):
         '''
@@ -94,12 +131,12 @@ class topo(raster):
                 a = ne.evaluate('where(mask,a*exaggeration,nd)')
 
             # Add mask to local dictionary
-            local_dict = self.window_local_dict(
-                self.get_window_views(mask, (3, 3)), 'm'
+            local_dict = window_local_dict(
+                get_window_views(mask, (3, 3)), 'm'
             )
             # Add surface data
-            local_dict.update(self.window_local_dict(
-                self.get_window_views(a, (3, 3)), 'a')
+            local_dict.update(window_local_dict(
+                get_window_views(a, (3, 3)), 'a')
             )
             # Add other variables
             local_dict.update({'csx': self.csx, 'csy': self.csy, 'nd': nd,
@@ -135,7 +172,7 @@ class topo(raster):
         if self.useChunks:
             # Iterate chunks and calculate slope
             for a, s in self.iterchunks(expand=(3, 3)):
-                s_ = self.truncate_slice(s, (3, 3))
+                s_ = truncate_slice(s, (3, 3))
                 slope_raster[s_] = eval_slope(a)
         else:
             # Calculate over all data
@@ -160,12 +197,12 @@ class topo(raster):
             mask = a != nd
 
             # Add mask to local dictionary
-            local_dict = self.window_local_dict(
-                self.get_window_views(mask, (3, 3)), 'm'
+            local_dict = window_local_dict(
+                get_window_views(mask, (3, 3)), 'm'
             )
             # Add surface data
-            local_dict.update(self.window_local_dict(
-                self.get_window_views(a, (3, 3)), 'a')
+            local_dict.update(window_local_dict(
+                get_window_views(a, (3, 3)), 'a')
             )
             # Add other variables
             local_dict.update({'csx': self.csx, 'csy': self.csy, 'nd': nd,
@@ -176,20 +213,19 @@ class topo(raster):
                                  if 'm' in key])
             calc_exp = '''
                 arctan2((((a0_0+(2*a1_0)+a2_0)-
-                          (a2_2+(2*a1_2)+a0_2)))/(8*csx)),
-                        ((((a0_0+(2*a0_1)+a0_2)-
-                           (a2_0+(2*a2_1)+a2_2))/(8*csy)))*(-180./pi)
+                          (a2_2+(2*a1_2)+a0_2))/(8*csx)),
+                        (((a0_0+(2*a0_1)+a0_2)-
+                          (a2_0+(2*a2_1)+a2_2))/(8*csy)))*(-180./pi)+180
             '''
-            a = ne.evaluate('where(%s,%s,nd)' % (bool_exp, calc_exp),
-                            local_dict=local_dict)
-            return ne.evaluate('where((a<0)&(a!=nd),a+360,nd)')
+            return ne.evaluate('where(%s,%s,nd)' % (bool_exp, calc_exp),
+                               local_dict=local_dict)
 
         # Allocate output
         aspect_raster = raster(self, output_descriptor='aspect')
         if self.useChunks:
             # Iterate chunks and calculate aspect
             for a, s in self.iterchunks(expand=(3, 3)):
-                s_ = self.truncate_slice(s, (3, 3))
+                s_ = truncate_slice(s, (3, 3))
                 aspect_raster[s_] = eval_aspect(a)
         else:
             # Calculate over all data
@@ -266,7 +302,7 @@ class topo(raster):
         if self.data.useChunks:
             # Iterate chunks and calculate aspect
             for a, s in self.data.iterchunks(expand=size):
-                s_ = self.truncate_slice(s, size)
+                s_ = truncate_slice(s, size)
                 self.roughness_raster[s_] = eval_roughness(a)
         else:
             # Calculate over all data
@@ -277,3 +313,48 @@ class topo(raster):
         # self.roughness_raster[-1, :] = self.nodata
         # self.roughness_raster[:, 0] = self.nodata
         # self.roughness_raster[:, -1] = self.nodata
+
+
+# Supplementary functions
+def truncate_slice(s, size):
+    i, j = size
+    ifr = int(math.ceil((i - 1) / 2.))
+    jfr = int(math.ceil((j - 1) / 2.))
+    ito = int((i - 1) / 2)
+    jto = int((j - 1) / 2)
+    s_ = s[0].start + ifr
+    s__ = s[1].start + jfr
+    _s = s[0].stop - ito
+    __s = s[1].stop - jto
+    return (slice(s_, _s), slice(s__, __s))
+
+def get_window_views(a, size):
+    '''
+    Get a "shaped" list of views into "a" to retrieve
+    neighbouring cells in the form of "size."
+    Note: asymmetrical shapes will be propagated
+        up and left.
+    '''
+    i_offset = (size[0] - 1) * -1
+    j_offset = (size[1] - 1) * -1
+    output = []
+    for i in range(i_offset, 1):
+        output.append([])
+        _i = abs(i_offset) + i
+        if i == 0:
+            i = None
+        for j in range(j_offset, 1):
+            _j = abs(j_offset) + j
+            if j == 0:
+                j = None
+            output[-1].append(a[_i:i, _j:j])
+    return output
+
+def window_local_dict(views, prefix='a'):
+    '''
+    Create a local dictionary with variable names to craft a numexpr
+    expression using offsets of a moving window
+    '''
+    return {'%s%s_%s' % (prefix, i, j): views[i][j]
+            for i in range(len(views))
+            for j in range(len(views[i]))}
