@@ -137,7 +137,10 @@ class raster(object):
         for i in range(1, self.bandCount + 1):
             band = ds.GetRasterBand(i)
             nd = band.GetNoDataValue()
-            self.nodataValues.append(nd)
+            if nd is None:
+                self.nodataValues.append(numpy.nan)
+            else:
+                self.nodataValues.append(nd)
         self.path = ds.GetFileList()[0]
         self.ndchecked = False
 
