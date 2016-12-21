@@ -160,8 +160,8 @@ class watershed(raster):
         del a
         return output
 
-    def alluvium(self, dem, min_contrib_area=1E6, slope_thresh=8,
-                 stream_slope_thresh=1.5):
+    def alluvium(self, dem, min_contrib_area=1E6, slope_thresh=6,
+                 stream_slope_thresh=2):
         '''
         Use the derivative of stream slope to determine regions of
         aggradation to predict alluvium deposition.  Streams above the
@@ -171,10 +171,10 @@ class watershed(raster):
         '''
         # Reclassify flow accumulation into streams and create seed points
         a = self.array
-        contrib = int(min_contrib_area / (self.csx *self.csy))
+        contrib = int(min_contrib_area / (self.csx * self.csy))
         streams = a >= contrib
         seeds = set(zip(*numpy.where(a == contrib)))
-        track = numpy.zeros(shape=a.shape, dtype='bool')
+        track = numpy.zeros(shape=a.shape, dtype='uint8')
 
         # Recursively propagate downstream and delineate alluvium
         # Get some parameters
@@ -187,58 +187,60 @@ class watershed(raster):
         with topo(dem).slope() as slope_output:
             slope = slope_output.array
         # Load elevation data into memory
-        dem = raster(dem).array
+        dem = raster(dem)
+        dem_a = dem.array
+        dem_m = dem_a != dem.nodata
+        dem = dem_a
         while True:
             try:
                 seed = seeds.pop()
             except:
                 break
-            s = (slice(max(0, min(seed[0] - 1, ish - 1)),
-                       max(0, min(seed[0] + 1, ish - 1))),
-                 slice(max(0, min(seed[1] - 1, jsh - 1)),
-                       max(0, min(seed[1] + 1, jsh - 1))))
-            mask = streams[s] & ~track[s]
-            if mask.sum() > 0:
-                # Stream exists
-                sl = numpy.mean(numpy.abs(dem[seed] - dem[s][mask]) /
-                                run[mask])
-                # High slope: erosion- directed propagation at higher slopes
-                g = dem[seed] - dem[s]
-                mask = g == g.max()
+            s = (slice(max(0, seed[0] - 1),
+                       min(seed[0] + 2, ish)),
+                 slice(max(0, seed[1] - 1),
+                       min(seed[1] + 2, jsh)))
+            str_mask = streams[s]
+            if streams[seed] & (track[seed] == 0):
+                # If stream exists calculate slope
+                sl = numpy.mean(numpy.degrees(numpy.arctan(
+                    numpy.abs(dem[seed] - dem[s][str_mask]) / run[str_mask])))
                 if sl > stream_slope_thresh:
-                    mild = False
-                    # Create a mask with correct gradient directions
-                    mask = ndimage.binary_dilation(mask)
-                    mask = ~track[s] & mask & (slope[s] < slope_thresh)
-                # Low slope: aggradation- fan outwards at shallower slopes
+                    track[seed] = 2
                 else:
-                    mild = True
-                    mask = ndimage.binary_dilation(
-                        mask, structure=numpy.ones(shape=(3, 3), dtype='bool')
-                    )
-                    mask = ~track[s] & mask & (slope[s] < (slope_thresh / 2))
+                    track[seed] = 1
+            # High slope: erosion- directed propagation at higher slopes
+            g = dem[seed] - dem[s]
+            mask = g == g.max()
+            if track[seed] == 2:
+                # Create a mask with correct gradient directions
+                mask = ndimage.binary_dilation(mask)
+                mask = mask & (slope[s] < slope_thresh)
+                track_add = 2
+            # Low slope: aggradation- fan outwards at shallower slopes
             else:
-                # Outside of stream or already tracked
-                g = dem[seed] - dem[s]
-                mask = g == g.max()
-                if mild:
-                    # Create a mask with correct gradient directions
-                    mask = ndimage.binary_dilation(mask)
-                    mask = ~track[s] & mask & (slope[s] < slope_thresh)
-                else:
-                    mask = ndimage.binary_dilation(
-                        mask, structure=numpy.ones(shape=(3, 3), dtype='bool')
-                    )
-                    mask = ~track[s] & mask & (slope[s] < (slope_thresh / 2))
-            # Update track and stack with result
-            track[mask] = 1
+                mask = ndimage.binary_dilation(
+                    mask, structure=numpy.ones(shape=(3, 3), dtype='bool')
+                )
+                mask = mask & (slope[s] < (slope_thresh / 2))
+                track_add = 1
+
+            # Update track with non-stream cells
+            mask = mask & ~str_mask & (track[s] == 0) & dem_m[s]
             s_i, s_j = numpy.where(mask)
-            s_i += s[0].start
-            s_j += s[1].start
+            s_i = s_i + s[0].start
+            s_j = s_j + s[1].start
+            track[(s_i, s_j)] = track_add
+
+            # Update the stack with new stream and other cells
+            mask[str_mask & (track[s] == 0)] = 1
+            s_i, s_j = numpy.where(mask)
+            s_i = s_i + s[0].start
+            s_j = s_j + s[1].start
             seeds.update(zip(s_i, s_j))
 
         alluv_out = raster(self, output_descriptor='slope').astype('uint8')
-        alluv_out[:] = track.astype('uint8')
+        alluv_out[:] = track
         alluv_out.nodataValues = [0]
         return watershed(alluv_out)
 

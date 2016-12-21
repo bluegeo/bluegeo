@@ -400,6 +400,17 @@ class raster(object):
     def array(self):
         '''**all data in memory**'''
         if self.format == 'gdal':
+            # Do a simple check for necessary no data value fixes using topleft
+            if not self.ndchecked:
+                for band in self.bands:
+                    with self.dataset as ds:
+                        tlc = ds.GetRasterBand(self.band).ReadAsArray(
+                            xoff=0, yoff=0, win_xsize=1, win_ysize=1)
+                    ds = None
+                    if numpy.isclose(tlc, self.nodata) and tlc != self.nodata:
+                        print "Warning: No data values must be fixed."
+                        self.ndchecked = True
+                        self.fix_nodata()
             with self.dataset as ds:
                 a = ds.GetRasterBand(self.band).ReadAsArray()
             ds = None
