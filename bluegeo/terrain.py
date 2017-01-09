@@ -13,9 +13,9 @@ from scipy import ndimage
 
 
 # Put a handle on the mower
-if sys.platform.startswith('linux'):
-    from mower import GrassSession
-    grassbin = '/usr/local/bin/grass70'
+# if sys.platform.startswith('linux'):
+from mower import GrassSession
+grassbin = '/usr/local/bin/grass70'
 # elif sys.platform.startswith('win'):
 #     # Ad hoc adaptation of mower for testing in a win env
 #     from mower_win import GrassSession
@@ -160,8 +160,8 @@ class watershed(raster):
         del a
         return output
 
-    def alluvium(self, dem, min_contrib_area=1E6, slope_thresh=6,
-                 stream_slope_thresh=2):
+    def alluvium(self, dem, min_contrib_area=1E6, slope_thresh=8,
+                 stream_slope_thresh=5):
         '''
         Use the derivative of stream slope to determine regions of
         aggradation to predict alluvium deposition.  Streams above the
@@ -173,7 +173,7 @@ class watershed(raster):
         a = self.array
         contrib = int(min_contrib_area / (self.csx * self.csy))
         streams = a >= contrib
-        seeds = set(zip(*numpy.where(a == contrib)))
+        seeds = set(zip(*numpy.where(streams)))
         track = numpy.zeros(shape=a.shape, dtype='uint8')
 
         # Recursively propagate downstream and delineate alluvium
@@ -210,18 +210,16 @@ class watershed(raster):
                 else:
                     track[seed] = 1
             # High slope: erosion- directed propagation at higher slopes
-            g = dem[seed] - dem[s]
-            mask = g == g.max()
+            g = (dem[seed] - dem[s]).ravel()
+            mask = numpy.argsort(g)
             if track[seed] == 2:
                 # Create a mask with correct gradient directions
-                mask = ndimage.binary_dilation(mask)
+                mask = (mask > 5).reshape(str_mask.shape)
                 mask = mask & (slope[s] < slope_thresh)
                 track_add = 2
             # Low slope: aggradation- fan outwards at shallower slopes
             else:
-                mask = ndimage.binary_dilation(
-                    mask, structure=numpy.ones(shape=(3, 3), dtype='bool')
-                )
+                mask = (mask > 3).reshape(str_mask.shape)
                 mask = mask & (slope[s] < (slope_thresh / 2))
                 track_add = 1
 

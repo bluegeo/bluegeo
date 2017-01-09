@@ -315,12 +315,12 @@ class raster(object):
             outraster.activeBand = band
             with outraster.dataset as ds:
                 ds.GetRasterBand(outraster.band).SetNoDataValue(self.nodata)
-                if self.useChunks:
-                    for a, s in self.iterchunks():
-                        outraster[s] = a
-                else:
-                    outraster[:] = self.array
             ds = None
+            if self.useChunks:
+                for a, s in self.iterchunks():
+                    outraster[s] = a
+            else:
+                outraster[:] = self.array
         del outraster
 
     def copy_ds(self, file_suffix, template=None):
@@ -800,9 +800,13 @@ class raster(object):
             path = self.generate_name('copy', 'tif', True)
             self.save_gdal_raster(path)
             input_raster = raster(path)
-            inds = input_raster.dataset
+            with input_raster.dataset as inds:
+                # The context manager does not work with ogr datasets
+                pass
         else:
-            inds = self.dataset
+            with self.dataset as inds:
+                # The context manager does not work with ogr datasets
+                pass
 
         # Get keyword args to determine what's done
         csx = kwargs.get('csx', None)
@@ -932,8 +936,9 @@ class raster(object):
                 shape = self.gdal_args_from_slice(s, self.shape)
                 shape = (shape[3], shape[2])
                 out_raster[s] = numpy.full(shape, self.nodata, self.dtype)
-
-        outds = out_raster.dataset
+        with out_raster.dataset as outds:
+            # The context manager does not work with ogr datasets
+            pass
         gdal.ReprojectImage(inds, outds, insrs, outsrs, self.interpolation)
         inds, outds = None, None
 
@@ -1015,8 +1020,8 @@ class raster(object):
         ds.SetGeoTransform((left, float(csx), 0, top, 0, csy * -1.))
         projection = raster.parse_projection(projection)
         ds.SetProjection(projection)
-        outraster = raster(ds, mode='r+')
         ds = None
+        outraster = raster(output_path, mode='r+')
         return outraster
 
     @staticmethod

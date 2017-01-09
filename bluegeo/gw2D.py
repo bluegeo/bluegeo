@@ -1,5 +1,4 @@
 from raster import *
-import numexpr as ne
 import matplotlib.pyplot as plt
 
 
@@ -8,22 +7,22 @@ class domain(object):
     Groundwater flow calculation domain.
     k is a hydraulic conductivity surface, b is a thickness surface
     '''
-    def __init__(self, k, b, length_units='m', time_units='s'):
+    def __init__(self, k, b, head_fill=0, length_units='m', time_units='s'):
         # Create a head surface
         self.nodata = -99999
         if k.shape != b.shape:
             raise ValueError('k and b have different shapes.')
         self.shape = b.shape
-        self.head = numpy.zeros(shape=self.shape, dtype='float32')
+        self.head = numpy.full(self.shape, head_fill, dtype='float32')
 
         # Create bi-directional transmissivity surfaces
         #   using harmonic means of K and b
         print "Computing transmissivity"
-        knodata = k.nodata[0]
-        bnodata = b.nodata[0]
+        knodata = k.nodata
+        bnodata = b.nodata
         self.template = raster(k)
-        k = k.load(in_memory=True)
-        b = b.load(in_memory=True)
+        k = k.array
+        b = b.array
         self.domain = (k != knodata) & (b != bnodata) & (k != 0) & (b != 0)
         # Ensure no-flow boundary created where K is zero or nodata
         self.head[~self.domain] = self.nodata
@@ -98,7 +97,7 @@ class domain(object):
                  (slice(None, None), slice(1, None)),
                  (slice(None, None), slice(0, -1)))]
         m = self.head != self.nodata
-        # Iterate and implicitly compute head using derivation at:
+        # Iterate and implicitly compute head using derivation:
         # http://inside.mines.edu/~epoeter/583/06/discussion/fdspreadsheet.htm
         resid = tolerance + 0.1
         iters = 0
@@ -156,11 +155,41 @@ class domain(object):
             # Update heads
             self.head = h
 
+        print ("%i iterations completed with a residual of %s" %
+               (iters, resid))
+
         if show_convergence:
             plt.plot(convergence)
             plt.ylabel('Residual')
             plt.xlabel('Iteration')
             plt.show()
+
+    def calculate_Q(self):
+        '''Use the head surface to calculate the steady-state flux'''
+        nbrs = [(self.t_y,
+                 (slice(0, -1), slice(None, None)),
+                 (slice(1, None), slice(None, None))),
+                (self.t_y,
+                 (slice(1, None), slice(None, None)),
+                 (slice(0, -1), slice(None, None))),
+                (self.t_x,
+                 (slice(None, None), slice(0, -1)),
+                 (slice(None, None), slice(1, None))),
+                (self.t_x,
+                 (slice(None, None), slice(1, None)),
+                 (slice(None, None), slice(0, -1)))]
+        m = self.head != self.nodata
+        for nbr in nbrs:
+            t, take, place = nbr
+            mask = m[take[0], take[1]] & m[place[0], place[1]]
+            t = t[mask]
+            calcset = den[place[0], place[1]][mask]
+            den[place[0], place[1]][mask] = ne.evaluate('calcset+t')
+            headset = self.head[take[0], take[1]][mask]
+            calcset = num[place[0], place[1]][mask]
+            num[place[0],
+                place[1]][mask] = ne.evaluate('calcset+(t*headset)')
+        self.q = q
 
     def view(self, attr='head'):
         '''View the current head surface'''
@@ -173,13 +202,12 @@ class domain(object):
 
     def saveAsRaster(self, outpath, attr='head', nodata=-99999):
         '''Save to a raster file'''
-        a = self.template.load('r+')
+        self.template.nodataValues = [nodata]
+        self.template.save_gdal_raster(outpath)
+        temp = raster(outpath, mode='r+')
         if attr == 'Q':
             # Calculate Q
-            
-            a[:] = q
+            self.calculate_Q()
+            temp[:] = self.q
         else:
-            a[:] = self.__dict__[attr]
-        del a
-        self.template.nodata = [nodata]
-        self.template.saveRaster(outpath)
+            temp[:] = self.__dict__[attr]
