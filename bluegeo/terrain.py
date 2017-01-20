@@ -5,21 +5,19 @@ Blue Geosimulation, 2016
 '''
 
 from raster import *
-import util
-import numpy.ma as ma
 import math
-import sys
 from scipy import ndimage
 
-
-# Put a handle on the mower
-# if sys.platform.startswith('linux'):
 from mower import GrassSession
 grassbin = '/usr/local/bin/grass70'
-# elif sys.platform.startswith('win'):
-#     # Ad hoc adaptation of mower for testing in a win env
-#     from mower_win import GrassSession
-#     grassbin = r'C:\Program Files\GRASS GIS 7.0.5\grass70.bat'
+
+
+class WatershedError(Exception):
+    pass
+
+
+class TopoError(Exception):
+    pass
 
 
 class watershed(raster):
@@ -56,7 +54,7 @@ class watershed(raster):
         fa_outpath = self.generate_name('fl_acc', 'tif', True)
 
         # Perform analysis using grass session
-        with GrassSession(external, grassbin=grassbin, persist=False) as gs:
+        with GrassSession(external, grassbin=grassbin, persist=False):
             from grass.pygrass.modules.shortcuts import raster as graster
             from grass.script import core as grass
             graster.external(input=external, output='surface')
@@ -110,8 +108,7 @@ class watershed(raster):
             return conv
 
         # Allocate output
-        conv = raster(self, output_descriptor='conv')
-        conv = conv.astype('float32')
+        conv = self.copy(True, 'conv').astype('float32')
         if self.useChunks:
             # Iterate chunks and calculate convergence
             for a, s in self.iterchunks(expand=size):
@@ -123,74 +120,123 @@ class watershed(raster):
 
         return watershed(conv)
 
-    def stream_slope(self, dem, min_contrib_area=1E6, iterations=1):
+    def stream_order(self, min_contrib_area):
+        '''
+        Return streams with a contributing area greate than the specified
+        threshold.  The resulting dataset includes strahler order for each
+        stream
+        '''
+        # Save a new raster if the data source format is not gdal
+        if self.format != 'gdal':
+            external = self.create_external_datasource()
+        else:
+            external = self.path
+        # Create output path
+        str_path = self.generate_name('streams', 'tif', True)
+
+        with GrassSession(external, grassbin=grass_bin):
+            from grass.pygrass.modules.shortcuts import raster as graster
+            from grass.script import core as grass
+            graster.external(input=external, output='dem')
+
+            # Compute flow accumulation threshold based on min area
+            thresh = min_contrib_area / (self.csx * self.csy)
+            grass.run_command('r.stream.extract', elevation='dem',
+                              threshold=thresh, stream_raster='streams',
+                              direction='fd')
+            grass.run_command('r.stream.order', stream_rast='streams',
+                              direction='fd', strahler="strlr")
+            graster.out_gdal('strlr', format="GTiff", output=str_path)
+
+        return watershed(str_path)
+
+    def stream_slope(self, iterations=1, streams=None, min_contrib_area=None):
         '''
         Compute the slope from cell to cell in streams with a minimum
-        contributing area.  Increase iterations to evaluate higher order
-        change. Seeded by flow accumulation, and requires a dem.
+        contributing area.  If streams are specified, they will not be
+        computed.
         '''
-        output = raster(streams)
-        a = output.load('r')
-        m = a != streams.nodata[0]
-        output.changeDataType('float32')
-        a = output.load('r+')
-        elev = dem.load('r')
+        if streams is not None:
+            with self.match_raster(streams) as dem:
+                elev = dem.array
+            strms = raster(streams)
+            m = strms.array != strms.nodata
+        else:
+            if min_contrib_area is None:
+                raise WatershedError('min_contrib_area must be specified if no'
+                                     ' stream layer is provided')
+            with watershed(self.path).stream_order(min_contrib_area) as ws:
+                m = ws.array != ws.nodata
+            elev = self.array
         # Compute stream slope
         inds = numpy.where(m)
-        diag = math.sqrt(streams.csx**2 + streams.csy**2)
-        run = numpy.array([[diag, streams.csy, diag],
-                           [streams.csx, 1, streams.csx],
-                           [diag, streams.csy, diag]])
+        diag = math.sqrt(self.csx**2 + self.csy**2)
+        run = numpy.array([[diag, self.csy, diag],
+                           [self.csx, 1, self.csx],
+                           [diag, self.csy, diag]])
+        ish, jsh = self.shape
 
         def compute(i, j):
-            i_, _i, j_, _j = util.getSlice(i, j, elev.shape)
+            s = (slice(max(0, i - 1),
+                       min(i + 2, ish)),
+                 slice(max(0, j - 1),
+                       min(j + 2, jsh)))
             base = elev[i, j]
-            rise = numpy.abs(base - elev[i_:_i, j_:_j][m[i_:_i, j_:_j]])
-            run_ = run[m[i_:_i, j_:_j]]
+            rise = numpy.abs(base - elev[s][m[s]])
+            run_ = run[m[s]]
             run_ = run_[rise != 0]
             rise = rise[rise != 0]
             if run_.size == 0:
                 return 0
             else:
                 return numpy.mean(numpy.degrees(numpy.arctan(rise / run_)))
-        slopefill = [compute(inds[0][i], inds[1][i])
-                     for i in range(inds[0].shape[0])]
-        a[m] = slopefill
-        a.flush()
-        del a
+
+        output = self.copy(True, 'str_slope')
+        a = numpy.full(output.shape, output.nodata, output.dtype)
+        for _iter in range(iterations):
+            slopefill = [compute(inds[0][i], inds[1][i])
+                         for i in range(inds[0].shape[0])]
+            a[m] = slopefill
+        output[:] = a
         return output
 
-    def alluvium(self, dem, min_contrib_area=1E6, slope_thresh=8,
-                 stream_slope_thresh=5):
+    def alluvium(self, slope_thresh=8, stream_slope_thresh=5, **kwargs):
         '''
         Use the derivative of stream slope to determine regions of
-        aggradation to predict alluvium deposition.  Streams above the
-        "min_contrib_area" will be used to seed the delineation, and
-        slopes exceeding "slope_thresh" will be avoided.
-        Seeded by flow accumulation and requires a dem.
+        aggradation to predict alluvium deposition.  The input slope threshold
+        is used as a cutoff for region delineation, which the stream slope
+        threshold is the required stream slope to initiate deposition.
+        Uses the dem as an input
+        surface, and accepts (or they will be derived):
+
+        streams: a streams raster
+        min_contrib_area: minimum contributing area to define streams
+        slope: a slope surface used to control the region delineation
         '''
-        # Reclassify flow accumulation into streams and create seed points
-        a = self.array
-        contrib = int(min_contrib_area / (self.csx * self.csy))
-        streams = a >= contrib
-        seeds = set(zip(*numpy.where(streams)))
-        track = numpy.zeros(shape=a.shape, dtype='uint8')
+        # Get or compute necessary datasets
+        streams = kwargs.get('streams', None)
+        min_contrib_area = kwargs.get('min_contrib_area', None)
+        slope = kwargs.get('slope', None)
+        if streams is None:
+            if min_contrib_area is None:
+                raise WatershedError('min_contrib_area must be specified if no'
+                                     ' stream layer is provided')
+            strslo = self.stream_slope(2, min_contrib_area=min_contrib_area)
+        else:
+            strslo = self.stream_slope(2, streams)
+        seeds = set(zip(*numpy.where(strslo.array != strslo.nodata)))
+        if slope is None:
+            slope = topo(self.path).slope().array
+
+        # Create output tracking array
+        track = numpy.zeros(shape=self.shape, dtype='uint8')
 
         # Recursively propagate downstream and delineate alluvium
-        # Get some parameters
-        ish, jsh = a.shape
-        diag = numpy.sqrt(self.csx**2 + self.csy**2)
-        run = numpy.array([[diag, self.csy, diag],
-                           [self.csx, 1, self.csx],
-                           [diag, self.csy, diag]])
-        # Compute slope
-        with topo(dem).slope() as slope_output:
-            slope = slope_output.array
         # Load elevation data into memory
-        dem = raster(dem)
-        dem_a = dem.array
-        dem_m = dem_a != dem.nodata
-        dem = dem_a
+        ish, jsh = self.shape
+        dem = self.array
+        dem_m = dem != self.nodata
+        streams = strslo.array
         while True:
             try:
                 seed = seeds.pop()
@@ -200,12 +246,10 @@ class watershed(raster):
                        min(seed[0] + 2, ish)),
                  slice(max(0, seed[1] - 1),
                        min(seed[1] + 2, jsh)))
-            str_mask = streams[s]
-            if streams[seed] & (track[seed] == 0):
-                # If stream exists calculate slope
-                sl = numpy.mean(numpy.degrees(numpy.arctan(
-                    numpy.abs(dem[seed] - dem[s][str_mask]) / run[str_mask])))
-                if sl > stream_slope_thresh:
+            str_mask = streams[s] != strso.nodata
+            if (streams[seed] != strslo.nodata) & (track[seed] == 0):
+                # If stream exists check slope and initiate growth
+                if streams[seed] > stream_slope_thresh:
                     track[seed] = 2
                 else:
                     track[seed] = 1
@@ -237,7 +281,7 @@ class watershed(raster):
             s_j = s_j + s[1].start
             seeds.update(zip(s_i, s_j))
 
-        alluv_out = raster(self, output_descriptor='slope').astype('uint8')
+        alluv_out = self.copy(True, 'alluv').astype('uint8')
         alluv_out[:] = track
         alluv_out.nodataValues = [0]
         return watershed(alluv_out)
@@ -310,7 +354,7 @@ class topo(raster):
                                local_dict=local_dict)
 
         # Allocate output
-        slope_raster = raster(self, output_descriptor='slope')
+        slope_raster = self.copy(True, 'slope')
         if self.useChunks:
             # Iterate chunks and calculate slope
             for a, s in self.iterchunks(expand=(3, 3)):
@@ -363,7 +407,7 @@ class topo(raster):
                                local_dict=local_dict)
 
         # Allocate output
-        aspect_raster = raster(self, output_descriptor='aspect')
+        aspect_raster = self.copy(True, 'aspect')
         if self.useChunks:
             # Iterate chunks and calculate aspect
             for a, s in self.iterchunks(expand=(3, 3)):
@@ -436,7 +480,7 @@ class topo(raster):
             return std
 
         # Allocate output
-        surf_rough = raster(self, output_descriptor='srf_rgh')
+        surf_rough = self.copy(True, 'srf_rgh')
         if self.useChunks:
             # Iterate chunks and calculate convergence
             for a, s in self.iterchunks(expand=size):

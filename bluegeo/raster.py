@@ -51,30 +51,30 @@ class raster(object):
     create a copy of the raster for writing if
     a function that requires modification is called.
     """
-    def __init__(self, data, mode='r', **kwargs):
+    def __init__(self, input_data, mode='r', **kwargs):
         # Record mode
         if mode in ['r', 'r+', 'w']:
             self.mode = mode
         else:
             raise RasterError('Unrecognized file mode "%s"' % mode)
 
-        # Check if data is a string
-        if isinstance(data, basestring):
+        # Check if input_data is a string
+        if isinstance(input_data, basestring):
             # If in 'w' mode, write a new file
             if self.mode == 'w':
-                self.save(data, **kwargs)
-            # Check if data is a valid file
-            elif not os.path.isfile(data):
-                raise RasterError('%s is not a file' % data)
+                self.save(input_data, **kwargs)
+            # Check if input_data is a valid file
+            elif not os.path.isfile(input_data):
+                raise RasterError('%s is not a file' % input_data)
             else:
-                # Try an HDF5 data source
+                # Try an HDF5 input_data source
                 try:
-                    with h5py.File(data, libver='latest') as ds:
+                    with h5py.File(input_data, libver='latest') as ds:
                         self.load_from_hdf5(ds)
                         self.format = 'HDF5'
                 except:
                     # Try for a gdal dataset
-                    ds = gdal.Open(data)
+                    ds = gdal.Open(input_data)
                     try:
                         gt = ds.GetGeoTransform()
                         assert gt != (0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
@@ -82,20 +82,20 @@ class raster(object):
                         ds = None
                         self.format = 'gdal'
                     except:
-                        raise RasterError('Unable to open dataset %s' % data)
+                        raise RasterError('Unable to open dataset %s' %
+                                          input_data)
         # If not a string, maybe an osgeo dataset?
-        elif isinstance(data, gdal.Dataset):
-            self.load_from_gdal(data)
+        elif isinstance(input_data, gdal.Dataset):
+            self.load_from_gdal(input_data)
             self.format = 'gdal'
         # ...or an h5py dataset
-        elif isinstance(data, h5py.File):
-            self.load_from_hdf5(data)
+        elif isinstance(input_data, h5py.File):
+            self.load_from_hdf5(input_data)
             self.format = 'HDF5'
         # ...or a raster instance
-        elif isinstance(data, raster):
-            # Create a copy of the instance, except for dataset
-            prefix = kwargs.get('output_descriptor', 'copy')
-            self.copy_ds(prefix, data)
+        elif isinstance(input_data, raster):
+            # Create pointer to other instance
+            self.__dict__.update(input_data.__dict__)
 
         # Populate other attributes
         self.activeBand = 1
@@ -195,13 +195,12 @@ class raster(object):
                     self.dtype = data.dtype.name
                 else:
                     data = data.astype(self.dtype)
-                self.dtype, self.size = self.get_data_specs(self.dtype,
-                                                            self.shape)
                 # If array is 3-D, third dimension (axis 2) are the bands
                 if data.ndim == 3:
                     self.bandCount = data.shape[2]
                 else:
                     self.bandCount = 1
+                self.dtype = data.dtype.name
             else:
                 # Load specs from shape
                 # If the shape is 3-D, third dimension (axis 2) are the bands
@@ -288,8 +287,6 @@ class raster(object):
         # Add attributes
         with self.dataset as ds:
             for key, val in self.__dict__.iteritems():
-                if key == 'garbage':
-                    continue
                 if val is None:
                     val = 'None'
                 ds.attrs[key] = val
@@ -323,21 +320,17 @@ class raster(object):
                 outraster[:] = self.array
         del outraster
 
-    def copy_ds(self, file_suffix, template=None):
+    def copy(self, empty=False, file_suffix='copy'):
         '''
         Create a copy of the underlying dataset to use for writing
         temporarily.  Used when mode is 'r' and procesing is required,
         or self is instantiated using another raster instance.
         Defaults to HDF5 format.
         '''
-        # Use another dataset as a template if specified
-        if template is not None:
-            self.__dict__.update(template.__dict__)
-
-        path = self.generate_name(file_suffix, 'h5', True)
-
-        # Create HDF5 file and datasets
-        self.save(path, None, empty=True)
+        path = self.generate_name(file_suffix, 'h5')
+        # Write to disk
+        self.save(path, empty=empty)
+        return raster(path)
 
     @property
     def size(self):
@@ -422,10 +415,12 @@ class raster(object):
     @property
     def chunks(self):
         '''Chunk shape of self'''
-        if self.format == 'gdal':
+        if hasattr(self, 'chunk_override'):
+            chunks = self.chunk_override
+        elif self.format == 'gdal':
             with self.dataset as ds:
                 chunks = ds.GetRasterBand(self.band).GetBlockSize()
-                # If no blocks exist, a single scanline will result- change this
+                # If no blocks exist, a single scanline will result
                 if chunks[0] == self.shape[1] and chunks[1] == 1:
                     lines = int((256 * 256 * self.itemsize) /
                                 (self.shape[0] * self.itemsize))
@@ -591,12 +586,12 @@ class raster(object):
 
         # Ensure they are already not the same
         if dtype == self.dtype:
-            return self
+            return self.copy(file_suffix=dtype)
 
         # Create a copy with new data type
         prvdtype = self.dtype
         self.dtype = dtype
-        out = raster(self, output_descriptor=dtype)
+        out = self.copy(emtpy=True, file_suffix=dtype)
         self.dtype = prvdtype
 
         # Complete casting
@@ -608,13 +603,23 @@ class raster(object):
         # Return casted raster
         return out
 
-    def define_projection(self, projection, overwrite=False):
+    def define_projection(self, projection):
         '''Define the raster projection'''
         if (self.projection != '' and
-                self.projection is not None) and not overwrite:
+                self.projection is not None) and self.mode == 'r':
             raise RasterError('The current raster already has a spatial'
-                              ' reference, use "overwrite=True" to replace.')
+                              ' reference, use mode="r+" to replace.')
         self.projection = self.parse_projection(projection)
+        # Write projection to output files
+        if self.format == 'gdal':
+            with self.dataset as ds:
+                ds.SetProjection(projection)
+            ds = None
+            del ds
+        else:
+            # Add as attribute
+            with self.dataset as ds:
+                ds.attrs['projection'] = projection
 
     def match_raster(self, input_raster, tolerance=1E-09):
         '''
@@ -627,10 +632,7 @@ class raster(object):
             else:
                 return False
 
-        if isinstance(input_raster, raster):
-            inrast = input_raster
-        else:
-            inrast = raster(input_raster, output_descriptor='match')
+        inrast = raster(input_raster)
 
         # Check if spatial references align
         insrs = osr.SpatialReference()
@@ -647,18 +649,18 @@ class raster(object):
                 isclose((self.left - inrast.left) % self.csx, [0, self.csx]),
                 samesrs]):
             # Simple slicing is sufficient
-            self.change_extent(inrast_bbox)
+            return self.change_extent(inrast_bbox)
         else:
             # Transform required
             print "Transforming to match rasters..."
             if samesrs:
-                self.transform(csx=inrast.csx, csy=inrast.csy,
-                               bbox=inrast_bbox,
-                               interpolation=self.interpolation)
+                return self.transform(csx=inrast.csx, csy=inrast.csy,
+                                      bbox=inrast_bbox,
+                                      interpolation=self.interpolation)
             else:
-                self.transform(csx=inrast.csx, csy=inrast.csy,
-                               projection=inrast, bbox=inrast_bbox,
-                               interpolation=self.interpolation)
+                return self.transform(csx=inrast.csx, csy=inrast.csy,
+                                      projection=inrast, bbox=inrast_bbox,
+                                      interpolation=self.interpolation)
 
     def slice_from_bbox(self, bbox):
         '''
@@ -731,10 +733,10 @@ class raster(object):
         # Check if no change
         if all([self.top == bbox[0], self.bottom == bbox[1],
                 self.left == bbox[2], self.right == bbox[3]]):
-            return
+            return self.copy(file_suffix='change_extent')
 
         # Create output dataset with new extent, and transfer self to it
-        path = self.generate_name('change_extent', 'h5', True)
+        path = self.generate_name('change_extent', 'h5')
         kwargs = {
             'projection': self.projection,
             'csx': self.csx,
@@ -745,13 +747,12 @@ class raster(object):
             'left': bbox[2],
             'nodata': self.nodata,
             'interpolationMethod': self.interpolationMethod,
-            'useChunks': self.useChunks,
-            'output_descriptor': 'ch_ext'
+            'useChunks': self.useChunks
         }
         outds = raster(path, mode='w', **kwargs)
         for band in outds.bands:
             outds[insert_slice] = self[self_slice]
-        self.__dict__.update(outds.__dict__)
+        return outds
 
     def transform(self, **kwargs):
         '''
@@ -797,7 +798,7 @@ class raster(object):
 
         # Direct to input raster dataset
         if self.format != 'gdal':
-            path = self.generate_name('copy', 'tif', True)
+            path = self.generate_name('copy', 'tif')
             self.save_gdal_raster(path)
             input_raster = raster(path)
             with input_raster.dataset as inds:
@@ -829,7 +830,7 @@ class raster(object):
         if all([i is None for i in [csx, csy, projection, bbox]]):
             print ("Warning: Did not perform transform, as no arguments"
                    " provided.")
-            return
+            return self.copy(file_suffix='transform')
 
         # Check for spatial reference change
         if projection != '':
@@ -843,7 +844,7 @@ class raster(object):
             insrs, outsrs = None, None
         if all([insrs is None, outsrs is None, csx is None, csy is None,
                 bbox is None]):
-            return
+            return self.copy(file_suffix='transform')
 
         # Refine each of the inputs, based on each of the args
         # Projection
@@ -923,7 +924,7 @@ class raster(object):
             output_srs = outsrs
         else:
             output_srs = self.projection
-        path = self.generate_name('transform', 'tif', True)
+        path = self.generate_name('transform', 'tif')
         out_raster = self.new_gdal_raster(path, shape, self.bandCount,
                                           self.dtype, bbox[2], bbox[0], csx,
                                           csy, output_srs, (256, 256))
@@ -942,16 +943,10 @@ class raster(object):
         gdal.ReprojectImage(inds, outds, insrs, outsrs, self.interpolation)
         inds, outds = None, None
 
-        # Change type to gdal and path to new raster
-        self.format = 'gdal'
-        self.path = path
+        # Return new raster
+        return raster(path)
 
-        # Update attributes from new raster
-        ds = gdal.Open(path)
-        self.load_from_gdal(ds)
-        ds = None
-
-    def generate_name(self, suffix, extension, add_to_garbage=False):
+    def generate_name(self, suffix, extension):
         '''Generate a unique file name'''
         now = datetime.now()
 
@@ -991,7 +986,6 @@ class raster(object):
                 close = numpy.isclose(a, self.nodata)
                 if numpy.any(close) and numpy.all(a != self.nodata):
                     self.nodataValues[band - 1] = numpy.asscalar(a[close][0])
-
 
     @staticmethod
     def new_gdal_raster(output_path, shape, bands, dtype, left, top, csx, csy,
@@ -1176,13 +1170,13 @@ class raster(object):
                                   ' using the "%s" operator' % op)
             num = False
         if num:
-            out = raster(self, output_descriptor=op)
+            out = self.copy(True, op)
         else:
             r.match_raster(self)
             out = r
             # Check if no copy made
             if r.path == out.path:
-                out = raster(r, output_descriptor=op)
+                out = r.copy(True, op)
         outnd = out.nodata
         nd = self.nodata
         if num:
@@ -1421,5 +1415,23 @@ class raster(object):
             for f in self.garbage:
                 try:
                     os.remove(f)
-                except Exception as e:
-                    print "Could not clean up file %s because %s" % (f, e)
+                except:
+                    continue
+
+
+# Numpy-like methods
+def copy(input_raster, empty=False, file_suffix='copy'):
+    '''Copy a raster dataset'''
+    return raster(input_raster).copy(empty=empty, file_suffix=file_suffix)
+
+
+def unique(input_raster):
+    '''Compute unique values'''
+    r = raster(input_raster)
+    if r.useChunks:
+        uniques = []
+        for a, s in r.iterchunks():
+            uniques.append(numpy.unique(a))
+        return numpy.unique(numpy.concatenate(uniques))
+    else:
+        return numpy.unique(r.array)
