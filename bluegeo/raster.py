@@ -330,7 +330,7 @@ class raster(object):
         path = self.generate_name(file_suffix, 'h5')
         # Write to disk
         self.save(path, empty=empty)
-        return raster(path)
+        return raster(path, mode='r+')
 
     @property
     def size(self):
@@ -591,7 +591,7 @@ class raster(object):
         # Create a copy with new data type
         prvdtype = self.dtype
         self.dtype = dtype
-        out = self.copy(emtpy=True, file_suffix=dtype)
+        out = self.copy(empty=True, file_suffix=dtype)
         self.dtype = prvdtype
 
         # Complete casting
