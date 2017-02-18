@@ -15,37 +15,41 @@ class domain(object):
         self.shape = b.shape
         self.head = numpy.full(self.shape, head_fill, dtype='float32')
 
-        # Create bi-directional transmissivity surfaces
-        #   using harmonic means of K and b
         print "Computing transmissivity"
         knodata = k.nodata
         bnodata = b.nodata
         self.template = raster(k)
-        k = k.array
-        b = b.array
+        k = numpy.pad(k.array, 1, 'constant', constant_values=0)
+        b = numpy.pad(b.array, 1, 'constant', constant_values=0)
         self.domain = (k != knodata) & (b != bnodata) & (k != 0) & (b != 0)
         # Ensure no-flow boundary created where K is zero or nodata
-        self.head[~self.domain] = self.nodata
-        # Compute in y-direction
-        slicemask = self.domain[:-1, :] & self.domain[1:, :]
-        b_up, k_up = b[:-1, :][slicemask], k[:-1, :][slicemask]
-        tup = ne.evaluate('b_up*k_up')
-        del b_up, k_up
-        b_down, k_down = b[1:, :][slicemask], k[1:, :][slicemask]
-        tdown = ne.evaluate('b_down*k_down')
-        del b_down, k_down
-        self.t_y = numpy.zeros(shape=b[1:, :].shape, dtype='float32')
-        self.t_y[slicemask] = ne.evaluate('2/((1/tup)+(1/tdown))')
-        # Compute in x-direction
-        slicemask = self.domain[:, 1:] & self.domain[:, :-1]
-        b_left, k_left = b[:, 1:][slicemask], k[:, 1:][slicemask]
-        tleft = ne.evaluate('b_left*k_left')
-        del b_left, k_left
-        b_right, k_right = b[:, :-1][slicemask], k[:, :-1][slicemask]
-        tright = ne.evaluate('b_right*k_right')
-        del b_right, k_right
-        self.t_x = numpy.zeros(shape=b[:, 1:].shape, dtype='float32')
-        self.t_x[slicemask] = ne.evaluate('2/((1/tleft)+(1/tright))')
+        self.head[~self.domain[1:-1, 1:-1]] = self.nodata
+        # Compute transmissivity in all directions
+        k_0, b_0 = k[1:-1, 1:-1], b[1:-1, 1:-1]
+        # +y
+        slicemask = self.domain[1:-1, 1:-1] & self.domain[:-2, 1:-1]
+        k_1, b_1 = k[:-2, 1:-1], b[:-2, 1:-1]
+        self.tup = ne.evaluate(
+            'where(slicemask,(2/((1/b_1)+(1/b_0)))*(2/((1/k_1)+(1/k_0))),0)'
+        )
+        # -y
+        slicemask = self.domain[1:-1, 1:-1] & self.domain[2:, 1:-1]
+        k_1, b_1 = k[2:, 1:-1], b[2:, 1:-1]
+        self.tdown = ne.evaluate(
+            'where(slicemask,(2/((1/b_1)+(1/b_0)))*(2/((1/k_1)+(1/k_0))),0)'
+        )
+        # -x
+        slicemask = self.domain[1:-1, 1:-1] & self.domain[1:-1, :-2]
+        k_1, b_1 = k[1:-1, :-2], b[1:-1, :-2]
+        self.tleft = ne.evaluate(
+            'where(slicemask,(2/((1/b_1)+(1/b_0)))*(2/((1/k_1)+(1/k_0))),0)'
+        )
+        # +x
+        slicemask = self.domain[1:-1, 1:-1] & self.domain[1:-1, 2:]
+        k_1, b_1 = k[1:-1, 2:], b[1:-1, 2:]
+        self.tright = ne.evaluate(
+            'where(slicemask,(2/((1/b_1)+(1/b_0)))*(2/((1/k_1)+(1/k_0))),0)'
+        )
 
     def addBoundary(self, indices, type='no-flow', values=None):
         '''
@@ -55,13 +59,13 @@ class domain(object):
         "values" must be specified (and match the indices size).
         '''
         if type == 'no-flow':
-            self.head[indices] = self.nodata
+            self.head[indices] = self.nodata # Need to fix this
         elif type == 'constant':
             intcon = numpy.full(self.shape, self.nodata, dtype='float32')
             if hasattr(self, 'constantmask'):
                 intcon[self.constantmask] = self.constantvalues
             intcon[indices] = values
-            intcon[~self.domain] = self.nodata
+            intcon[~self.domain[1:-1, 1:-1]] = self.nodata
             self.constantmask = intcon != self.nodata
             self.constantvalues = intcon[self.constantmask]
         elif type == 'flux':
@@ -83,77 +87,63 @@ class domain(object):
         # Apply constant head
         if hasattr(self, 'constantmask'):
             self.head[self.constantmask] = self.constantvalues
+
+        # Create a copy of head for calculation
+        head = numpy.pad(self.head, 1, 'constant', constant_values=self.nodata)
         # Create iterator for neighbourhood calculations
-        nbrs = [(self.t_y,
-                 (slice(0, -1), slice(None, None)),
-                 (slice(1, None), slice(None, None))),
-                (self.t_y,
-                 (slice(1, None), slice(None, None)),
-                 (slice(0, -1), slice(None, None))),
-                (self.t_x,
-                 (slice(None, None), slice(0, -1)),
-                 (slice(None, None), slice(1, None))),
-                (self.t_x,
-                 (slice(None, None), slice(1, None)),
-                 (slice(None, None), slice(0, -1)))]
-        m = self.head != self.nodata
+        nbrs = [('up', slice(0, -2), slice(1, -1)),
+                ('down', slice(2, None), slice(1, -1)),
+                ('left', slice(1, -1), slice(0, -2)),
+                ('right', slice(1, -1), slice(2, None))]
+        m = head != self.nodata
         # Iterate and implicitly compute head using derivation:
         # http://inside.mines.edu/~epoeter/583/06/discussion/fdspreadsheet.htm
         resid = tolerance + 0.1
         iters = 0
         convergence = []
+        # Create calculation set
+        flux = numpy.zeros(shape=self.shape, dtype='float32')
+        hdd = numpy.zeros(shape=self.shape, dtype='float32')
+        if hasattr(self, 'fluxmask'):
+            flux[self.fluxmask] = self.fluxvalues
+        if hasattr(self, 'hddpmask'):
+            hdd[self.hddpmask] = self.hddpvalues
+        calc_set = {'f': flux, 'tup': self.tup, 'tdown': self.tdown,
+                    'tleft': self.tleft, 'tright': self.tright,
+                    'hdd': hdd}
+        den = ne.evaluate('tup+tdown+tleft+tright', local_dict=calc_set)
+        calc_set.update({'den': den})
         while resid > tolerance:
             iters += 1
             # Copy head from previous iteration
-            h = numpy.copy(self.head)
+            h = numpy.copy(head)
 
-            # Create numerator and denominator surfaces
-            num = numpy.zeros(shape=self.shape, dtype='float32')
-            den = numpy.zeros(shape=self.shape, dtype='float32')
-
-            # Calculate numerator and denominators
+            # Add head views to calculation set
             for nbr in nbrs:
-                t, take, place = nbr
-                mask = m[take[0], take[1]] & m[place[0], place[1]]
-                t = t[mask]
-                calcset = den[place[0], place[1]][mask]
-                den[place[0], place[1]][mask] = ne.evaluate('calcset+t')
-                headset = self.head[take[0], take[1]][mask]
-                calcset = num[place[0], place[1]][mask]
-                num[place[0],
-                    place[1]][mask] = ne.evaluate('calcset+(t*headset)')
-
-            # Add boundary conditions to numerator
-            if hasattr(self, 'hddpmask'):
-                pass
-            if hasattr(self, 'fluxmask'):
-                calcset = num[self.fluxmask]
-                values = self.fluxvalues
-                num[self.fluxmask] = ne.evaluate('calcset+values')
-
-            # Isolated and stagnant cells maintain previous values
-            stagnant = m & (den == 0) & (num == 0)
+                name, i_slice, j_slice = nbr
+                calc_set['h%s' % name] = head[i_slice, j_slice]
 
             # Calculate head at output
-            num, den = num[m], den[m]
-            h[m] = ne.evaluate('num/den')
+            h[1:-1, 1:-1] = ne.evaluate(
+                'where(den>0,((hup*tup)+(hdown*tdown)+(hleft*tleft)+'
+                '(hright*tright)+f+hdd)/den,0)',
+                local_dict=calc_set
+            )
 
             # Replace constant head values
             if hasattr(self, 'constantmask'):
-                h[self.constantmask] = self.constantvalues
-
-            # Replace stagnant values
-            h[stagnant] = self.head[stagnant]
+                h[1:-1, 1:-1][self.constantmask] = self.constantvalues
 
             # Compute residual
-            resid = numpy.max(numpy.abs(self.head - h))
+            resid = numpy.max(numpy.abs(head - h))
             convergence.append(resid)
             if iters == max_iter:
                 print "No convergence, with a residual of %s" % (resid)
                 break
 
             # Update heads
-            self.head = h
+            head = h
+        self.head = head[1:-1, 1:-1]
 
         print ("%i iterations completed with a residual of %s" %
                (iters, resid))
@@ -210,4 +200,6 @@ class domain(object):
             self.calculate_Q()
             temp[:] = self.q
         else:
-            temp[:] = self.__dict__[attr]
+            a = self.__dict__[attr]
+            a[~self.domain[1:-1, 1:-1]] = nodata
+            temp[:] = a

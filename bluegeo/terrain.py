@@ -8,8 +8,11 @@ from raster import *
 import math
 from scipy import ndimage
 
-from mower import GrassSession
-grassbin = '/usr/local/bin/grass70'
+try:
+    from mower import GrassSession
+    grassbin = '/usr/local/bin/grass70'
+except ImportError:
+    print "Warning: Grass functions not available"
 
 
 class WatershedError(Exception):
@@ -65,13 +68,13 @@ class watershed(raster):
 
         return watershed(fd_outpath), watershed(fa_outpath)
 
-    def convergence(self, size=(11, 11)):
+    def convergence(self, size=(11, 11), fd=None):
         '''
         Compute the relative convergence of flow vectors (uses directions 1 to
         8, which are derived from flow direction)
         '''
         def eval_conv(a):
-            nd = self.nodata
+            nd = fd.nodata
             mask = (a > 0) & (a != nd)
 
             # Convert a into angles
@@ -107,16 +110,23 @@ class watershed(raster):
             conv[b['a%s' % c] == nd] = nd
             return conv
 
+        # Calculate fa if not specified
+        if fd is None:
+            fa, fd = self.route()
+        else:
+            fd = raster(fd)
+            if 'int' not in fd.dtype:
+                fd = fd.astype('int32')
         # Allocate output
-        conv = self.copy(True, 'conv').astype('float32')
-        if self.useChunks:
+        conv = self.copy(True, 'conv')
+        if fd.useChunks:
             # Iterate chunks and calculate convergence
-            for a, s in self.iterchunks(expand=size):
+            for a, s in fd.iterchunks(expand=size):
                 s_ = truncate_slice(s, size)
-                conv[s_] = eval_conv(a)
+                conv[s_] = eval_conv(a).astype('float32')
         else:
             # Calculate over all data
-            conv[:] = eval_conv(self.array)
+            conv[:] = eval_conv(fd.array)
 
         return watershed(conv)
 
@@ -132,7 +142,7 @@ class watershed(raster):
         else:
             external = self.path
         # Create output path
-        str_path = self.generate_name('streams', 'tif', True)
+        str_path = self.generate_name('streams', 'tif')
 
         with GrassSession(external, grassbin=grass_bin):
             from grass.pygrass.modules.shortcuts import raster as graster
@@ -150,7 +160,19 @@ class watershed(raster):
 
         return watershed(str_path)
 
-    def stream_slope(self, iterations=1, streams=None, min_contrib_area=None):
+    def stream_reclass(self, fa, min_contrib_area):
+        '''
+        Reclassify a flow accumulation dataset
+        '''
+        fa_rast = raster(fa)
+        st = fa_rast.astype('uint8')
+        st[:] = (fa_rast.array > (min_contrib_area /
+                                  (st.csx * st.csy))).astype('uint8')
+        st.nodataValues = [0]
+        return st
+
+    def stream_slope(self, iterations=1, streams=None, min_contrib_area=None,
+                     fa=None):
         '''
         Compute the slope from cell to cell in streams with a minimum
         contributing area.  If streams are specified, they will not be
@@ -165,8 +187,14 @@ class watershed(raster):
             if min_contrib_area is None:
                 raise WatershedError('min_contrib_area must be specified if no'
                                      ' stream layer is provided')
-            with watershed(self.path).stream_order(min_contrib_area) as ws:
-                m = ws.array != ws.nodata
+            if fa is not None:
+                with watershed(
+                    self.path
+                ).stream_reclass(fa, min_contrib_area) as ws:
+                    m = ws.array != ws.nodata
+            else:
+                with watershed(self.path).stream_order(min_contrib_area) as ws:
+                    m = ws.array != ws.nodata
             elev = self.array
         # Compute stream slope
         inds = numpy.where(m)
@@ -200,7 +228,7 @@ class watershed(raster):
         output[:] = a
         return output
 
-    def alluvium(self, slope_thresh=8, stream_slope_thresh=5, **kwargs):
+    def alluvium(self, slope_thresh=6, stream_slope_thresh=5, **kwargs):
         '''
         Use the derivative of stream slope to determine regions of
         aggradation to predict alluvium deposition.  The input slope threshold
@@ -215,13 +243,12 @@ class watershed(raster):
         '''
         # Get or compute necessary datasets
         streams = kwargs.get('streams', None)
-        min_contrib_area = kwargs.get('min_contrib_area', None)
+        min_contrib_area = kwargs.get('min_contrib_area', 1E04)
         slope = kwargs.get('slope', None)
+        fa = kwargs.get('fa', None)
         if streams is None:
-            if min_contrib_area is None:
-                raise WatershedError('min_contrib_area must be specified if no'
-                                     ' stream layer is provided')
-            strslo = self.stream_slope(2, min_contrib_area=min_contrib_area)
+            strslo = self.stream_slope(2, min_contrib_area=min_contrib_area,
+                                       fa=fa)
         else:
             strslo = self.stream_slope(2, streams)
         seeds = set(zip(*numpy.where(strslo.array != strslo.nodata)))
@@ -246,7 +273,7 @@ class watershed(raster):
                        min(seed[0] + 2, ish)),
                  slice(max(0, seed[1] - 1),
                        min(seed[1] + 2, jsh)))
-            str_mask = streams[s] != strso.nodata
+            str_mask = streams[s] != strslo.nodata
             if (streams[seed] != strslo.nodata) & (track[seed] == 0):
                 # If stream exists check slope and initiate growth
                 if streams[seed] > stream_slope_thresh:
@@ -284,6 +311,70 @@ class watershed(raster):
         alluv_out = self.copy(True, 'alluv').astype('uint8')
         alluv_out[:] = track
         alluv_out.nodataValues = [0]
+        return watershed(alluv_out)
+
+    def alluvium2(self, min_dep=0, max_dep=5, benches=1, **kwargs):
+        '''
+        Stuff
+        '''
+        min_contrib_area = kwargs.get('min_contrib_area', 1E04)
+        slope = kwargs.get('slope', None)
+        if slope is None:
+            with topo(self.path).slope() as slope:
+                sl = slope.array
+                slnd = slope.nodata
+        else:
+            slope = raster(slope)
+            sl = slope.array
+            slnd = slope.nodata
+        streams = kwargs.get('streams', None)
+        if streams is None:
+            with self.stream_slope(
+                min_contrib_area=min_contrib_area
+            ) as strslo:
+                sa = strslo.array
+                sand = strslo.nodata
+        else:
+            with self.stream_slope(streams=streams) as strslo:
+                sa = strslo.array
+                sand = strslo.nodata
+        elev = self.array
+
+        # First phase
+        sa_m = sa != sand
+        sl_m = sl != slnd
+        alluv = sa_m.astype('uint8')
+        slope_m = sl_m & (sl >= min_dep) & (sl <= max_dep)
+        labels, num = ndimage.label(slope_m, numpy.ones(shape=(3, 3),
+                                                        dtype='bool'))
+        # Find mean stream slopes within regions
+        str_labels = numpy.copy(labels)
+        str_labels[~sa_m] = 0
+        un_lbl = numpy.unique(str_labels[str_labels != 0])
+        min_slopes = ndimage.minimum(sa, str_labels, un_lbl)
+        max_slopes = ndimage.maximum(sa, str_labels, un_lbl)
+        # Find max elevation of streams within regions
+        max_elev = ndimage.maximum(elev, str_labels, un_lbl)
+
+        # Iterate stream labels and assign regions based on elevation and slope
+        for i, reg in enumerate(un_lbl):
+            if reg == 0:
+                continue
+            # Modify region to reflect stream slope variance and max elevation
+            m = ((labels == reg) & (sl >= min_slopes[i]) &
+                 (sl <= max_slopes[i]) & (elev < max_elev[i]))
+            alluv[m] = 1
+
+        # Remove regions not attached to a stream
+        labels, num = ndimage.label(alluv, numpy.ones(shape=(3, 3),
+                                                      dtype='bool'))
+        alluv = numpy.zeros(shape=alluv.shape, dtype='uint8')
+        for reg in numpy.unique(labels[sa_m]):
+            alluv[labels == reg] = 1
+
+        alluv_out = self.copy(True, 'alluv').astype('uint8')
+        alluv_out.nodataValues = [0]
+        alluv_out[:] = alluv
         return watershed(alluv_out)
 
 
@@ -498,8 +589,8 @@ def truncate_slice(s, size):
     i, j = size
     ifr = int(math.ceil((i - 1) / 2.))
     jfr = int(math.ceil((j - 1) / 2.))
-    ito = int((i - 1) / 2)
-    jto = int((j - 1) / 2)
+    ito = int((i - 1) / 2.)
+    jto = int((j - 1) / 2.)
     s_ = s[0].start + ifr
     s__ = s[1].start + jfr
     _s = s[0].stop - ito

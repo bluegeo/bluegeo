@@ -4,8 +4,10 @@ Raster data interfacing and manipulation library
 '''
 
 import os
+import shutil
 import numbers
 import decimal
+from copy import deepcopy
 from datetime import datetime
 from contextlib import contextmanager
 import numpy
@@ -62,7 +64,7 @@ class raster(object):
         if isinstance(input_data, basestring):
             # If in 'w' mode, write a new file
             if self.mode == 'w':
-                self.save(input_data, **kwargs)
+                self.build_new_raster(input_data, **kwargs)
             # Check if input_data is a valid file
             elif not os.path.isfile(input_data):
                 raise RasterError('%s is not a file' % input_data)
@@ -157,75 +159,12 @@ class raster(object):
         self.shape = tuple(self.shape)
         self.path = str(ds.filename)
 
-    def save(self, output_path, compression='lzf', empty=False, **kwargs):
+    def save_as(self, output_path, compression='lzf', empty=False, new=False,
+                data=None):
         '''
         Save to a new file, and use with self
         '''
-        # Get kwargs- for building a new raster
-        build_raster = False
-        if len(kwargs) > 0:
-            build_raster = True
-            self.projection = self.parse_projection(
-                kwargs.get('projection', None))
-            self.csy = float(kwargs.get('csy', 1))
-            self.csx = float(kwargs.get('csx', 1))
-            self.dtype = kwargs.get('dtype', None)
-            self.left = float(kwargs.get('left', 0))
-            self.shape = kwargs.get('shape', None)
-            self.interpolationMethod = kwargs.get('interpolationMethod',
-                                                  'nearest')
-            self.useChunks = kwargs.get('useChunks', True)
-            data = kwargs.get('data', None)
-            if data is None and self.shape is None:
-                raise RasterError('Either "data" or "shape" must be specified'
-                                  ' when building a new raster.')
-            if numexpr_:
-                self.aMethod = 'ne'
-            else:
-                self.aMethod = 'np'
-        # Build the new raster if necessary
-        if build_raster:
-            if data is not None:
-                # Get specs from data
-                data = numpy.array(data)
-                if data.ndim == 1:
-                    data = data.reshape((1, data.shape[0]))
-                self.shape = (data.shape[0], data.shape[1])
-                if self.dtype is None:
-                    self.dtype = data.dtype.name
-                else:
-                    data = data.astype(self.dtype)
-                # If array is 3-D, third dimension (axis 2) are the bands
-                if data.ndim == 3:
-                    self.bandCount = data.shape[2]
-                else:
-                    self.bandCount = 1
-                self.dtype = data.dtype.name
-            else:
-                # Load specs from shape
-                # If the shape is 3-D, third dimension (axis 2) are the bands
-                if len(self.shape) == 3:
-                    self.bandCount = self.shape[2]
-                else:
-                    # If only one row and 1D, change to 2D
-                    if len(self.shape) == 1:
-                        self.shape = (1, self.shape[0])
-                    self.bandCount = 1
-                self.shape = (self.shape[0], self.shape[1])
-                if self.dtype is None:
-                    self.dtype = 'float32'
-            # Use shape to build arbitary top if not specified
-            self.top = float(kwargs.get('top', self.shape[0] * self.csy))
-            self.nodataValues = kwargs.get('nodata', None)
-            if self.nodataValues is None:
-                self.nodataValues = [0 for i in self.bands]
-            if type(self.nodataValues) != list:
-                self.nodataValues = [self.nodataValues]
-
-        # Recompute right and bottom to be certain they're right
-        self.bottom = self.top - (self.csy * self.shape[0])
-        self.right = self.left + (self.csx * self.shape[1])
-
+        # Create output dataset
         # Check compression
         if compression not in [None, 'lzf', 'gzip', 'szip']:
             raise RasterError('Unrecognized compression "%s"' % compression)
@@ -234,28 +173,16 @@ class raster(object):
         if output_path.split('.')[-1] != 'h5':
             output_path = output_path + '.h5'
 
-        # Change mode to read/write
-        self.mode = 'r+'
-        # Keep format in 'gdal' in case reading from self still
-        if not hasattr(self, 'format'):
-            self.format = 'HDF5'
-        if not hasattr(self, 'path'):
-            self.path = output_path
-
         # Create new HDF5 file
         with h5py.File(output_path, mode='w', libver='latest') as newfile:
             # Copy data from data source to new file
-            try:
-                prvb = self.activeBand
-            except:
-                self.activeBand = 1
-                prvb = 1
+            prvb = self.activeBand
             for band in self.bands:
                 ds = newfile.create_dataset(str(band), self.shape,
                                             dtype=self.dtype,
                                             compression=compression,
                                             chunks=self.chunks)
-                if build_raster:
+                if new:
                     if data is not None:
                         if data.ndim == 3:
                             ds[:] = data[:, :, band - 1]
@@ -280,16 +207,107 @@ class raster(object):
                         else:
                             ds[:] = self.array
                 del ds
-        self.format = 'HDF5'
-        self.path = output_path
-        self.activeBand = prvb
 
-        # Add attributes
-        with self.dataset as ds:
-            for key, val in self.__dict__.iteritems():
+            # Add attributes to new file
+            update_dict = deepcopy(self.__dict__)
+            update_dict.update(
+                {
+                    'mode': 'r+',
+                    'format': 'HDF5',
+                    'path': output_path,
+                    'bottom': self.top - (self.csy * self.shape[0]),
+                    'right': self.left + (self.csx * self.shape[1])
+                }
+            )
+            for key, val in update_dict.iteritems():
                 if val is None:
                     val = 'None'
-                ds.attrs[key] = val
+                newfile.attrs[key] = val
+
+        self.activeBand = prvb
+
+        return raster(output_path, mode='r+')
+
+    def build_new_raster(self, path, **kwargs):
+        '''
+        Build a new raster from a set of keyword args
+        '''
+        # Get kwargs- for building the new raster
+        self.projection = self.parse_projection(
+            kwargs.get('projection', None))
+        self.csy = float(kwargs.get('csy', 1))
+        self.csx = float(kwargs.get('csx', 1))
+        self.dtype = kwargs.get('dtype', None)
+        self.left = float(kwargs.get('left', 0))
+        self.shape = kwargs.get('shape', None)
+        self.interpolationMethod = kwargs.get('interpolationMethod',
+                                              'nearest')
+        compression = kwargs.get('compression', 'lzf')
+        self.useChunks = kwargs.get('useChunks', True)
+        data = kwargs.get('data', None)
+        if data is None and self.shape is None:
+            raise RasterError('Either "data" or "shape" must be specified'
+                              ' when building a new raster.')
+        if numexpr_:
+            self.aMethod = 'ne'
+        else:
+            self.aMethod = 'np'
+
+        # Build it
+        if data is not None:
+            # Get specs from data
+            data = numpy.array(data)
+            if data.ndim == 1:
+                data = data.reshape((1, data.shape[0]))
+            self.shape = (data.shape[0], data.shape[1])
+            if self.dtype is None:
+                self.dtype = data.dtype.name
+            else:
+                data = data.astype(self.dtype)
+            # If array is 3-D, third dimension (axis 2) are the bands
+            if data.ndim == 3:
+                self.bandCount = data.shape[2]
+            else:
+                self.bandCount = 1
+            self.dtype = data.dtype.name
+        else:
+            # Load specs from shape
+            # If the shape is 3-D, third dimension (axis 2) are the bands
+            if len(self.shape) == 3:
+                self.bandCount = self.shape[2]
+            else:
+                # If only one row and 1D, change to 2D
+                if len(self.shape) == 1:
+                    self.shape = (1, self.shape[0])
+                self.bandCount = 1
+            self.shape = (self.shape[0], self.shape[1])
+            if self.dtype is None:
+                self.dtype = 'float32'
+        # Use shape to build arbitrary top if not specified
+        self.top = float(kwargs.get('top', self.shape[0] * self.csy))
+        self.nodataValues = kwargs.get('nodata', None)
+        if self.nodataValues is None:
+            self.nodataValues = [0 for i in self.bands]
+        if type(self.nodataValues) != list:
+            self.nodataValues = [self.nodataValues]
+
+        self.activeBand = 1
+        self.format = 'HDF5'
+        self.mode = 'r+'
+
+        new_rast = self.save_as(path, compression=compression, new=True,
+                                data=data)
+        self.__dict__.update(new_rast.__dict__)
+
+    def save(self, output_path, compression='lzf', empty=False):
+        '''
+        Update attributes to current file
+        '''
+        if self.mode != 'r+':
+            raise RasterError('Raster is open as read-only. Change mode to'
+                              ' "r+" to modify')
+        # Need to implement this method (just update the attributes of the
+        #   current file)
 
     def save_gdal_raster(self, output_path, compress=True):
         '''
@@ -328,9 +346,8 @@ class raster(object):
         Defaults to HDF5 format.
         '''
         path = self.generate_name(file_suffix, 'h5')
-        # Write to disk
-        self.save(path, empty=empty)
-        return raster(path, mode='r+')
+        # Write new file and return raster
+        return self.save_as(path, empty=empty)
 
     @property
     def size(self):
@@ -503,16 +520,24 @@ class raster(object):
         # Parse expand arg (for chunk overlap)
         if type(expand) in [int, float, numpy.ndarray]:
             i = j = int(expand)
-        elif type(expand) == tuple:
+        elif type(expand) == tuple or type(expand) == list:
             i, j = map(int, expand)
         else:
             raise RasterError('Unable to interpret the expand argument "%s" of'
                               ' type %s' % (expand, type(expand).__name__))
         # Change expand to an edge
-        ifr = int(numpy.ceil((i - 1) / 2.))
-        jfr = int(numpy.ceil((j - 1) / 2.))
-        ito = int((i - 1) / 2)
-        jto = int((j - 1) / 2)
+        if i != 0:
+            ifr = int(numpy.ceil((i - 1) / 2.))
+            ito = int((i - 1) / 2.)
+        else:
+            ifr = 0
+            ito = 0
+        if j != 0:
+            jfr = int(numpy.ceil((j - 1) / 2.))
+            jto = int((j - 1) / 2.)
+        else:
+            jfr = 0
+            jto = 0
 
         # Expand chunks to fill cache
         if fill_cache:
@@ -574,7 +599,7 @@ class raster(object):
                               ' trying to save a GDAL raster' % dtype)
 
     def astype(self, dtype):
-        '''Change the data type of self'''
+        '''Change the data type of self and return copy'''
         # Check the input
         try:
             dtype = dtype.lower()
@@ -583,7 +608,6 @@ class raster(object):
                              'float64']
         except:
             raise RasterError('Unrecognizable data type "%s"' % dtype)
-
         # Ensure they are already not the same
         if dtype == self.dtype:
             return self.copy(file_suffix=dtype)
@@ -599,6 +623,8 @@ class raster(object):
             out.activeBand = band
             for a, s in self.iterchunks():
                 out[s] = a.astype(dtype)
+            out.nodataValues[band - 1] =\
+                numpy.asscalar(numpy.array(out.nodata).astype(dtype))
 
         # Return casted raster
         return out
@@ -928,6 +954,7 @@ class raster(object):
         out_raster = self.new_gdal_raster(path, shape, self.bandCount,
                                           self.dtype, bbox[2], bbox[0], csx,
                                           csy, output_srs, (256, 256))
+
         # Set/fill nodata value
         for band in out_raster.bands:
             with out_raster.dataset as ds:
@@ -940,6 +967,7 @@ class raster(object):
         with out_raster.dataset as outds:
             # The context manager does not work with ogr datasets
             pass
+
         gdal.ReprojectImage(inds, outds, insrs, outsrs, self.interpolation)
         inds, outds = None, None
 
@@ -996,9 +1024,9 @@ class raster(object):
             comp = 'COMPRESS=LZW'
         else:
             comp = 'COMPRESS=NONE'
-        # If the chunk size is the same as the raster size the TIFF driver
+        # When the chunk sizes are close to the overall shape the TIFF driver
         #   goes bonkers, so do not tile in this case.
-        if chunks[1] == shape[1] or chunks[0] == shape[0]:
+        if chunks[1] * 2 > shape[1] or chunks[0] * 2 > shape[0]:
             blockxsize, blockysize, tiled = ('BLOCKXSIZE=0', 'BLOCKYSIZE=0',
                                              'TILED=NO')
         else:
