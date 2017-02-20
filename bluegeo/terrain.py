@@ -10,7 +10,7 @@ from scipy import ndimage
 
 try:
     from mower import GrassSession
-    grassbin = '/usr/local/bin/grass70'
+    grassbin = 'grass'
 except ImportError:
     print "Warning: Grass functions not available"
 
