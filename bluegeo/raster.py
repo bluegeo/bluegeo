@@ -1126,6 +1126,32 @@ class raster(object):
             win_ysize = stop - yoff
         return xoff, yoff, win_xsize, win_ysize
 
+    def max(self):
+        """
+        Collect the maximum
+        :return: Ummm...the maximum value
+        """
+        if self.useChunks:
+            stack = []
+            for a, s in self.iterchunks():
+                stack.append(numpy.max(a[a != self.nodata]))
+            return max(stack)
+        else:
+            return numpy.max(self.array[self.array != self.nodata])
+
+    def min(self):
+        """
+        Collect the maximum
+        :return: Ummm...the minimum value
+        """
+        if self.useChunks:
+            stack = []
+            for a, s in self.iterchunks():
+                stack.append(numpy.min(a[a != self.nodata]))
+            return min(stack)
+        else:
+            return numpy.min(self.array[self.array != self.nodata])
+
     def __getitem__(self, s):
         if self.format == 'gdal':
             # Do a simple check for necessary no data value fixes using topleft
@@ -1188,6 +1214,7 @@ class raster(object):
                                   ' info:\n%s' % e)
 
     def perform_operation(self, r, op):
+        opstrrepr = {'/': 'div', '*': 'mul', '+': 'plu', '-': 'mnu'}
         try:
             if all([isinstance(x, numbers.Number)
                     for x in (0, 0.0, 0j, decimal.Decimal(r))]):
@@ -1198,13 +1225,13 @@ class raster(object):
                                   ' using the "%s" operator' % op)
             num = False
         if num:
-            out = self.copy(True, op)
+            out = self.copy(True, opstrrepr[op])
         else:
             r.match_raster(self)
             out = r
             # Check if no copy made
             if r.path == out.path:
-                out = r.copy(True, op)
+                out = r.copy(True, opstrrepr[op])
         outnd = out.nodata
         nd = self.nodata
         if num:
@@ -1449,17 +1476,47 @@ class raster(object):
 
 # Numpy-like methods
 def copy(input_raster, empty=False, file_suffix='copy'):
-    '''Copy a raster dataset'''
+    """Copy a raster dataset"""
     return raster(input_raster).copy(empty=empty, file_suffix=file_suffix)
 
 
 def unique(input_raster):
-    '''Compute unique values'''
+    """Compute unique values"""
     r = raster(input_raster)
     if r.useChunks:
         uniques = []
         for a, s in r.iterchunks():
-            uniques.append(numpy.unique(a))
+            uniques.append(numpy.unique(a[a != r.nodata]))
         return numpy.unique(numpy.concatenate(uniques))
     else:
-        return numpy.unique(r.array)
+        return numpy.unique(r.array[r.array != r.nodata])
+
+def min(input_raster):
+    """
+    Calculate the minimum value
+    :param input_raster: A raster-compatible object
+    :return: Minimum value
+    """
+    r = raster(input_raster)
+    if self.useChunks:
+        stack = []
+        for a, s in r.iterchunks():
+            stack.append(numpy.min(a[a != r.nodata]))
+        return min(stack)
+    else:
+        return numpy.min(r.array[r.array != r.nodata])
+
+def max(input_raster):
+    """
+    Calculate the maximum value
+    :param input_raster: A raster-compatible object
+    :return: Maximum value
+    """
+    r = raster(input_raster)
+    if self.useChunks:
+        stack = []
+        for a, s in r.iterchunks():
+            stack.append(numpy.max(a[a != r.nodata]))
+        return max(stack)
+    else:
+        return numpy.max(r.array[r.array != r.nodata])
