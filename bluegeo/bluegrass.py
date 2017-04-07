@@ -25,8 +25,7 @@ class GrassSession():
         if temp is not None:
             self.tempdir = temp
         else:
-            with tempfile.NamedTemporaryFile() as tf:
-                self.tempdir = os.path.dirname(tf)
+            self.tempdir = tempfile.gettempdir()
         self.persist = persist
 
         # if src
