@@ -172,7 +172,7 @@ class watershed(raster):
         return st
 
     def stream_slope(self, iterations=1, streams=None, min_contrib_area=None,
-                     fa=None):
+                     fa=None, units='degrees'):
         '''
         Compute the slope from cell to cell in streams with a minimum
         contributing area.  If streams are specified, they will not be
@@ -217,7 +217,10 @@ class watershed(raster):
             if run_.size == 0:
                 return 0
             else:
-                return numpy.mean(numpy.degrees(numpy.arctan(rise / run_)))
+                if units == 'degrees':
+                    return numpy.mean(numpy.degrees(numpy.arctan(rise / run_)))
+                else:
+                    return numpy.mean(rise / run_) * 100
 
         output = self.copy(True, 'str_slope')
         a = numpy.full(output.shape, output.nodata, output.dtype)
