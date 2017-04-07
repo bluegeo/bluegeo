@@ -205,10 +205,10 @@ class watershed(raster):
         ish, jsh = self.shape
 
         def compute(i, j):
-            s = (slice(max(0, i - 1),
-                       min(i + 2, ish)),
-                 slice(max(0, j - 1),
-                       min(j + 2, jsh)))
+            s = (slice(max([0, i - 1]),
+                       min([i + 2, ish])),
+                 slice(max([0, j - 1]),
+                       min([j + 2, jsh])))
             base = elev[i, j]
             rise = numpy.abs(base - elev[s][m[s]])
             run_ = run[m[s]]
