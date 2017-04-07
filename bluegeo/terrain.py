@@ -144,7 +144,7 @@ class watershed(raster):
         # Create output path
         str_path = self.generate_name('streams', 'tif')
 
-        with GrassSession(external, grassbin=grass_bin):
+        with GrassSession(external, grassbin=grassbin):
             from grass.pygrass.modules.shortcuts import raster as graster
             from grass.script import core as grass
             graster.external(input=external, output='dem')
