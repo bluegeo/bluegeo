@@ -1491,7 +1491,7 @@ def unique(input_raster):
     else:
         return numpy.unique(r.array[r.array != r.nodata])
 
-def min(input_raster):
+def rastmin(input_raster):
     """
     Calculate the minimum value
     :param input_raster: A raster-compatible object
@@ -1506,7 +1506,7 @@ def min(input_raster):
     else:
         return numpy.min(r.array[r.array != r.nodata])
 
-def max(input_raster):
+def rastmax(input_raster):
     """
     Calculate the maximum value
     :param input_raster: A raster-compatible object
