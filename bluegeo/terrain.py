@@ -28,6 +28,7 @@ class watershed(raster):
     '''
     def __init__(self, surface, tempdir=None):
         # Open and change to float if not already
+        self.tempdir = tempdir
         if isinstance(surface, raster):
             self.__dict__.update(surface.__dict__)
         else:
@@ -56,7 +57,7 @@ class watershed(raster):
         fa_outpath = self.generate_name('fl_acc', 'tif', True)
 
         # Perform analysis using grass session
-        with GrassSession(external, temp=tempdir):
+        with GrassSession(external, temp=self.tempdir):
             from grass.pygrass.modules.shortcuts import raster as graster
             from grass.script import core as grass
             graster.external(input=external, output='surface')
@@ -143,7 +144,7 @@ class watershed(raster):
         # Create output path
         str_path = self.generate_name('streams', 'tif')
 
-        with GrassSession(external, temp=tempdir):
+        with GrassSession(external, temp=self.tempdir):
             from grass.pygrass.modules.shortcuts import raster as graster
             from grass.script import core as grass
             graster.external(input=external, output='dem')
