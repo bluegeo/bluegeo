@@ -66,7 +66,7 @@ class watershed(raster):
             graster.out_gdal('fd', format="GTiff", output=fd_outpath)
             graster.out_gdal('fa', format="GTiff", output=fa_outpath)
 
-        return watershed(fd_outpath), watershed(fa_outpath)
+        return watershed(fd_outpath, tempdir=self.tempdir), watershed(fa_outpath, tempdir=self.tempdir)
 
     def convergence(self, size=(11, 11), fd=None):
         '''
@@ -128,7 +128,7 @@ class watershed(raster):
             # Calculate over all data
             conv[:] = eval_conv(fd.array)
 
-        return watershed(conv)
+        return watershed(conv, tempdir=self.tempdir)
 
     def stream_order(self, min_contrib_area):
         '''
@@ -158,7 +158,7 @@ class watershed(raster):
                               direction='fd', strahler="strlr")
             graster.out_gdal('strlr', format="GTiff", output=str_path)
 
-        return watershed(str_path)
+        return watershed(str_path, tempdir=self.tempdir)
 
     def stream_reclass(self, fa, min_contrib_area):
         '''
@@ -189,11 +189,11 @@ class watershed(raster):
                                      ' stream layer is provided')
             if fa is not None:
                 with watershed(
-                    self.path
+                    self.path, tempdir=self.tempdir
                 ).stream_reclass(fa, min_contrib_area) as ws:
                     m = ws.array != ws.nodata
             else:
-                with watershed(self.path).stream_order(min_contrib_area) as ws:
+                with watershed(self.path, tempdir=self.tempdir).stream_order(min_contrib_area) as ws:
                     m = ws.array != ws.nodata
             elev = self.array
         # Compute stream slope
@@ -311,7 +311,7 @@ class watershed(raster):
         alluv_out = self.copy(True, 'alluv').astype('uint8')
         alluv_out[:] = track
         alluv_out.nodataValues = [0]
-        return watershed(alluv_out)
+        return watershed(alluv_out, tempdir=self.tempdir)
 
     def alluvium2(self, min_dep=0, max_dep=5, benches=1, **kwargs):
         '''
@@ -375,7 +375,7 @@ class watershed(raster):
         alluv_out = self.copy(True, 'alluv').astype('uint8')
         alluv_out.nodataValues = [0]
         alluv_out[:] = alluv
-        return watershed(alluv_out)
+        return watershed(alluv_out, tempdir=self.tempdir)
 
 
 class topo(raster):
