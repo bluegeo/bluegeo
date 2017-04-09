@@ -5,6 +5,7 @@ Blue Geosimulation, 2016
 '''
 
 from raster import *
+import util
 import math
 from scipy import ndimage
 
@@ -53,8 +54,8 @@ class watershed(raster):
             external = self.path
 
         # Get paths for the outputs
-        fd_outpath = self.generate_name('fl_dir', 'tif', True)
-        fa_outpath = self.generate_name('fl_acc', 'tif', True)
+        fd_outpath = self.generate_name('fl_dir', 'tif')
+        fa_outpath = self.generate_name('fl_acc', 'tif')
 
         # Perform analysis using grass session
         with GrassSession(external, temp=self.tempdir):
@@ -85,11 +86,11 @@ class watershed(raster):
             a[~mask] = nd
 
             # Get neighbours as views and create output
-            b = window_local_dict(get_window_views(a, size), 'a')
+            b = util.window_local_dict(util.get_window_views(a, size), 'a')
             x, y = numpy.mgrid[0:(a.shape[0] - 1) * self.csy:a.shape[0] * 1j,
                                0:(a.shape[1] - 1) * self.csx:a.shape[1] * 1j]
-            b.update(window_local_dict(get_window_views(x, size), 'x'))
-            b.update(window_local_dict(get_window_views(y, size), 'y'))
+            b.update(util.window_local_dict(util.get_window_views(x, size), 'x'))
+            b.update(util.window_local_dict(util.get_window_views(y, size), 'y'))
             pi = numpy.pi
             b.update({'pi': pi, 'nd': nd})
             c = '%s_%s' % ((size[0] - 1) / 2, (size[1] - 1) / 2)
@@ -122,7 +123,7 @@ class watershed(raster):
         if fd.useChunks:
             # Iterate chunks and calculate convergence
             for a, s in fd.iterchunks(expand=size):
-                s_ = truncate_slice(s, size)
+                s_ = util.truncate_slice(s, size)
                 conv[s_] = eval_conv(a).astype('float32')
         else:
             # Calculate over all data
@@ -411,12 +412,12 @@ class topo(raster):
                 a = ne.evaluate('where(mask,a*exaggeration,nd)')
 
             # Add mask to local dictionary
-            local_dict = window_local_dict(
-                get_window_views(mask, (3, 3)), 'm'
+            local_dict = util.window_local_dict(
+                util.get_window_views(mask, (3, 3)), 'm'
             )
             # Add surface data
-            local_dict.update(window_local_dict(
-                get_window_views(a, (3, 3)), 'a')
+            local_dict.update(util.window_local_dict(
+                util.get_window_views(a, (3, 3)), 'a')
             )
             # Add other variables
             local_dict.update({'csx': self.csx, 'csy': self.csy, 'nd': nd,
@@ -452,7 +453,7 @@ class topo(raster):
         if self.useChunks:
             # Iterate chunks and calculate slope
             for a, s in self.iterchunks(expand=(3, 3)):
-                s_ = truncate_slice(s, (3, 3))
+                s_ = util.truncate_slice(s, (3, 3))
                 slope_raster[s_] = eval_slope(a)
         else:
             # Calculate over all data
@@ -477,12 +478,12 @@ class topo(raster):
             mask = a != nd
 
             # Add mask to local dictionary
-            local_dict = window_local_dict(
-                get_window_views(mask, (3, 3)), 'm'
+            local_dict = util.window_local_dict(
+                util.get_window_views(mask, (3, 3)), 'm'
             )
             # Add surface data
-            local_dict.update(window_local_dict(
-                get_window_views(a, (3, 3)), 'a')
+            local_dict.update(util.window_local_dict(
+                util.get_window_views(a, (3, 3)), 'a')
             )
             # Add other variables
             local_dict.update({'csx': self.csx, 'csy': self.csy, 'nd': nd,
@@ -505,7 +506,7 @@ class topo(raster):
         if self.useChunks:
             # Iterate chunks and calculate aspect
             for a, s in self.iterchunks(expand=(3, 3)):
-                s_ = truncate_slice(s, (3, 3))
+                s_ = util.truncate_slice(s, (3, 3))
                 aspect_raster[s_] = eval_aspect(a)
         else:
             # Calculate over all data
@@ -526,7 +527,7 @@ class topo(raster):
         '''
         def eval_roughness(a):
             # Generate nodata mask and get views
-            view = get_window_views(a, size)
+            view = util.get_window_views(a, size)
             ic, jc = (size[0] - 1) / 2, (size[1] - 1) / 2
             nd = self.nodata
             mask = view[ic][jc] == nd
@@ -578,55 +579,10 @@ class topo(raster):
         if self.useChunks:
             # Iterate chunks and calculate convergence
             for a, s in self.iterchunks(expand=size):
-                s_ = truncate_slice(s, size)
+                s_ = util.truncate_slice(s, size)
                 surf_rough[s_] = eval_roughness(a)
         else:
             # Calculate over all data
             surf_rough[:] = eval_roughness(self.array)
 
         return topo(surf_rough)
-
-
-# Supplementary functions
-def truncate_slice(s, size):
-    i, j = size
-    ifr = int(math.ceil((i - 1) / 2.))
-    jfr = int(math.ceil((j - 1) / 2.))
-    ito = int((i - 1) / 2.)
-    jto = int((j - 1) / 2.)
-    s_ = s[0].start + ifr
-    s__ = s[1].start + jfr
-    _s = s[0].stop - ito
-    __s = s[1].stop - jto
-    return (slice(s_, _s), slice(s__, __s))
-
-def get_window_views(a, size):
-    '''
-    Get a "shaped" list of views into "a" to retrieve
-    neighbouring cells in the form of "size."
-    Note: asymmetrical shapes will be propagated
-        up and left.
-    '''
-    i_offset = (size[0] - 1) * -1
-    j_offset = (size[1] - 1) * -1
-    output = []
-    for i in range(i_offset, 1):
-        output.append([])
-        _i = abs(i_offset) + i
-        if i == 0:
-            i = None
-        for j in range(j_offset, 1):
-            _j = abs(j_offset) + j
-            if j == 0:
-                j = None
-            output[-1].append(a[_i:i, _j:j])
-    return output
-
-def window_local_dict(views, prefix='a'):
-    '''
-    Create a local dictionary with variable names to craft a numexpr
-    expression using offsets of a moving window
-    '''
-    return {'%s%s_%s' % (prefix, i, j): views[i][j]
-            for i in range(len(views))
-            for j in range(len(views[i]))}

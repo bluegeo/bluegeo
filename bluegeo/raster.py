@@ -159,7 +159,7 @@ class raster(object):
         self.shape = tuple(self.shape)
         self.path = str(ds.filename)
 
-    def save_as(self, output_path, compression='lzf', empty=False, new=False,
+    def save_as(self, output_path, compression='lzf', empty=False,
                 data=None):
         '''
         Save to a new file, and use with self
@@ -182,31 +182,17 @@ class raster(object):
                                             dtype=self.dtype,
                                             compression=compression,
                                             chunks=self.chunks)
-                if new:
-                    if data is not None:
-                        if data.ndim == 3:
-                            ds[:] = data[:, :, band - 1]
-                        else:
-                            ds[:] = data
+                if data is not None:
+                    if type(data) == numpy.ndarray and data.ndim == 3:
+                        ds[:] = data[:, :, band - 1]
                     else:
-                        if self.useChunks:
-                            for a, s in self.iterchunks():
-                                shape_ = self.gdal_args_from_slice(s,
-                                                                   self.shape)
-                                shape_ = (shape_[3], shape_[2])
-                                ds[s] = numpy.full(shape_, self.nodata,
-                                                   self.dtype)
-                        else:
-                            ds[:] = numpy.full(self.shape, self.nodata,
-                                               self.dtype)
-                else:
-                    if not empty:
-                        if self.useChunks:
-                            for a, s in self.iterchunks():
-                                ds[s] = a
-                        else:
-                            ds[:] = self.array
-                del ds
+                        ds[:] = data
+                elif not empty:
+                    if self.useChunks:
+                        for a, s in self.iterchunks():
+                            ds[s] = a
+                    else:
+                        ds[:] = self.array
 
             # Add attributes to new file
             update_dict = deepcopy(self.__dict__)
@@ -338,16 +324,16 @@ class raster(object):
                 outraster[:] = self.array
         del outraster
 
-    def copy(self, empty=False, file_suffix='copy'):
-        '''
+    def copy(self, empty=False, file_suffix='copy', fill=None):
+        """
         Create a copy of the underlying dataset to use for writing
         temporarily.  Used when mode is 'r' and procesing is required,
         or self is instantiated using another raster instance.
         Defaults to HDF5 format.
-        '''
+        """
         path = self.generate_name(file_suffix, 'h5')
         # Write new file and return raster
-        return self.save_as(path, empty=empty)
+        return self.save_as(path, data=fill, empty=empty)
 
     @property
     def size(self):
