@@ -27,7 +27,7 @@ class watershed(raster):
     '''
     Topographic routing and watershed delineation primarily using grass
     '''
-    def __init__(self, surface, tempdir=None):
+    def __init__(self, surface, tempdir=None, grassdiskswap=False):
         # Open and change to float if not already
         self.tempdir = tempdir
         if isinstance(surface, raster):
@@ -62,8 +62,11 @@ class watershed(raster):
             from grass.pygrass.modules.shortcuts import raster as graster
             from grass.script import core as grass
             graster.external(input=external, output='surface')
+            flags = "s"
+            if grassdiskswap:
+                flags += "m"
             grass.run_command('r.watershed', elevation='surface',
-                              drainage='fd', accumulation='fa', flags="s")
+                              drainage='fd', accumulation='fa', flags=flags)
             graster.out_gdal('fd', format="GTiff", output=fd_outpath)
             graster.out_gdal('fa', format="GTiff", output=fa_outpath)
 
