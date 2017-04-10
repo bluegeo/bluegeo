@@ -63,9 +63,9 @@ class watershed(raster):
             from grass.pygrass.modules.shortcuts import raster as graster
             from grass.script import core as grass
             graster.external(input=external, output='surface')
-            flags = {"s": True}
+            flags = "s"
             if self.useSwap:
-                flags.update({"m": True})
+                flags += "m"
             grass.run_command('r.watershed', elevation='surface',
                               drainage='fd', accumulation='fa', flags=flags)
             graster.out_gdal('fd', format="GTiff", output=fd_outpath)
