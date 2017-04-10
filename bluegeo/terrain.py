@@ -30,6 +30,7 @@ class watershed(raster):
     def __init__(self, surface, tempdir=None, grassdiskswap=False):
         # Open and change to float if not already
         self.tempdir = tempdir
+        self.useSwap = grassdiskswap
         if isinstance(surface, raster):
             self.__dict__.update(surface.__dict__)
         else:
@@ -63,7 +64,7 @@ class watershed(raster):
             from grass.script import core as grass
             graster.external(input=external, output='surface')
             flags = "s"
-            if grassdiskswap:
+            if self.useSwap:
                 flags += "m"
             grass.run_command('r.watershed', elevation='surface',
                               drainage='fd', accumulation='fa', flags=flags)
