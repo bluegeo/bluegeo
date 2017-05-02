@@ -5,17 +5,6 @@ import os
 import time
 import shutil
 
-"""
-Due to ctypes, you have to set LD_LIBRARY_PATH ahead of time
-    export LD_LIBRARY_PATH=`grass71 --config path`/lib
-    python your_script.py
-or
-    su
-    echo "`grass71 --config path`/lib" > /etc/ld.so.conf.d/grass71.conf
-    ldconfig
-    exit
-    python your_script.py
-"""
 
 class GrassSession():
     def __init__(self, src=None, grassbin='grass',

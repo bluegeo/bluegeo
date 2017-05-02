@@ -3,6 +3,7 @@ Utilities for bluegeo
 '''
 import math
 import numpy
+from scipy import ndimage
 
 
 class BlueUtilError(Exception):
@@ -73,6 +74,36 @@ def window_local_dict(views, prefix='a'):
             for j in range(len(views[i]))}
 
 
+def indices_to_coords(indices, top, left, csx, csy):
+    """
+    Convert a tuple of ([i...], [j...]) indices to coordinates
+    :param indices: 
+    :param top: 
+    :param left: 
+    :param csx: 
+    :param csy: 
+    :return: Coordinates: ([y...], [x...])
+    """
+    return ((top - (csy / 2.)) - (indices[0] * csy),
+            (left + (csx / 2.)) + (indices[1] * csx)
+            )
+
+
+def kernel_from_distance(distance, csx, csy):
+    """
+    Calculate a kernel mask using distance
+    :param distance: Radius for kernel
+    :param csx: 
+    :param csy: 
+    :return: kernel mask
+    """
+    num_cells_x = numpy.ceil(round((distance * 2.) / csx))
+    num_cells_y = numpy.ceil(round((distance * 2.) / csy))
+    centroid = (int(num_cells_y / 2.), int(num_cells_x / 2.))
+    kernel = numpy.ones(shape=(num_cells_y, num_cells_x), dtype='bool')
+    kernel[centroid] = 0
+    dt = ndimage.distance_transform_edt(kernel, (csy, csx))
+    return dt <= distance
 
 
 

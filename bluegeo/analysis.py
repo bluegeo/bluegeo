@@ -3,10 +3,76 @@ General functions for hydrologic analysis
 Devin Cairns, 2016
 '''
 from raster import *
+from terrain import *
 from skimage.measure import label
 from scipy import ndimage
 import math
 import time
+
+
+def region_label(input_raster, return_map=False):
+    """
+    Label contiguous regions in a raster
+    :param input_raster: 
+    :param return_map: Return a dictionary of cell indices associated with each label
+    :return: output labelled raster, and map of the flattened labels if return_map is True
+    """
+    rast = raster(input_raster)
+    a = rast.array
+    a = label(a, background=rast.nodata)
+    outrast = rast.astype(a.dtype)
+    outrast[:] = a
+
+    if return_map:
+        indices = numpy.argsort(a.ravel())
+        bins = numpy.bincount(a.ravel())
+        indices = numpy.split(indices, numpy.cumsum(bins[bins > 0][:-1]))
+        return outrast, dict(zip(numpy.unique(a.ravel()), indices))
+
+
+def sinuosity(**kwargs):
+    """
+    Calculate sinuosity from a dem or streams
+    :param kwargs: dem=path to dem _or_ stream_order=path to strahler stream order raster
+    :return: sinuosity as a ratio
+    """
+    # Collect as raster of streams
+    dem = kwargs.get('dem', None)
+    stream_order = kwargs.get('stream_order')
+    distance = kwargs.get('sample_distance', 1000)  # Default measurement distance is 1 km if in m
+    if distance == 0:
+        raise Exception('Sinuosity sampling distance must be greater than 0')
+    if stream_order is not None:
+        stream_order = raster(stream_order)
+    elif dem is not None:
+        min_contrib_area = kwargs.get('min_contrib_area')
+        if min_contrib_area is None:
+            raise Exception('Minimum contributing area required if deriving streams from DEM')
+            stream_order = watershed(dem).stream_order(min_contrib_area)
+    else:
+        raise Exception('Sinuosity needs needs either dem or  ')
+
+    # Convolution kernel created using distance
+    kernel = util.kernel_from_distance(distance, stream_order.csx,
+                                       stream_order.csy)
+
+    # Label and map stream order
+    stream_order, stream_map = region_label(stream_order)
+
+    # Iterate stream orders and calculate sinuosity
+    sinuosity_raster = stream_order.copy().astype('float32')
+    outa = sinuosity_raster.array
+    datamask = outa != sinuosity_raster.nodata
+    for region, indices in stream_map:
+        # Count cells in neighbourhood
+        count_arr = numpy.zeros(shape=sinuosity_raster.shape, dtype='int32').ravel()
+        count_arr[indices] = 1
+        count_arr = count_arr.reshape(sinuosity_raster.shape)
+        count_arr = ndimage.convolve(count_arr, kernel, mode='constant')
+        outa[datamask] = count_arr[datamask] / distance
+    sinuosity_raster[:] = outa
+
+    return sinuosity_raster
 
 
 def combine_bathymetry(dem, bathymetry, csv_path):

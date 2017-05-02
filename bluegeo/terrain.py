@@ -7,7 +7,7 @@ Blue Geosimulation, 2016
 from raster import *
 import util
 import math
-from scipy import ndimage
+from scipy import ndimage, interpolate
 
 try:
     from bluegrass import GrassSession
@@ -393,8 +393,9 @@ class topo(raster):
         else:
             super(topo, self).__init__(surface)
         if 'float' not in self.dtype:
-            out = self.astype('float32')
-            self.__dict__.update(out.__dict__)
+            self = self.astype('float32')
+            # out = self.astype('float32')
+            # self.__dict__.update(out.__dict__)
         # Change interpolation method unless otherwise specified
         self.interpolationMethod = 'bilinear'
 
@@ -586,3 +587,29 @@ class topo(raster):
             surf_rough[:] = eval_roughness(self.array)
 
         return topo(surf_rough)
+
+    def align(self, input_raster, interpolation='nearest'):
+        """
+        Align two grids, and correct the z-value using difference in overlapping areas
+        :param input_raster: Raster to align with self
+        :return: Aligned dataset with coverage from self, and input_raster
+        """
+        outrast = self.copy('align')
+        # TODO: rasters must be combined using a mosaic to preserve extent of both
+        with topo(input_raster).match_raster(self) as inrast:
+            selfData = self.array
+            targetData = inrast.array
+            targetDataMask = targetData != inrast.nodata
+            selfDataMask = selfData != self.nodata
+            points = numpy.where(selfDataMask & targetDataMask)
+            if points[0].size == 0:
+                raise TopoError("No overlapping regions found during align")
+            xi = numpy.where(targetDataMask & ~selfDataMask)
+            del targetDataMask, selfDataMask
+            pointGrid = util.indices_to_coords(points, self.top, self.left, self.csx, self.csy)
+            xGrid = util.indices_to_coords(xi, self.top, self.left, self.csx, self.csy)
+            selfData[xi] = targetData[xi] + interpolate.griddata(
+                pointGrid, selfData[points] - targetData[points], xGrid,
+                interpolation, fill_value=self.nodata)
+            outrast[:] = selfData
+        return outrast

@@ -13,6 +13,7 @@ from contextlib import contextmanager
 import numpy
 from osgeo import gdal, osr, gdalconst
 import h5py
+import tempfile
 try:
     import numexpr as ne
     numexpr_ = True
@@ -147,7 +148,7 @@ class raster(object):
         self.ndchecked = False
 
     def load_from_hdf5(self, ds):
-        '''Load attributes from an HDF5 file'''
+        """Load attributes from an HDF5 file"""
         d = {}
         for key, val in ds.attrs.iteritems():
             if not isinstance(val, numpy.ndarray) and val == 'None':
@@ -160,10 +161,11 @@ class raster(object):
         self.path = str(ds.filename)
 
     def save_as(self, output_path, compression='lzf', empty=False,
-                data=None):
-        '''
+                data=None, garbage_collect=False):
+        """
         Save to a new file, and use with self
-        '''
+        Note, using data overrides the empty arg
+        """
         # Create output dataset
         # Check compression
         if compression not in [None, 'lzf', 'gzip', 'szip']:
@@ -177,11 +179,16 @@ class raster(object):
         with h5py.File(output_path, mode='w', libver='latest') as newfile:
             # Copy data from data source to new file
             prvb = self.activeBand
+            # File may not exist yet if being built from new raster
+            if hasattr(self, 'path'):
+                chunks = self.chunks
+            else:
+                chunks = (256, 256)
             for band in self.bands:
                 ds = newfile.create_dataset(str(band), self.shape,
                                             dtype=self.dtype,
                                             compression=compression,
-                                            chunks=self.chunks)
+                                            chunks=chunks)
                 if data is not None:
                     if type(data) == numpy.ndarray and data.ndim == 3:
                         ds[:] = data[:, :, band - 1]
@@ -205,6 +212,13 @@ class raster(object):
                     'right': self.left + (self.csx * self.shape[1])
                 }
             )
+            if garbage_collect:
+                update_dict['garbage'] = output_path
+            else:
+                try:
+                    del update_dict['garbage']
+                except:
+                    pass
             for key, val in update_dict.iteritems():
                 if val is None:
                     val = 'None'
@@ -215,9 +229,9 @@ class raster(object):
         return raster(output_path, mode='r+')
 
     def build_new_raster(self, path, **kwargs):
-        '''
+        """
         Build a new raster from a set of keyword args
-        '''
+        """
         # Get kwargs- for building the new raster
         self.projection = self.parse_projection(
             kwargs.get('projection', None))
@@ -278,28 +292,30 @@ class raster(object):
             self.nodataValues = [self.nodataValues]
 
         self.activeBand = 1
+        self.activeBand = 1
         self.format = 'HDF5'
         self.mode = 'r+'
 
-        new_rast = self.save_as(path, compression=compression, new=True,
+        new_rast = self.save_as(path, compression=compression, empty=True,
                                 data=data)
         self.__dict__.update(new_rast.__dict__)
 
     def save(self, output_path, compression='lzf', empty=False):
-        '''
+        """
         Update attributes to current file
-        '''
+        """
         if self.mode != 'r+':
             raise RasterError('Raster is open as read-only. Change mode to'
                               ' "r+" to modify')
+        raise NotImplementedError("The save method has not yet been implemented")
         # Need to implement this method (just update the attributes of the
         #   current file)
 
     def save_gdal_raster(self, output_path, compress=True):
-        '''
+        """
         Save current instance to a gdal-raster.
         Future- add for support of more file types.
-        '''
+        """
         # Check path
         if output_path.split('.')[-1] != 'tif':
             output_path = output_path + '.tif'
@@ -333,7 +349,7 @@ class raster(object):
         """
         path = self.generate_name(file_suffix, 'h5')
         # Write new file and return raster
-        return self.save_as(path, data=fill, empty=empty)
+        return self.save_as(path, data=fill, empty=empty, garbage_collect=True)
 
     @property
     def size(self):
@@ -367,7 +383,7 @@ class raster(object):
             #   |
             #   V
             ds = None
-        else:
+        elif self.format == 'HDF5':
             try:
                 ds = h5py.File(self.path, mode=self.mode, libver='latest')
                 yield ds
@@ -394,7 +410,9 @@ class raster(object):
 
     @property
     def array(self):
-        '''**all data in memory**'''
+        """
+        Load underlying data into a numpy array
+        """
         if self.format == 'gdal':
             # Do a simple check for necessary no data value fixes using topleft
             if not self.ndchecked:
@@ -417,7 +435,7 @@ class raster(object):
 
     @property
     def chunks(self):
-        '''Chunk shape of self'''
+        """Chunk shape of self"""
         if hasattr(self, 'chunk_override'):
             chunks = self.chunk_override
         elif self.format == 'gdal':
@@ -446,12 +464,12 @@ class raster(object):
 
     @property
     def itemsize(self):
-        '''Return number of bytes/element for a specific dtype'''
+        """Return number of bytes/element for a specific dtype"""
         return numpy.dtype(self.dtype).itemsize
 
     @property
     def mgrid(self):
-        '''Return arrays of the coordinates of all raster grid cells'''
+        """Return arrays of the coordinates of all raster grid cells"""
         top_c = self.top - (self.csy * 0.5)
         left_c = self.left + (self.csx * 0.5)
         ishape, jshape = self.shape
@@ -634,9 +652,9 @@ class raster(object):
                 ds.attrs['projection'] = projection
 
     def match_raster(self, input_raster, tolerance=1E-09):
-        '''
+        """
         Align extent and cells with another raster
-        '''
+        """
         def isclose(input, values):
             values = [(val - tolerance, val + tolerance) for val in values]
             if any([lower < input < upper for lower, upper in values]):
@@ -675,12 +693,12 @@ class raster(object):
                                       interpolation=self.interpolation)
 
     def slice_from_bbox(self, bbox):
-        '''
+        """
         Compute slice objects to using a bbox.
 
         Returns slicer for self, another for an array the size of bbox, and
         the shape of the output array from bbox.
-        '''
+        """
         top, bottom, left, right = map(float, bbox)
         if any([top < bottom,
                 bottom > top,
@@ -733,12 +751,12 @@ class raster(object):
                 (top, bottom, left, right))
 
     def change_extent(self, bbox):
-        '''
+        """
         Slice self using bounding box coordinates.
 
         Note: the bounding box may not be honoured exactly.  To accomplish this
         use a transform.
-        '''
+        """
         # Get slices
         self_slice, insert_slice, shape, bbox = self.slice_from_bbox(bbox)
 
@@ -762,12 +780,13 @@ class raster(object):
             'useChunks': self.useChunks
         }
         outds = raster(path, mode='w', **kwargs)
+        outds.garbage = path
         for band in outds.bands:
             outds[insert_slice] = self[self_slice]
         return outds
 
     def transform(self, **kwargs):
-        '''
+        """
         Change cell size, projection, or extent.
         ------------------------
         In Args
@@ -782,7 +801,7 @@ class raster(object):
         "bbox": bounding box for output (top, bottom, left, right)
             Note- if projection specified, bbox must be in the output
             coordinate system
-        '''
+        """
         def expand_extent(csx, csy, bbox, shape):
             '''Expand extent to snap to cell size'''
             top, bottom, left, right = bbox
@@ -961,27 +980,27 @@ class raster(object):
         return raster(path)
 
     def generate_name(self, suffix, extension):
-        '''Generate a unique file name'''
+        """Generate a unique file name"""
         now = datetime.now()
 
-        def getabsname(i):
+        def getabsname(i, path_str):
             return ('%s_%s_%s%i.%s' %
-                    (''.join(os.path.basename(self.path).split('.')[:-1])[:20],
-                     str(suffix),
+                    (''.join(path_str.split('.')[:-1])[:20], str(suffix),
                      datetime.toordinal(now), i, str(extension))
                     )
 
         i = 1
-        path = os.path.join(os.path.dirname(self.path), getabsname(i))
+        if not hasattr(self, 'path'):
+            path_dir = tempfile.gettempdir()
+            path_str = ''
+        else:
+            path_dir = os.path.dirname(self.path)
+            path_str = os.path.basename(self.path)
+
+        path = os.path.join(path_dir, getabsname(i, path_str))
         while os.path.isfile(path):
             i += 1
-            path = os.path.join(os.path.dirname(self.path), getabsname(i))
-
-        # Add to garbage collector if necessary
-        try:
-            self.garbage.append(path)
-        except:
-            self.garbage = [path]
+            path = os.path.join(path_dir, getabsname(i, path_str))
 
         return path
 
@@ -1407,6 +1426,9 @@ class raster(object):
             return False
 
     def __ne__(self, r):
+        if not isinstance(r, raster):
+            raise RasterError('Expected a raster instance while using the "!="'
+                              ' operator')
         if self == r:
             return False
         else:
@@ -1415,7 +1437,7 @@ class raster(object):
     def __repr__(self):
         insr = osr.SpatialReference(wkt=self.projection)
         methods = {
-            'ne': 'numexpr (Parallel, CPU cache-optimized)',
+            'ne': 'numexpr (Parallel, cache-optimized)',
             'np': 'numpy (single-threaded, vectorized)'
         }
         if os.path.isfile(self.path):
@@ -1450,14 +1472,105 @@ class raster(object):
     def __exit__(self, *a):
         self.clean_garbage()
 
+    def __del__(self):
+        # Supposedly not a great approach, but it doesn't hurt anything
+        self.clean_garbage()
+
     def clean_garbage(self):
-        '''Remove all temporary files (usually created implicitly)'''
+        """Remove all temporary files (created using copy)"""
         if hasattr(self, 'garbage'):
-            for f in self.garbage:
-                try:
-                    os.remove(f)
-                except:
-                    continue
+            try:
+                os.remove(self.garbage)
+            except:
+                pass
+
+
+class mosaic(raster):
+    """Handle a mosaic of rasters"""
+    def __init__(self, raster_list):
+        self.rasterList = []
+        self.extents = []
+        self.rasterDtypes = []
+        self.cellSizes = []
+        projection = None
+        for inputRaster in raster_list:
+            rast = raster(inputRaster)
+            self.rasterList.append(inputRaster)
+            self.extents.append((rast.top, rast.bottom, rast.left, rast.right))
+            self.cellSizes.append((rast.csx, rast.csy))
+            self.rasterDtypes.append(rast.dtype)
+            # Take the first occurrence of projection
+            if rast.projection is not None and projection is None:
+                projection = rast.projection
+        self.mergeOrder = numpy.arange(len(self.rasterList))
+        self.fullyMerged = False
+
+        # Dimensions of all
+        top, bottom, left, right = zip(*self.extents)
+        top, bottom, left, right = max(top), min(bottom), min(left), max(right)
+        csx, csy = zip(*self.cellSizes)
+        csx, csy = min(csx), min(csy)
+
+        # Calculate shape
+        shape = (int(numpy.ceil((top - bottom) / csy)),
+                 int(numpy.ceil((right - left) / csx)))
+
+        # Collect the most precise data type
+        precision = numpy.argmax([numpy.dtype(dtype).itemsize for dtype in self.rasterDtypes])
+        dtype = self.rasterDtypes[precision]
+
+        # Build a new raster using the combined specs
+        path = self.generate_name('rastermosaic', 'h5')
+        super(mosaic, self).__init__(path, mode='w', csx=csx, csy=csy, top=top, left=left,
+                                     shape=shape, projection=projection, dtype=dtype)
+        # Create a mask to track where data are merged
+        with h5py.File(self.path, libver='latest') as f:
+            f.create_dataset('mosaic', data=numpy.zeros(shape=self.shape, dtype='bool'),
+                             compression='lzf')
+
+    def __getitem__(self, s):
+        """
+        Merge where data are retrieved
+        :param s: 
+        :return: 
+        """
+        # If all rasters are merged, using parent
+        if self.fullyMerged:
+            super(mosaic, self).__getitem__(s)
+        else:
+            with h5py.File(self.path, libver='latest') as f:
+                ds = f['mosaic']
+
+    @property
+    def array(self):
+        """
+        Merge all rasters and return 
+        :return: 
+        """
+        pass
+
+    def merge(self, raster_list, s):
+        """
+        Merge a region
+        :param raster_list: 
+        :return: 
+        """
+        pass
+
+    def interpolation_method(self, method):
+        """
+        Update interpolation methods for each raster
+        :param method: A single method, or a list of methods that matches the number of rasters
+        :return: None
+        """
+        if hasattr(method, '__iter__'):
+            if len(method) != len(self.rasterList):
+                raise RasterError('Number of methods must match the number of rasters')
+            for i, m in enumerate(method):
+                self.rasterList[i].interpolationMethod = m
+        else:
+            for rast in self.rasterList:
+                rast.interpolationMethod = method
 
 
 # Numpy-like methods
