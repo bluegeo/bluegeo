@@ -48,7 +48,7 @@ def sinuosity(**kwargs):
         min_contrib_area = kwargs.get('min_contrib_area')
         if min_contrib_area is None:
             raise Exception('Minimum contributing area required if deriving streams from DEM')
-            stream_order = watershed(dem).stream_order(min_contrib_area)
+        stream_order = watershed(dem).stream_order(min_contrib_area)
     else:
         raise Exception('Sinuosity needs needs either dem or  ')
 
