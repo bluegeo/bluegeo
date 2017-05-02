@@ -46,9 +46,10 @@ def sinuosity(**kwargs):
         stream_order = raster(stream_order)
     elif dem is not None:
         min_contrib_area = kwargs.get('min_contrib_area')
+        tempdir = kwargs.get('tempdir', None)
         if min_contrib_area is None:
             raise Exception('Minimum contributing area required if deriving streams from DEM')
-        stream_order = watershed(dem).stream_order(min_contrib_area)
+        stream_order = watershed(dem, tempdir=tempdir).stream_order(min_contrib_area)
     else:
         raise Exception('Sinuosity needs needs either dem or  ')
 
