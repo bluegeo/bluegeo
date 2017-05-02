@@ -39,7 +39,7 @@ def sinuosity(**kwargs):
     # Collect as raster of streams
     dem = kwargs.get('dem', None)
     stream_order = kwargs.get('stream_order')
-    distance = kwargs.get('sample_distance', 1000)  # Default measurement distance is 1 km if in m
+    distance = kwargs.get('sample_distance', 100)  # Default measurement distance is 100m
     if distance == 0:
         raise Exception('Sinuosity sampling distance must be greater than 0')
     if stream_order is not None:
@@ -56,6 +56,8 @@ def sinuosity(**kwargs):
     # Convolution kernel created using distance
     kernel = util.kernel_from_distance(distance, stream_order.csx,
                                        stream_order.csy)
+    # Maximum length of a straight reach
+    straight_segment = distance / min(stream_order.csx, stream_order.csy)
 
     # Label and map stream order
     stream_order, stream_map = region_label(stream_order)
@@ -70,7 +72,7 @@ def sinuosity(**kwargs):
         count_arr[indices] = 1
         count_arr = count_arr.reshape(sinuosity_raster.shape)
         count_arr = ndimage.convolve(count_arr, kernel, mode='constant')
-        outa[datamask] = count_arr[datamask] / distance
+        outa[datamask] = count_arr[datamask] / straight_segment
     sinuosity_raster[:] = outa
 
     return sinuosity_raster
