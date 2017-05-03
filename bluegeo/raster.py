@@ -605,6 +605,7 @@ class raster(object):
     def astype(self, dtype):
         '''Change the data type of self and return copy'''
         # Check the input
+        dtype = str(dtype)
         try:
             dtype = dtype.lower()
             assert dtype in ['bool', 'int8', 'uint8', 'int16', 'uint16',
