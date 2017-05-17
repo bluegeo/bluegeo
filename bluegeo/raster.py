@@ -184,23 +184,6 @@ class raster(object):
                 chunks = self.chunks
             else:
                 chunks = (256, 256)
-            for band in self.bands:
-                ds = newfile.create_dataset(str(band), self.shape,
-                                            dtype=self.dtype,
-                                            compression=compression,
-                                            chunks=chunks)
-                if data is not None:
-                    if type(data) == numpy.ndarray and data.ndim == 3:
-                        ds[:] = data[:, :, band - 1]
-                    else:
-                        ds[:] = data
-                elif not empty:
-                    if self.useChunks:
-                        for a, s in self.iterchunks():
-                            ds[s] = a
-                    else:
-                        ds[:] = self.array
-
             # Add attributes to new file
             update_dict = deepcopy(self.__dict__)
             update_dict.update(
@@ -212,6 +195,8 @@ class raster(object):
                     'right': self.left + (self.csx * self.shape[1])
                 }
             )
+
+            # Do not transfer old garbage
             if garbage_collect:
                 update_dict['garbage'] = output_path
             else:
@@ -223,6 +208,28 @@ class raster(object):
                 if val is None:
                     val = 'None'
                 newfile.attrs[key] = val
+
+            for band in self.bands:
+                ds = newfile.create_dataset(str(band), self.shape,
+                                            dtype=self.dtype,
+                                            compression=compression,
+                                            chunks=chunks)
+                if data is not None:
+                    if type(data) == numpy.ndarray and data.ndim == 3:
+                        ds[:] = data[:, :, band - 1]
+                    elif numpy.array(data).size == 1:
+                        # Broadcasting slow with h5py
+                        for a, s in self.iterchunks():
+                            _shape = (s[0].stop - s[0].start, s[1].stop - s[1].start)
+                            ds[s] = numpy.full(_shape, data, self.dtype)
+                    else:
+                        ds[:] = data
+                elif not empty:
+                    if self.useChunks:
+                        for a, s in self.iterchunks():
+                            ds[s] = a
+                    else:
+                        ds[:] = self.array
 
         self.activeBand = prvb
 
@@ -290,14 +297,17 @@ class raster(object):
             self.nodataValues = [0 for i in self.bands]
         if type(self.nodataValues) != list:
             self.nodataValues = [self.nodataValues]
+        # Data will be broadcast to nodata if it is not specified
+        if data is None:
+            data = self.nodataValues[0]
 
         self.activeBand = 1
         self.activeBand = 1
         self.format = 'HDF5'
         self.mode = 'r+'
+        self.path = path
 
-        new_rast = self.save_as(path, compression=compression, empty=True,
-                                data=data)
+        new_rast = self.save_as(path, compression=compression, data=data)
         self.__dict__.update(new_rast.__dict__)
 
     def save(self, output_path, compression='lzf', empty=False):
@@ -581,7 +591,7 @@ class raster(object):
 
     @staticmethod
     def get_gdal_dtype(dtype):
-        '''Return a gdal data type from a numpy counterpart'''
+        """Return a gdal data type from a numpy counterpart"""
         datatypes = {
             'int8': 'Int16',
             'bool': 'Byte',
@@ -751,13 +761,25 @@ class raster(object):
                 shape,
                 (top, bottom, left, right))
 
-    def change_extent(self, bbox):
+    def change_extent(self, bbox_or_raster):
         """
         Slice self using bounding box coordinates.
 
         Note: the bounding box may not be honoured exactly.  To accomplish this
         use a transform.
         """
+        # Get input
+        try:
+            bbox = raster(bbox_or_raster)
+            bbox = (bbox.top, bbox.bottom, bbox.left, bbox.right)
+        except:
+            bbox = bbox_or_raster
+
+        # Check that bbox is not inverted
+        if any([bbox[0] <= bbox[1], bbox[2] >= bbox[3]]):
+            raise RasterError('Input bounding box appears to be inverted'
+                              ' or has null dimensions')
+
         # Get slices
         self_slice, insert_slice, shape, bbox = self.slice_from_bbox(bbox)
 
@@ -782,7 +804,7 @@ class raster(object):
         }
         outds = raster(path, mode='w', **kwargs)
         outds.garbage = path
-        for band in outds.bands:
+        for _ in outds.bands:
             outds[insert_slice] = self[self_slice]
         return outds
 
