@@ -98,7 +98,12 @@ class raster(object):
         # ...or a raster instance
         elif isinstance(input_data, raster):
             # Create pointer to other instance
-            self.__dict__.update(input_data.__dict__)
+            update_dict = deepcopy(input_data.__dict__)
+            try:
+                del update_dict['garbage']  # Do not grab garbage
+            except:
+                pass
+            self.__dict__.update(update_dict)
 
         # Populate other attributes
         self.activeBand = 1
@@ -153,6 +158,8 @@ class raster(object):
         for key, val in ds.attrs.iteritems():
             if not isinstance(val, numpy.ndarray) and val == 'None':
                 val = None
+            elif str(key) == 'garbage':
+                continue
             d[key] = val
         current_mode = self.mode
         self.__dict__.update(d)
@@ -202,7 +209,7 @@ class raster(object):
             else:
                 try:
                     del update_dict['garbage']
-                except:
+                except KeyError:
                     pass
             for key, val in update_dict.iteritems():
                 if val is None:

@@ -590,7 +590,7 @@ class topo(raster):
 
         return topo(surf_rough)
 
-    def align(self, input_raster, interpolation='nearest', tolerance=1E-06, max_iter=5000):
+    def align(self, input_raster, interpolation='nearest', idw_search=10, tolerance=1E-06, max_iter=5000):
         """
         Align two grids, and correct the z-value using difference in overlapping areas
         :param input_raster: Raster to align with self
@@ -601,31 +601,34 @@ class topo(raster):
         print "Matching rasters"
         # Get extent of both rasters
         inrast = raster(input_raster)
-        bbox = (max(self.top, inrast.top), min(self.bottom, inrast.bottom),
-                min(self.left, inrast.left), max(self.right, inrast.right))
-        selfcopy = self.change_extent(bbox)
-        self.__dict__.update(selfcopy.__dict__)
-        del selfcopy.garbage
-        del selfcopy
-        self.garbage = self.path
+
+        # Grab extent from input_rast in coordinate system of self
+        inrastBbox = util.transform_points([(inrast.left, inrast.top), (inrast.right, inrast.top),
+                                            (inrast.left, inrast.bottom), (inrast.right, inrast.bottom)],
+                                           inrast.projection, self.projection)
+        bbox = (max(self.top, inrastBbox[0][1], inrastBbox[1][1]),
+                min(self.bottom, inrastBbox[2][1], inrastBbox[3][1]),
+                min(self.left, inrastBbox[0][0], inrastBbox[2][0]),
+                max(self.right, inrastBbox[1][0], inrastBbox[3][0]))
+        selfChangeExtent = self.change_extent(bbox)  # Need extent of both rasters
 
         # Allocate output
-        outrast = self.copy('align')
+        outrast = selfChangeExtent.copy('align')
 
         # Match both rasters
-        with topo(input_raster).match_raster(self.path) as inrast:
+        with topo(input_raster).match_raster(selfChangeExtent) as inrast:
             print "Reading data and generating masks"
-            selfData = self.array
+            selfData = selfChangeExtent.array
             targetData = inrast.array
             targetDataMask = targetData != inrast.nodata
-            selfDataMask = selfData != self.nodata
+            selfDataMask = selfData != selfChangeExtent.nodata
             points = selfDataMask & targetDataMask
             xi = numpy.where(targetDataMask & ~selfDataMask)
 
             def nearest(points, missing):
-                distance = numpy.ones(shape=self.shape, dtype='bool')
+                distance = numpy.ones(shape=selfChangeExtent.shape, dtype='bool')
                 distance[points] = 0
-                distance = ndimage.distance_transform_edt(distance, (self.csy, self.csx),
+                distance = ndimage.distance_transform_edt(distance, (selfChangeExtent.csy, selfChangeExtent.csx),
                                                           return_indices=True,
                                                           return_distances=False)
                 distance = (distance[0][missing], distance[1][missing])
@@ -695,11 +698,14 @@ class topo(raster):
                 del targetDataMask, selfDataMask
                 # Points in form ((x, y), (x, y))
                 pointGrid = numpy.fliplr(
-                    numpy.array(util.indices_to_coords(points, self.top, self.left, self.csx, self.csy)).T
+                    numpy.array(util.indices_to_coords(points, selfChangeExtent.top,
+                                                       selfChangeExtent.left, selfChangeExtent.csx,
+                                                       selfChangeExtent.csy)).T
                 )
                 # Interpolation grid in form ((x, y), (x, y))
                 xGrid = numpy.fliplr(
-                    numpy.array(util.indices_to_coords(xi, self.top, self.left, self.csx, self.csy)).T
+                    numpy.array(util.indices_to_coords(xi, selfChangeExtent.top, selfChangeExtent.left,
+                                                       selfChangeExtent.csx, selfChangeExtent.csy)).T
                 )
                 grad = selfData[points] - targetData[points]
 
@@ -709,6 +715,17 @@ class topo(raster):
                 output = numpy.zeros(shape=xi[0].shape, dtype='float32')
                 for i in iterator:
                     output[i[1][0]:i[1][1]] = i[0]
+
+                try:
+                    a = selfData.copy()
+                    a.fill(outrast.nodata)
+                    a[xi] = output
+                    copyrast = outrast.copy()
+                    copyrast[:] = a
+                    copyrast.save_gdal_raster(r'C:/users/devin/desktop/grad.tif')
+                    del a
+                except Exception as e:
+                    print "Problem saving grad:\n{}".format(e)
 
                 selfData[xi] = targetData[xi] + output
 
@@ -724,8 +741,8 @@ class topo(raster):
                         util.get_window_views(a, (3, 3)), 'a')
                     )
                     # Add other variables
-                    local_dict.update({'csx': self.csx, 'csy': self.csy,
-                                       'diag': numpy.sqrt((self.csx**2) + (self.csy**2))})
+                    local_dict.update({'csx': selfChangeExtent.csx, 'csy': selfChangeExtent.csy,
+                                       'diag': numpy.sqrt((selfChangeExtent.csx**2) + (selfChangeExtent.csy**2))})
 
                     # Compute mean filter
                     bool_exp = '&'.join([key for key in local_dict.keys()
@@ -758,16 +775,6 @@ class topo(raster):
                         break
                 if completed:
                     print "Completed iterative filter in %s iterations with a residual of %s" % (cnt, resid)
-
-                try:
-                    a = selfData.copy()
-                    a.fill(outrast.nodata)
-                    a[xi] = grad[xi]
-                    copyrast = outrast.copy()
-                    copyrast[:] = a
-                    copyrast.save_gdal_raster(r'C:/users/devin/desktop/grad.tif')
-                except:
-                    print "Problem saving grad"
 
                 selfData[xi] = targetData[xi] + grad[xi]
 

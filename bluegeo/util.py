@@ -4,10 +4,29 @@ Utilities for bluegeo
 import math
 import numpy
 from scipy import ndimage
+from osgeo import osr
 
 
 class BlueUtilError(Exception):
     pass
+
+
+def transform_points(points, inproj, outproj):
+    """
+    Transform a list of points [(x, y), (x, y)...]
+    :param points: 
+    :param inproj: projection of points as wkt
+    :param outproj: output projection of points as wkt
+    :return: projected points
+    """
+    insr = osr.SpatialReference()
+    insr.ImportFromWkt(inproj)
+    outsr = osr.SpatialReference()
+    outsr.ImportFromWkt(outproj)
+    if insr.IsSame(outsr):
+        return points
+    coordTransform = osr.CoordinateTransformation(insr, outsr)
+    return [coordTransform.TransformPoint(x, y)[:2] for x, y in points]
 
 
 def truncate_slice(s, size):
