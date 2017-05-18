@@ -722,6 +722,21 @@ class topo(raster):
                 for i in iterator:
                     output[i[1][0]:i[1][1]] = i[0]
 
+                #################################
+                # Temporary to check calculations
+                # TODO: Remove
+                #################################
+                try:
+                    a = selfData.copy()
+                    a.fill(outrast.nodata)
+                    gradsave = outrast.copy()
+                    a[xi] = output
+                    gradsave[:] = a
+                    gradsave.save_gdal_raster('/working/canfor/palliser_grad.tif')
+                    del a
+                except:
+                    print "Unable to save the gradient"
+
                 selfData[xi] = targetData[xi] + output
 
             elif interpolation == 'progressive':
