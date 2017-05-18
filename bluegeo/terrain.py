@@ -715,7 +715,7 @@ class topo(raster):
                 )
                 grad = selfData[points] - targetData[points]
 
-                iterator = inverse_distance(pointGrid[0:None:1000], xGrid, grad[0:None:1000])
+                iterator = inverse_distance(pointGrid, xGrid, grad)
 
                 # Add output to selfData
                 output = numpy.zeros(shape=xi[0].shape, dtype='float32')
