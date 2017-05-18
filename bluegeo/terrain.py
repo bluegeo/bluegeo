@@ -659,12 +659,16 @@ class topo(raster):
                 if chunkSize < 1:
                     chunkSize = 1
                 chunkRange = range(0, xGrid.shape[0] + chunkSize, chunkSize)
-                print "Requires %s rows/chunk out of %s" % (chunkSize, xGrid.shape[0])
 
-                iterator = [
-                    (pointGrid, xGrid[fr:to], values, numpy.zeros(shape=(to - fr,), dtype='float32'), (fr, to))
-                    for fr, to in zip(chunkRange[:-1], chunkRange[1:-1] + [xGrid.shape[0]])
-                ]
+                iterator = []
+                totalCalcs = 0
+                for fr, to in zip(chunkRange[:-1], chunkRange[1:-1] + [xGrid.shape[0]]):
+                    xChunk = xGrid[fr:to]
+                    totalCalcs += pointGrid.shape[0] * xChunk.shape[0]
+                    iterator.append(
+                        (pointGrid, xChunk, values, numpy.zeros(shape=(to - fr,), dtype='float32'), (fr, to))
+                    )
+                print "Requires {} calculations".format(totalCalcs)
 
                 import time
                 now = time.time()
