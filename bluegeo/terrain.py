@@ -640,7 +640,7 @@ class topo(raster):
                 def idw(args):
                     points, xi, grad, output, mask = args
                     i_shape = xi.shape[0]
-                    point_shape = points.shape[1]
+                    point_shape = points.shape[0]
                     for i in range(i_shape):
                         num = 0.0
                         denom = 0.0
@@ -715,7 +715,7 @@ class topo(raster):
                 )
                 grad = selfData[points] - targetData[points]
 
-                iterator = inverse_distance(pointGrid, xGrid, grad)
+                iterator = inverse_distance(pointGrid[0:None:1000], xGrid, grad[0:None:1000])
 
                 # Add output to selfData
                 output = numpy.zeros(shape=xi[0].shape, dtype='float32')
