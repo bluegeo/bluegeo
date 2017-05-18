@@ -661,15 +661,17 @@ class topo(raster):
                 chunkRange = range(0, xGrid.shape[0] + chunkSize, chunkSize)
                 print "Requires %s rows/chunk out of %s" % (chunkSize, xGrid.shape[0])
 
+                iterator = [
+                    (pointGrid, xGrid[fr:to], values, numpy.zeros(shape=(to - fr,), dtype='float32'), (fr, to))
+                    for fr, to in zip(chunkRange[:-1], chunkRange[1:-1] + [xGrid.shape[0]])
+                ]
+
                 import time
                 now = time.time()
                 print "Interpolating"
                 p = Pool(cpu_count())
                 try:
-                    iterator = list(p.imap_unordered(idw, [
-                        (pointGrid, xGrid[fr:to], values, numpy.zeros(shape=(to - fr,), dtype='float32'), (fr, to))
-                        for fr, to in zip(chunkRange[:-1], chunkRange[1:-1] + [xGrid.shape[0]])
-                    ]))
+                    iterator = list(p.imap_unordered(idw, iterator))
                 except Exception as e:
                     import sys
                     p.close()
@@ -715,17 +717,6 @@ class topo(raster):
                 output = numpy.zeros(shape=xi[0].shape, dtype='float32')
                 for i in iterator:
                     output[i[1][0]:i[1][1]] = i[0]
-
-                try:
-                    a = selfData.copy()
-                    a.fill(outrast.nodata)
-                    a[xi] = output
-                    copyrast = outrast.copy()
-                    copyrast[:] = a
-                    copyrast.save_gdal_raster(r'C:/users/devin/desktop/grad.tif')
-                    del a
-                except Exception as e:
-                    print "Problem saving grad:\n{}".format(e)
 
                 selfData[xi] = targetData[xi] + output
 

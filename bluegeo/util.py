@@ -1,6 +1,5 @@
-'''
-Utilities for bluegeo
-'''
+# Utilities for bluegeo
+
 import math
 import numpy
 from scipy import ndimage

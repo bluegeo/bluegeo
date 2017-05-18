@@ -3,5 +3,6 @@ import riparian
 import spatial
 import terrain
 import util
+from bluegrass import GrassSession
 
-print("vvvvelcome! to the BlueGeo data manipulation library")
+print("bluegeo GIS library V0.1 beta")
