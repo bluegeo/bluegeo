@@ -4,16 +4,12 @@ Raster data interfacing and manipulation library
 '''
 
 import os
-import shutil
 import numbers
-import decimal
-from copy import deepcopy
-from datetime import datetime
 from contextlib import contextmanager
 import numpy
 from osgeo import gdal, osr, gdalconst
 import h5py
-import tempfile
+from util import parse_projection, generate_name
 try:
     import numexpr as ne
     numexpr_ = True
@@ -75,7 +71,7 @@ class raster(object):
                     with h5py.File(input_data, libver='latest') as ds:
                         self.load_from_hdf5(ds)
                         self.format = 'HDF5'
-                except:
+                except Exception as e:
                     # Try for a gdal dataset
                     ds = gdal.Open(input_data)
                     try:
@@ -97,13 +93,18 @@ class raster(object):
             self.format = 'HDF5'
         # ...or a raster instance
         elif isinstance(input_data, raster):
-            # Create pointer to other instance
-            update_dict = deepcopy(input_data.__dict__)
-            try:
-                del update_dict['garbage']  # Do not grab garbage
-            except:
-                pass
-            self.__dict__.update(update_dict)
+            # Create pointer to other instance (same object)
+            self.__dict__ = input_data.__dict__
+            # Garbage is only collected if one instance exists
+            if hasattr(self, 'garbage'):
+                self.garbage['num'] += 1
+        else:
+            raise RasterError("Unknown input data of type {}\n"
+                              "Data may be one of:\n"
+                              "path\ngdal.Dataset\n"
+                              "h5py.File\n"
+                              "raster instance\n"
+                              "kwargs to build new raster".format(type(input_data).__name__))
 
         # Populate other attributes
         self.activeBand = 1
@@ -154,35 +155,22 @@ class raster(object):
 
     def load_from_hdf5(self, ds):
         """Load attributes from an HDF5 file"""
-        d = {}
-        for key, val in ds.attrs.iteritems():
-            if not isinstance(val, numpy.ndarray) and val == 'None':
-                val = None
-            elif str(key) == 'garbage':
-                continue
-            d[key] = val
-        current_mode = self.mode
-        self.__dict__.update(d)
-        self.mode = current_mode
+        self.__dict__.update({key: (None if not isinstance(val, numpy.ndarray) and val == 'None' else val)
+                              for key, val in dict(ds.attrs).iteritems()})
         self.shape = tuple(self.shape)
         self.path = str(ds.filename)
 
-    def save_as(self, output_path, compression='lzf', empty=False,
-                data=None, garbage_collect=False):
+    def new_hdf5_raster(self, output_path, compress):
         """
-        Save to a new file, and use with self
-        Note, using data overrides the empty arg
+        Create a new HDF5 data source for raster.  Factory for 'save' and 'empty'.
+        :param output_path: path for raster
+        :return: None
         """
-        # Create output dataset
-        # Check compression
-        if compression not in [None, 'lzf', 'gzip', 'szip']:
-            raise RasterError('Unrecognized compression "%s"' % compression)
+        # Do not overwrite self
+        if os.path.normpath(output_path).lower() == os.path.normpath(self.path).lower() and mode == 'r':
+            raise RasterError('Cannot overwrite the source dataset because it is open as read-only')
 
-        # Check path
-        if output_path.split('.')[-1] != 'h5':
-            output_path = output_path + '.h5'
-
-        # Create new HDF5 file
+        # Create new file
         with h5py.File(output_path, mode='w', libver='latest') as newfile:
             # Copy data from data source to new file
             prvb = self.activeBand
@@ -192,62 +180,81 @@ class raster(object):
             else:
                 chunks = (256, 256)
             # Add attributes to new file
-            update_dict = deepcopy(self.__dict__)
-            update_dict.update(
-                {
-                    'mode': 'r+',
-                    'format': 'HDF5',
-                    'path': output_path,
-                    'bottom': self.top - (self.csy * self.shape[0]),
-                    'right': self.left + (self.csx * self.shape[1])
-                }
-            )
-
-            # Do not transfer old garbage
-            if garbage_collect:
-                update_dict['garbage'] = output_path
-            else:
-                try:
-                    del update_dict['garbage']
-                except KeyError:
-                    pass
-            for key, val in update_dict.iteritems():
-                if val is None:
-                    val = 'None'
-                newfile.attrs[key] = val
+            newfile.attrs.update({key: ('None' if not isinstance(val, numpy.ndarray) and val == None else val)
+                                  for key, val in self.__dict__.iteritems()
+                                  if key not in ['garbage', 'mode', 'path']})
+            newfile.attrs.update({'format': 'HDF5', 'bottom': self.top - (self.csy * self.shape[0]),
+                                  'right': self.left + (self.csx * self.shape[1])})
 
             for band in self.bands:
+                if compress:
+                    compression = 'lzf'
+                else:
+                    compression = None
                 ds = newfile.create_dataset(str(band), self.shape,
                                             dtype=self.dtype,
                                             compression=compression,
                                             chunks=chunks)
-                if data is not None:
-                    if type(data) == numpy.ndarray and data.ndim == 3:
-                        ds[:] = data[:, :, band - 1]
-                    elif numpy.array(data).size == 1:
-                        # Broadcasting slow with h5py
-                        for a, s in self.iterchunks():
-                            _shape = (s[0].stop - s[0].start, s[1].stop - s[1].start)
-                            ds[s] = numpy.full(_shape, data, self.dtype)
-                    else:
-                        ds[:] = data
-                elif not empty:
-                    if self.useChunks:
-                        for a, s in self.iterchunks():
-                            ds[s] = a
-                    else:
-                        ds[:] = self.array
 
-        self.activeBand = prvb
+    def save(self, output_path, compress=True):
+        """
+        Save to a new file, and use with self
+        Note, using data overrides the empty arg
+        """
+        # Path extension dictates output type
+        extension = output_path.split('.')[-1].lower()
 
-        return raster(output_path, mode='r+')
+        # If HDF5:
+        if extension == 'h5':
+            #  Create new HDF5 file
+            self.new_hdf5_raster(output_path, compress=compress)
+
+            # Transfer data
+            out_rast = raster(output_path)
+            for _ in self.bands:
+                if self.useChunks:
+                    for a, s in self.iterchunks():
+                        out_rast[s] = a
+                else:
+                    out_rast[:] = self.array
+
+        # If GDAL:
+        elif extension in self.gdal_drivers.keys():
+            # Create data source
+            outraster = self.new_gdal_raster(output_path, self.shape,
+                                             self.bandCount, self.dtype,
+                                             self.left, self.top, self.csx,
+                                             self.csy, self.projection,
+                                             self.chunks, compress)
+
+            # Add data and nodata attributes
+            for band in self.bands:
+                outraster.activeBand = band
+                with outraster.dataset as ds:
+                    ds.GetRasterBand(outraster.band).SetNoDataValue(self.nodata)
+                ds = None
+                if self.useChunks:
+                    for a, s in self.iterchunks():
+                        outraster[s] = a
+                else:
+                    outraster[:] = self.array
+            del outraster
+
+        # Unsure...
+        else:
+            raise RasterError(
+                'Unknown file type, or file type not implemented yet: {}'.format(output_path.split('.')[-1])
+            )
 
     def build_new_raster(self, path, **kwargs):
         """
         Build a new raster from a set of keyword args
         """
+        # Force to HDF5 TODO: Provide support for GDAL types
+        if path.split('.')[-1].lower() != 'h5':
+            path += '.h5'
         # Get kwargs- for building the new raster
-        self.projection = self.parse_projection(
+        self.projection = parse_projection(
             kwargs.get('projection', None))
         self.csy = float(kwargs.get('csy', 1))
         self.csx = float(kwargs.get('csx', 1))
@@ -256,7 +263,7 @@ class raster(object):
         self.shape = kwargs.get('shape', None)
         self.interpolationMethod = kwargs.get('interpolationMethod',
                                               'nearest')
-        compression = kwargs.get('compression', 'lzf')
+        compress = kwargs.get('compress', True)
         self.useChunks = kwargs.get('useChunks', True)
         data = kwargs.get('data', None)
         if data is None and self.shape is None:
@@ -304,9 +311,6 @@ class raster(object):
             self.nodataValues = [0 for i in self.bands]
         if type(self.nodataValues) != list:
             self.nodataValues = [self.nodataValues]
-        # Data will be broadcast to nodata if it is not specified
-        if data is None:
-            data = self.nodataValues[0]
 
         self.activeBand = 1
         self.activeBand = 1
@@ -314,59 +318,62 @@ class raster(object):
         self.mode = 'r+'
         self.path = path
 
-        new_rast = self.save_as(path, compression=compression, data=data)
+        if data is None:
+            # Data will be broadcast to nodata if it is not specified
+            new_rast = self.full(self.nodataValues[0], path, compress=compress)
+        else:
+            new_rast = self.empty(path, compress=compress)
+            new_rast[:] = data
         self.__dict__.update(new_rast.__dict__)
 
-    def save(self, output_path, compression='lzf', empty=False):
-        """
-        Update attributes to current file
-        """
-        if self.mode != 'r+':
-            raise RasterError('Raster is open as read-only. Change mode to'
-                              ' "r+" to modify')
-        raise NotImplementedError("The save method has not yet been implemented")
-        # Need to implement this method (just update the attributes of the
-        #   current file)
-
-    def save_gdal_raster(self, output_path, compress=True):
-        """
-        Save current instance to a gdal-raster.
-        Future- add for support of more file types.
-        """
-        # Check path
-        if output_path.split('.')[-1] != 'tif':
-            output_path = output_path + '.tif'
-
-        # Create data source
-        outraster = self.new_gdal_raster(output_path, self.shape,
-                                         self.bandCount, self.dtype,
-                                         self.left, self.top, self.csx,
-                                         self.csy, self.projection,
-                                         self.chunks, compress)
-
-        # Add data and nodata attributes
-        for band in self.bands:
-            outraster.activeBand = band
-            with outraster.dataset as ds:
-                ds.GetRasterBand(outraster.band).SetNoDataValue(self.nodata)
-            ds = None
-            if self.useChunks:
-                for a, s in self.iterchunks():
-                    outraster[s] = a
-            else:
-                outraster[:] = self.array
-        del outraster
-
-    def copy(self, empty=False, file_suffix='copy', fill=None):
+    def copy(self, file_suffix='copy', format='h5'):
         """
         Create a copy of the underlying dataset to use for writing
-        temporarily.  Used when mode is 'r' and procesing is required,
+        temporarily.  Used when mode is 'r' and processing is required,
         or self is instantiated using another raster instance.
         Defaults to HDF5 format.
         """
-        path = self.generate_name(file_suffix, 'h5')
+        path = generate_name(self.path, file_suffix, format)
         # Write new file and return raster
-        return self.save_as(path, data=fill, empty=empty, garbage_collect=True)
+        self.save(path)
+        new_rast = raster(path)
+        # new_rast is temporary, so prepare garbage
+        new_rast.garbage = {'path': path, 'num': 1}
+        new_rast.mode = 'r+'
+        return new_rast
+
+    def empty(self, path=None, compress=True):
+        """
+        Return an empty copy of the raster- fast for empty raster instantiation
+        :param path: output path if desired
+        :param compress: Compress the output
+        :return: raster instance
+        """
+        if path is None:
+            out_path = generate_name(self.path, 'copy', 'h5')
+        else:
+            out_path = path
+        #  Create new HDF5 file
+        self.new_hdf5_raster(out_path, compress=compress)
+
+        # Add to garbage if temporary, and make writeable
+        outrast = raster(out_path)
+        if path is None:
+            outrast.garbage = {'path': out_path, 'num': 1}
+        outrast.mode = 'r+'
+        return outrast
+
+    def full(self, data, path=None, compress=True):
+        """
+        Return a copy of the raster filled with the input data
+        :param data: Array or scalar to be used to fill the raster
+        :param path: output path if not temporary
+        :param compress: Compress the output or not
+        :return: raster instance
+        """
+        outrast = self.empty(path=path, compress=compress)
+        outrast[:] = data
+        return outrast
 
     @property
     def size(self):
@@ -632,12 +639,12 @@ class raster(object):
             raise RasterError('Unrecognizable data type "%s"' % dtype)
         # Ensure they are already not the same
         if dtype == self.dtype:
-            return self.copy(file_suffix=dtype)
+            return self.copy(dtype)
 
         # Create a copy with new data type
         prvdtype = self.dtype
         self.dtype = dtype
-        out = self.copy(empty=True, file_suffix=dtype)
+        out = self.empty()
         self.dtype = prvdtype
 
         # Complete casting
@@ -657,11 +664,11 @@ class raster(object):
                 self.projection is not None) and self.mode == 'r':
             raise RasterError('The current raster already has a spatial'
                               ' reference, use mode="r+" to replace.')
-        self.projection = self.parse_projection(projection)
+        self.projection = parse_projection(projection)
         # Write projection to output files
         if self.format == 'gdal':
             with self.dataset as ds:
-                ds.SetProjection(projection)
+                ds.SetProjection(parse_projection(projection))
             ds = None
             del ds
         else:
@@ -669,7 +676,7 @@ class raster(object):
             with self.dataset as ds:
                 ds.attrs['projection'] = projection
 
-    def match_raster(self, input_raster, tolerance=1E-09):
+    def match_raster(self, input_raster, tolerance=1E-06):
         """
         Align extent and cells with another raster
         """
@@ -793,10 +800,10 @@ class raster(object):
         # Check if no change
         if all([self.top == bbox[0], self.bottom == bbox[1],
                 self.left == bbox[2], self.right == bbox[3]]):
-            return self.copy(file_suffix='change_extent')
+            return self.copy('change_extent')
 
-        # Create output dataset with new extent, and transfer self to it
-        path = self.generate_name('change_extent', 'h5')
+        # Create output dataset with new extent
+        path = generate_name(self.path, 'change_extent', 'h5')
         kwargs = {
             'projection': self.projection,
             'csx': self.csx,
@@ -810,7 +817,8 @@ class raster(object):
             'useChunks': self.useChunks
         }
         outds = raster(path, mode='w', **kwargs)
-        outds.garbage = path
+        # Add output to garbage
+        outds.garbage = {'path': path, 'num': 1}
         for _ in outds.bands:
             outds[insert_slice] = self[self_slice]
         return outds
@@ -857,19 +865,6 @@ class raster(object):
                 top += resid
             return (top, bottom, left, right)
 
-        # Direct to input raster dataset
-        if self.format != 'gdal':
-            path = self.generate_name('copy', 'tif')
-            self.save_gdal_raster(path)
-            input_raster = raster(path)
-            with input_raster.dataset as inds:
-                # The context manager does not work with ogr datasets
-                pass
-        else:
-            with self.dataset as inds:
-                # The context manager does not work with ogr datasets
-                pass
-
         # Get keyword args to determine what's done
         csx = kwargs.get('csx', None)
         if csx is not None:
@@ -877,7 +872,7 @@ class raster(object):
         csy = kwargs.get('csy', None)
         if csy is not None:
             csy = float(csy)
-        projection = self.parse_projection(kwargs.get('projection', None))
+        projection = parse_projection(kwargs.get('projection', None))
         bbox = kwargs.get('bbox', None)
         if bbox is not None:
             bbox = map(float, bbox)
@@ -905,7 +900,7 @@ class raster(object):
             insrs, outsrs = None, None
         if all([insrs is None, outsrs is None, csx is None, csy is None,
                 bbox is None]):
-            return self.copy(file_suffix='transform')
+            return self.copy('transform')
 
         # Refine each of the inputs, based on each of the args
         # Projection
@@ -985,7 +980,7 @@ class raster(object):
             output_srs = outsrs
         else:
             output_srs = self.projection
-        path = self.generate_name('transform', 'tif')
+        path = generate_name(self.path, 'transform', 'tif')
         out_raster = self.new_gdal_raster(path, shape, self.bandCount,
                                           self.dtype, bbox[2], bbox[0], csx,
                                           csy, output_srs, (256, 256))
@@ -1003,39 +998,28 @@ class raster(object):
             # The context manager does not work with ogr datasets
             pass
 
-        gdal.ReprojectImage(inds, outds, insrs, outsrs, self.interpolation)
+        # Direct to input raster dataset
+        if self.format != 'gdal':
+            with self.copy('copy', 'tif') as input_raster:
+                with input_raster.dataset as inds:
+                    # The context manager does not work with ogr datasets
+                    pass
+                    gdal.ReprojectImage(inds, outds, insrs, outsrs, self.interpolation)
+        else:
+            with self.dataset as inds:
+                # The context manager does not work with ogr datasets
+                pass
+                gdal.ReprojectImage(inds, outds, insrs, outsrs, self.interpolation)
         inds, outds = None, None
 
         # Return new raster
-        return raster(path)
-
-    def generate_name(self, suffix, extension):
-        """Generate a unique file name"""
-        now = datetime.now()
-
-        def getabsname(i, path_str):
-            return ('%s_%s_%s%i.%s' %
-                    (''.join(path_str.split('.')[:-1])[:20], str(suffix),
-                     datetime.toordinal(now), i, str(extension))
-                    )
-
-        i = 1
-        if not hasattr(self, 'path'):
-            path_dir = tempfile.gettempdir()
-            path_str = ''
-        else:
-            path_dir = os.path.dirname(self.path)
-            path_str = os.path.basename(self.path)
-
-        path = os.path.join(path_dir, getabsname(i, path_str))
-        while os.path.isfile(path):
-            i += 1
-            path = os.path.join(path_dir, getabsname(i, path_str))
-
-        return path
+        outrast = raster(path)
+        # This is temporary as an output
+        outrast.garbage = {'path': path, 'num': 1}
+        return outrast
 
     def fix_nodata(self):
-        '''Fix no data values to be identifiable if rounding errors exist'''
+        """Fix no data values to be identifiable if rounding errors exist"""
         for band in self.bands:
             if self.useChunks:
                 for a, s in self.iterchunks():
@@ -1050,11 +1034,16 @@ class raster(object):
                 if numpy.any(close) and numpy.all(a != self.nodata):
                     self.nodataValues[band - 1] = numpy.asscalar(a[close][0])
 
-    @staticmethod
-    def new_gdal_raster(output_path, shape, bands, dtype, left, top, csx, csy,
+    def new_gdal_raster(self, output_path, shape, bands, dtype, left, top, csx, csy,
                         projection, chunks, compress=True):
-        '''Generate a new gdal raster dataset'''
-        driver = gdal.GetDriverByName('GTiff')
+        """Generate a new gdal raster dataset"""
+        extension = output_path.split('.')[-1].lower()
+        if extension not in self.gdal_drivers.keys():
+            raise RasterError(
+                'Unknown file type, or file type not implemented yet: {}'.format(output_path.split('.')[-1])
+            )
+        driver = gdal.GetDriverByName(self.gdal_drivers[extension])
+        # Only tif currently set up, so these are the hard-coded compression and writing parameters
         if compress:
             comp = 'COMPRESS=LZW'
         else:
@@ -1075,46 +1064,23 @@ class raster(object):
         if ds is None:
             raise RasterError('GDAL error trying to create new raster.')
         ds.SetGeoTransform((left, float(csx), 0, top, 0, csy * -1.))
-        projection = raster.parse_projection(projection)
+        projection = parse_projection(projection)
         ds.SetProjection(projection)
         ds = None
         outraster = raster(output_path, mode='r+')
         return outraster
 
     @staticmethod
-    def parse_projection(projection):
-        '''Return a wkt from some argument'''
-        def raise_re():
-            raise RasterError('Unable to determine projection from %s' %
-                              projection)
-        if isinstance(projection, basestring):
-            sr = osr.SpatialReference()
-            sr.ImportFromWkt(projection)
-            outwkt = sr.ExportToWkt()
-        elif isinstance(projection, osr.SpatialReference):
-            return projection.ExportToWkt()
-        elif isinstance(projection, int):
-            sr = osr.SpatialReference()
-            sr.ImportFromEPSG(projection)
-            outwkt = sr.ExportToWkt()
-        elif isinstance(projection, raster):
-            # Return attribute from raster instance
-            return projection.projection
-        elif projection is None or projection == '':
-            outwkt = ''
-        else:
-            raise_re()
-        return outwkt
-
-    @staticmethod
     def gdal_args_from_slice(s, shape):
-        '''Supplementary to __getitem__ and __setitem__'''
+        """Factory for __getitem__ and __setitem__"""
         if type(s) == int:
             xoff = 0
             yoff = s
             win_xsize = shape[1]
             win_ysize = 1
         elif type(s) == tuple:
+            # Convert numpy objects to integers
+            s = [int(o) if 'numpy' in str(type(o)) else o for o in s]
             if type(s[0]) == int:
                 yoff = s[0]
                 win_ysize = 1
@@ -1164,7 +1130,7 @@ class raster(object):
     def max(self):
         """
         Collect the maximum
-        :return: Ummm...the maximum value
+        :return: The maximum value
         """
         if self.useChunks:
             stack = []
@@ -1205,7 +1171,7 @@ class raster(object):
                 xoff, yoff, win_xsize, win_ysize =\
                     self.gdal_args_from_slice(s, self.shape)
             except:
-                raise RasterError('Boolean and array indexing currently'
+                raise RasterError('Boolean and fancy indexing currently'
                                   ' unsupported for GDAL raster data sources.'
                                   ' Convert to HDF5 to use this'
                                   ' functionality.')
@@ -1249,72 +1215,31 @@ class raster(object):
                                   ' info:\n%s' % e)
 
     def perform_operation(self, r, op):
-        opstrrepr = {'/': 'div', '*': 'mul', '+': 'plu', '-': 'mnu'}
-        try:
-            if all([isinstance(x, numbers.Number)
-                    for x in (0, 0.0, 0j, decimal.Decimal(r))]):
-                num = True
-        except:
-            if not isinstance(r, raster):
-                raise RasterError('Expected a number or raster instance while'
-                                  ' using the "%s" operator' % op)
-            num = False
-        if num:
-            out = self.copy(True, opstrrepr[op])
+        """
+        Factory for all operand functions
+        :param r: value
+        :param op: operand
+        :return: raster instance
+        """
+        if isinstance(r, numbers.Number) or isinstance(r, numpy.ndarray):
+            out = self.full(r)
         else:
-            r.match_raster(self)
-            out = r
-            # Check if no copy made
-            if r.path == out.path:
-                out = r.copy(True, opstrrepr[op])
+            try:
+                r = raster(r)
+            except:
+                raise RasterError('Expected a number, numpy array, or valid raster while'
+                                  ' using the "%s" operator' % op)
+            out = r.match_raster(self)
+
         outnd = out.nodata
         nd = self.nodata
-        if num:
-            # It's a scalar
-            if self.useChunks:
-                # Compute over chunks
-                for a, s in self.iterchunks():
-                    if self.aMethod == 'ne':
-                        out[s] = ne.evaluate('where(a!=nd,a%sr,outnd)' % op)
-                    elif self.aMethod == 'np':
-                        m = a != nd
-                        b = a[m]
-                        a[m] = eval('b%sr' % op)
-                        a[~m] = outnd
-                        out[s] = a
-            else:
-                # Load into memory, then compute
-                a = self.array
+
+        if self.useChunks:
+            # Compute over chunks
+            for a, s in self.iterchunks():
+                b = out[s]
                 if self.aMethod == 'ne':
-                    out[:] = ne.evaluate('where(a!=nd,a%sr,outnd)' % op)
-                elif self.aMethod == 'np':
-                    m = a != nd
-                    b = a[m]
-                    a[m] = eval('b%sr' % op)
-                    a[~m] = outnd
-                    out[:] = a
-        else:
-            # Congratulations! It's a raster
-            if self.useChunks:
-                # Compute over chunks
-                for a, s in self.iterchunks():
-                    b = r[s]
-                    if self.aMethod == 'ne':
-                        out[s] = ne.evaluate('where((a!=nd)&(b!=outnd),a%sb,'
-                                             'outnd)' % op)
-                    elif self.aMethod == 'np':
-                        m = (a != nd) & (b != outnd)
-                        b = b[m]
-                        c = a[m]
-                        a[m] = eval('c%sb' % op)
-                        a[~m] = outnd
-                        out[s] = a
-            else:
-                # Load into memory, then compute
-                a = self.array
-                b = r.array
-                if self.aMethod == 'ne':
-                    out[:] = ne.evaluate('where((a!=nd)&(b!=outnd),a%sb,'
+                    out[s] = ne.evaluate('where((a!=nd)&(b!=outnd),a%sb,'
                                          'outnd)' % op)
                 elif self.aMethod == 'np':
                     m = (a != nd) & (b != outnd)
@@ -1322,74 +1247,69 @@ class raster(object):
                     c = a[m]
                     a[m] = eval('c%sb' % op)
                     a[~m] = outnd
-                    out[:] = a
+                    out[s] = a
+        else:
+            # Load into memory, then compute
+            a = self.array
+            b = out.array
+            if self.aMethod == 'ne':
+                out[:] = ne.evaluate('where((a!=nd)&(b!=outnd),a%sb,'
+                                     'outnd)' % op)
+            elif self.aMethod == 'np':
+                m = (a != nd) & (b != outnd)
+                b = b[m]
+                c = a[m]
+                a[m] = eval('c%sb' % op)
+                a[~m] = outnd
+                out[:] = a
         return out
 
     def perform_i_operation(self, r, op):
+        """
+        Factory for all i-operand functions
+        :param r: number, array, or raster
+        :param op: operand
+        :return: raster instance
+        """
         if self.mode == 'r':
             raise RasterError('%s open as read-only.' %
                               os.path.basename(self.path))
-        try:
-            if all([isinstance(x, numbers.Number)
-                    for x in (0, 0.0, 0j, decimal.Decimal(r))]):
-                num = True
-        except:
-            if not isinstance(r, raster):
-                raise RasterError('Expected a number or raster instance while'
-                                  ' using the "%s=" operator')
-            num = False
-
-        # r is a scalar
-        if num:
-            nd = self.nodata
-            if self.useChunks:
-                for a, s in self.iterchunks():
-                    if self.aMethod == 'ne':
-                        self[s] = ne.evaluate('where(a!=nd,a%sr,nd)' % op)
-                    elif self.aMethod == 'np':
-                        m = a != nd
-                        b = a[m]
-                        a[m] = eval('b%sr' % op)
-                        self[s] = a
-            else:
-                a = self.array
-                if self.aMethod == 'ne':
-                    self[:] = ne.evaluate('where(a!=nd,a%sr,nd)' % op)
-                elif self.aMethod == 'np':
-                    m = a != nd
-                    b = a[m]
-                    a[m] = eval('b%sr' % op)
-                    self[:] = a
-
-        # r is another raster
+        if isinstance(r, numbers.Number) or isinstance(r, numpy.ndarray):
+            r = self.full(r)
         else:
+            try:
+                r = raster(r)
+            except:
+                raise RasterError('Expected a number, numpy array, or valid raster while'
+                                  ' using the "%s=" operator' % op)
             r.match_raster(self)
-            rnd = r.nodata
-            nd = self.nodata
-            if self.useChunks:
-                for a, s in self.iterchunks():
-                    b = r[s]
-                    if self.aMethod == 'ne':
-                        self[s] = ne.evaluate('where((a!=nd)&(b!=rnd),a%sb,nd)'
-                                              % op)
-                    elif self.aMethod == 'np':
-                        m = (a != nd) & (b != rnd)
-                        b = b[m]
-                        c = a[m]
-                        a[m] = eval('c%sb' % op)
-                        self[s] = a
-            else:
-                a = self.array
-                b = r.array
+
+        rnd = r.nodata
+        nd = self.nodata
+        if self.useChunks:
+            for a, s in self.iterchunks():
+                b = r[s]
                 if self.aMethod == 'ne':
-                    self[:] = ne.evaluate('where((a!=nd)&(b!=rnd),a%sb,nd)'
+                    self[s] = ne.evaluate('where((a!=nd)&(b!=rnd),a%sb,nd)'
                                           % op)
                 elif self.aMethod == 'np':
                     m = (a != nd) & (b != rnd)
                     b = b[m]
                     c = a[m]
                     a[m] = eval('c%sb' % op)
-                    self[:] = a
+                    self[s] = a
+        else:
+            a = self.array
+            b = r.array
+            if self.aMethod == 'ne':
+                self[:] = ne.evaluate('where((a!=nd)&(b!=rnd),a%sb,nd)'
+                                      % op)
+            elif self.aMethod == 'np':
+                m = (a != nd) & (b != rnd)
+                b = b[m]
+                c = a[m]
+                a[m] = eval('c%sb' % op)
+                self[:] = a
 
     def __add__(self, r):
         return self.perform_operation(r, '+')
@@ -1466,6 +1386,16 @@ class raster(object):
 
     def __repr__(self):
         insr = osr.SpatialReference(wkt=self.projection)
+        projcs = insr.GetAttrValue('projcs')
+        datum = insr.GetAttrValue('datum')
+        if projcs is None:
+            projcs = 'None'
+        else:
+            projcs = projcs.replace('_', ' ')
+        if datum is None:
+            datum = 'None'
+        else:
+            datum = datum.replace('_', ' ')
         methods = {
             'ne': 'numexpr (Parallel, cache-optimized)',
             'np': 'numpy (single-threaded, vectorized)'
@@ -1492,9 +1422,14 @@ class raster(object):
                 '' % (self.bandCount, self.shape[0], self.shape[1], self.csx,
                       self.csy, (self.top, self.bottom, self.left, self.right),
                       self.dtype, round(self.size, 3),
-                      insr.GetAttrValue('projcs'), insr.GetAttrValue('datum'),
+                      projcs, datum,
                       self.activeBand, self.interpolationMethod,
                       self.useChunks, methods[self.aMethod]))
+
+    @property
+    def gdal_drivers(self):
+        known_drivers = {'tif': 'GTiff'}
+        return known_drivers
 
     def __enter__(self):
         return self
@@ -1503,16 +1438,19 @@ class raster(object):
         self.clean_garbage()
 
     def __del__(self):
-        # Supposedly not a great approach, but it doesn't hurt anything
+        """Oh well"""
         self.clean_garbage()
 
     def clean_garbage(self):
-        """Remove all temporary files (created using copy)"""
+        """Remove all temporary files"""
         if hasattr(self, 'garbage'):
-            try:
-                os.remove(self.garbage)
-            except:
-                pass
+            if self.garbage['num'] > 1:
+                self.garbage['num'] -= 1
+            else:
+                try:
+                    os.remove(self.garbage['path'])
+                except:
+                    pass
 
 
 class mosaic(raster):
@@ -1550,7 +1488,8 @@ class mosaic(raster):
         dtype = self.rasterDtypes[precision]
 
         # Build a new raster using the combined specs
-        path = self.generate_name('rastermosaic', 'h5')
+        path = generate_name(self.path, 'rastermosaic', 'h5')
+        # TODO: Add this path to the garbage of the output
         super(mosaic, self).__init__(path, mode='w', csx=csx, csy=csy, top=top, left=left,
                                      shape=shape, projection=projection, dtype=dtype)
         # Create a mask to track where data are merged
@@ -1604,9 +1543,17 @@ class mosaic(raster):
 
 
 # Numpy-like methods
-def copy(input_raster, empty=False, file_suffix='copy'):
+def copy(input_raster):
     """Copy a raster dataset"""
-    return raster(input_raster).copy(empty=empty, file_suffix=file_suffix)
+    return raster(input_raster).copy('copy')
+
+
+def empty(input_raster):
+    return raster(input_raster).empty()
+
+
+def full(input_raster):
+    return raster(input_raster).full()
 
 
 def unique(input_raster):
@@ -1627,7 +1574,7 @@ def rastmin(input_raster):
     :return: Minimum value
     """
     r = raster(input_raster)
-    if self.useChunks:
+    if r.useChunks:
         stack = []
         for a, s in r.iterchunks():
             stack.append(numpy.min(a[a != r.nodata]))
@@ -1642,7 +1589,7 @@ def rastmax(input_raster):
     :return: Maximum value
     """
     r = raster(input_raster)
-    if self.useChunks:
+    if r.useChunks:
         stack = []
         for a, s in r.iterchunks():
             stack.append(numpy.max(a[a != r.nodata]))

@@ -90,3 +90,13 @@ class GrassSession():
 
     def __exit__(self, type, value, traceback):
         self.cleanup()
+
+
+# def groundwater_2d(dem, Kx, Ky, ):
+#     # Match all input rasters
+#     with raster(Kx).matchRaster(dem) as match:
+#
+#
+#     with GrassSession() as gs:
+#         from grass.pygrass.modules.shortcuts import raster as graster
+#         from grass.script import core as grass

@@ -1,14 +1,15 @@
 '''
 Terrain and Hydrologic routing analysis
 
-Blue Geosimulation, 2016
+Blue Geosimulation, 2017
 '''
 
 from raster import *
 import util
 import math
-from scipy import ndimage, interpolate
 from numba.decorators import jit
+from vector import *
+from scipy import ndimage
 
 try:
     from bluegrass import GrassSession
@@ -16,371 +17,8 @@ except ImportError:
     print "Warning: Grass functions not available"
 
 
-class WatershedError(Exception):
-    pass
-
-
 class TopoError(Exception):
     pass
-
-
-class watershed(raster):
-    '''
-    Topographic routing and watershed delineation primarily using grass
-    '''
-    def __init__(self, surface, tempdir=None):
-        # Open and change to float if not already
-        self.tempdir = tempdir
-        if isinstance(surface, raster):
-            self.__dict__.update(surface.__dict__)
-        else:
-            super(watershed, self).__init__(surface)
-        # Change interpolation method unless otherwise specified
-        self.interpolationMethod = 'bilinear'
-
-    def create_external_datasource(self):
-        path = self.generate_name('copy', 'tif', True)
-        self.save_gdal_raster(path)
-        return path
-
-    def route(self):
-        '''
-        Return a single (D8) flow direction from 1 to 8, and positive flow
-        accumulation surface
-        '''
-        # Save a new raster if the data source format is not gdal
-        if self.format != 'gdal':
-            external = self.create_external_datasource()
-        else:
-            external = self.path
-
-        # Get paths for the outputs
-        fd_outpath = self.generate_name('fl_dir', 'tif')
-        fa_outpath = self.generate_name('fl_acc', 'tif')
-
-        # Perform analysis using grass session
-        with GrassSession(external, temp=self.tempdir):
-            from grass.pygrass.modules.shortcuts import raster as graster
-            from grass.script import core as grass
-            graster.external(input=external, output='surface')
-            grass.run_command('r.watershed', elevation='surface',
-                              drainage='fd', accumulation='fa', flags='s')
-            graster.out_gdal('fd', format="GTiff", output=fd_outpath)
-            graster.out_gdal('fa', format="GTiff", output=fa_outpath)
-
-        return watershed(fd_outpath, tempdir=self.tempdir), watershed(fa_outpath, tempdir=self.tempdir)
-
-    def convergence(self, size=(11, 11), fd=None):
-        '''
-        Compute the relative convergence of flow vectors (uses directions 1 to
-        8, which are derived from flow direction)
-        '''
-        def eval_conv(a):
-            nd = fd.nodata
-            mask = (a > 0) & (a != nd)
-
-            # Convert a into angles
-            x, y = numpy.mgrid[0:self.csy * 2:3j, 0:self.csx * 2:3j]
-            ang = (numpy.arctan2(y - self.csy, x - self.csx) * -1) + numpy.pi
-            a = ne.evaluate('where(mask,a-1,0)')
-            a = ang[(0, 0, 0, 1, 2, 2, 2, 1), (2, 1, 0, 0, 0, 1, 2, 2)][a]
-            a[~mask] = nd
-
-            # Get neighbours as views and create output
-            b = util.window_local_dict(util.get_window_views(a, size), 'a')
-            x, y = numpy.mgrid[0:(a.shape[0] - 1) * self.csy:a.shape[0] * 1j,
-                               0:(a.shape[1] - 1) * self.csx:a.shape[1] * 1j]
-            b.update(util.window_local_dict(util.get_window_views(x, size), 'x'))
-            b.update(util.window_local_dict(util.get_window_views(y, size), 'y'))
-            pi = numpy.pi
-            b.update({'pi': pi, 'nd': nd})
-            c = '%s_%s' % ((size[0] - 1) / 2, (size[1] - 1) / 2)
-            conv = numpy.zeros(shape=b['a%s' % c].shape, dtype='float32')
-
-            # Iterate neighbours and compute convergence
-            size_scale = (size[0] * size[1]) - 1
-            for i in range(size[0]):
-                for j in range(size[1]):
-                    if i == int(c[0]) and j == int(c[2]):
-                        continue
-                    at2 = ne.evaluate('where(a%i_%i!=nd,abs(((arctan2(y%i_%i-'
-                                      'y%s,x%i_%i-x%s)*-1)+pi)-a%i_%i),nd)' %
-                                      (i, j, i, j, c, i, j, c, i, j),
-                                      local_dict=b)
-                    conv = ne.evaluate('where(at2!=nd,conv+((where(at2>pi,(2*'
-                                       'pi)-at2,at2)/pi)/size_scale),conv)')
-            conv[b['a%s' % c] == nd] = nd
-            return conv
-
-        # Calculate fa if not specified
-        if fd is None:
-            fa, fd = self.route()
-        else:
-            fd = raster(fd)
-            if 'int' not in fd.dtype:
-                fd = fd.astype('int32')
-        # Allocate output
-        conv = self.copy(True, 'conv')
-        if fd.useChunks:
-            # Iterate chunks and calculate convergence
-            for a, s in fd.iterchunks(expand=size):
-                s_ = util.truncate_slice(s, size)
-                conv[s_] = eval_conv(a).astype('float32')
-        else:
-            # Calculate over all data
-            conv[:] = eval_conv(fd.array)
-
-        return watershed(conv, tempdir=self.tempdir)
-
-    def stream_order(self, min_contrib_area):
-        '''
-        Return streams with a contributing area greate than the specified
-        threshold.  The resulting dataset includes strahler order for each
-        stream
-        '''
-        # Save a new raster if the data source format is not gdal
-        if self.format != 'gdal':
-            external = self.create_external_datasource()
-        else:
-            external = self.path
-        # Create output path
-        str_path = self.generate_name('streams', 'tif')
-
-        with GrassSession(external, temp=self.tempdir):
-            from grass.pygrass.modules.shortcuts import raster as graster
-            from grass.script import core as grass
-            graster.external(input=external, output='dem')
-
-            # Compute flow accumulation threshold based on min area
-            thresh = min_contrib_area / (self.csx * self.csy)
-            grass.run_command('r.stream.extract', elevation='dem',
-                              threshold=thresh, stream_raster='streams',
-                              direction='fd')
-            grass.run_command('r.stream.order', stream_rast='streams',
-                              direction='fd', strahler="strlr")
-            graster.out_gdal('strlr', format="GTiff", output=str_path)
-
-        return watershed(str_path, tempdir=self.tempdir)
-
-    def stream_reclass(self, fa, min_contrib_area):
-        '''
-        Reclassify a flow accumulation dataset
-        '''
-        fa_rast = raster(fa)
-        st = fa_rast.astype('uint8')
-        st[:] = (fa_rast.array > (min_contrib_area /
-                                  (st.csx * st.csy))).astype('uint8')
-        st.nodataValues = [0]
-        return st
-
-    def stream_slope(self, iterations=1, streams=None, min_contrib_area=None,
-                     fa=None, units='degrees'):
-        '''
-        Compute the slope from cell to cell in streams with a minimum
-        contributing area.  If streams are specified, they will not be
-        computed.
-        '''
-        if streams is not None:
-            with self.match_raster(streams) as dem:
-                elev = dem.array
-            strms = raster(streams)
-            m = strms.array != strms.nodata
-        else:
-            if min_contrib_area is None:
-                raise WatershedError('min_contrib_area must be specified if no'
-                                     ' stream layer is provided')
-            if fa is not None:
-                with watershed(
-                    self.path, tempdir=self.tempdir
-                ).stream_reclass(fa, min_contrib_area) as ws:
-                    m = ws.array != ws.nodata
-            else:
-                with watershed(self.path, tempdir=self.tempdir).stream_order(min_contrib_area) as ws:
-                    m = ws.array != ws.nodata
-            elev = self.array
-        # Compute stream slope
-        inds = numpy.where(m)
-        diag = math.sqrt(self.csx**2 + self.csy**2)
-        run = numpy.array([[diag, self.csy, diag],
-                           [self.csx, 1, self.csx],
-                           [diag, self.csy, diag]])
-        ish, jsh = self.shape
-
-        def compute(i, j):
-            s = (slice(max([0, i - 1]),
-                       min([i + 2, ish])),
-                 slice(max([0, j - 1]),
-                       min([j + 2, jsh])))
-            base = elev[i, j]
-            rise = numpy.abs(base - elev[s][m[s]])
-            run_ = run[m[s]]
-            run_ = run_[rise != 0]
-            rise = rise[rise != 0]
-            if run_.size == 0:
-                return 0
-            else:
-                if units == 'degrees':
-                    return numpy.mean(numpy.degrees(numpy.arctan(rise / run_)))
-                else:
-                    return numpy.mean(rise / run_) * 100
-
-        output = self.copy(True, 'str_slope')
-        a = numpy.full(output.shape, output.nodata, output.dtype)
-        for _iter in range(iterations):
-            slopefill = [compute(inds[0][i], inds[1][i])
-                         for i in range(inds[0].shape[0])]
-            a[m] = slopefill
-        output[:] = a
-        return output
-
-    def alluvium(self, slope_thresh=6, stream_slope_thresh=5, **kwargs):
-        '''
-        Use the derivative of stream slope to determine regions of
-        aggradation to predict alluvium deposition.  The input slope threshold
-        is used as a cutoff for region delineation, which the stream slope
-        threshold is the required stream slope to initiate deposition.
-        Uses the dem as an input
-        surface, and accepts (or they will be derived):
-
-        streams: a streams raster
-        min_contrib_area: minimum contributing area to define streams
-        slope: a slope surface used to control the region delineation
-        '''
-        # Get or compute necessary datasets
-        streams = kwargs.get('streams', None)
-        min_contrib_area = kwargs.get('min_contrib_area', 1E04)
-        slope = kwargs.get('slope', None)
-        fa = kwargs.get('fa', None)
-        if streams is None:
-            strslo = self.stream_slope(2, min_contrib_area=min_contrib_area,
-                                       fa=fa)
-        else:
-            strslo = self.stream_slope(2, streams)
-        seeds = set(zip(*numpy.where(strslo.array != strslo.nodata)))
-        if slope is None:
-            slope = topo(self.path).slope().array
-
-        # Create output tracking array
-        track = numpy.zeros(shape=self.shape, dtype='uint8')
-
-        # Recursively propagate downstream and delineate alluvium
-        # Load elevation data into memory
-        ish, jsh = self.shape
-        dem = self.array
-        dem_m = dem != self.nodata
-        streams = strslo.array
-        while True:
-            try:
-                seed = seeds.pop()
-            except:
-                break
-            s = (slice(max(0, seed[0] - 1),
-                       min(seed[0] + 2, ish)),
-                 slice(max(0, seed[1] - 1),
-                       min(seed[1] + 2, jsh)))
-            str_mask = streams[s] != strslo.nodata
-            if (streams[seed] != strslo.nodata) & (track[seed] == 0):
-                # If stream exists check slope and initiate growth
-                if streams[seed] > stream_slope_thresh:
-                    track[seed] = 2
-                else:
-                    track[seed] = 1
-            # High slope: erosion- directed propagation at higher slopes
-            g = (dem[seed] - dem[s]).ravel()
-            mask = numpy.argsort(g)
-            if track[seed] == 2:
-                # Create a mask with correct gradient directions
-                mask = (mask > 5).reshape(str_mask.shape)
-                mask = mask & (slope[s] < slope_thresh)
-                track_add = 2
-            # Low slope: aggradation- fan outwards at shallower slopes
-            else:
-                mask = (mask > 3).reshape(str_mask.shape)
-                mask = mask & (slope[s] < (slope_thresh / 2))
-                track_add = 1
-
-            # Update track with non-stream cells
-            mask = mask & ~str_mask & (track[s] == 0) & dem_m[s]
-            s_i, s_j = numpy.where(mask)
-            s_i = s_i + s[0].start
-            s_j = s_j + s[1].start
-            track[(s_i, s_j)] = track_add
-
-            # Update the stack with new stream and other cells
-            mask[str_mask & (track[s] == 0)] = 1
-            s_i, s_j = numpy.where(mask)
-            s_i = s_i + s[0].start
-            s_j = s_j + s[1].start
-            seeds.update(zip(s_i, s_j))
-
-        alluv_out = self.copy(True, 'alluv').astype('uint8')
-        alluv_out[:] = track
-        alluv_out.nodataValues = [0]
-        return watershed(alluv_out, tempdir=self.tempdir)
-
-    def alluvium2(self, min_dep=0, max_dep=5, benches=1, **kwargs):
-        '''
-        Stuff
-        '''
-        min_contrib_area = kwargs.get('min_contrib_area', 1E04)
-        slope = kwargs.get('slope', None)
-        if slope is None:
-            with topo(self.path).slope() as slope:
-                sl = slope.array
-                slnd = slope.nodata
-        else:
-            slope = raster(slope)
-            sl = slope.array
-            slnd = slope.nodata
-        streams = kwargs.get('streams', None)
-        if streams is None:
-            with self.stream_slope(
-                min_contrib_area=min_contrib_area
-            ) as strslo:
-                sa = strslo.array
-                sand = strslo.nodata
-        else:
-            with self.stream_slope(streams=streams) as strslo:
-                sa = strslo.array
-                sand = strslo.nodata
-        elev = self.array
-
-        # First phase
-        sa_m = sa != sand
-        sl_m = sl != slnd
-        alluv = sa_m.astype('uint8')
-        slope_m = sl_m & (sl >= min_dep) & (sl <= max_dep)
-        labels, num = ndimage.label(slope_m, numpy.ones(shape=(3, 3),
-                                                        dtype='bool'))
-        # Find mean stream slopes within regions
-        str_labels = numpy.copy(labels)
-        str_labels[~sa_m] = 0
-        un_lbl = numpy.unique(str_labels[str_labels != 0])
-        min_slopes = ndimage.minimum(sa, str_labels, un_lbl)
-        max_slopes = ndimage.maximum(sa, str_labels, un_lbl)
-        # Find max elevation of streams within regions
-        max_elev = ndimage.maximum(elev, str_labels, un_lbl)
-
-        # Iterate stream labels and assign regions based on elevation and slope
-        for i, reg in enumerate(un_lbl):
-            if reg == 0:
-                continue
-            # Modify region to reflect stream slope variance and max elevation
-            m = ((labels == reg) & (sl >= min_slopes[i]) &
-                 (sl <= max_slopes[i]) & (elev < max_elev[i]))
-            alluv[m] = 1
-
-        # Remove regions not attached to a stream
-        labels, num = ndimage.label(alluv, numpy.ones(shape=(3, 3),
-                                                      dtype='bool'))
-        alluv = numpy.zeros(shape=alluv.shape, dtype='uint8')
-        for reg in numpy.unique(labels[sa_m]):
-            alluv[labels == reg] = 1
-
-        alluv_out = self.copy(True, 'alluv').astype('uint8')
-        alluv_out.nodataValues = [0]
-        alluv_out[:] = alluv
-        return watershed(alluv_out, tempdir=self.tempdir)
 
 
 class topo(raster):
@@ -389,15 +27,10 @@ class topo(raster):
     '''
     def __init__(self, surface):
         # Open and change to float if not already
-        if isinstance(surface, raster):
-            self.__dict__.update(surface.__dict__)
+        if 'float' not in raster(surface).dtype:
+            super(topo, self).__init__(surface.astype('float32'))
         else:
             super(topo, self).__init__(surface)
-        if 'float' not in self.dtype:
-            selfcopy = self.astype('float32')
-            self.__dict__.update(selfcopy.__dict__)
-            selfcopy.garbage = []
-            del selfcopy
         # Change interpolation method unless otherwise specified
         self.interpolationMethod = 'bilinear'
 
@@ -452,7 +85,7 @@ class topo(raster):
                                local_dict=local_dict)
 
         # Allocate output
-        slope_raster = self.copy(True, 'slope')
+        slope_raster = self.empty()
         if self.useChunks:
             # Iterate chunks and calculate slope
             for a, s in self.iterchunks(expand=(3, 3)):
@@ -505,7 +138,7 @@ class topo(raster):
                                local_dict=local_dict)
 
         # Allocate output
-        aspect_raster = self.copy(True, 'aspect')
+        aspect_raster = self.empty()
         if self.useChunks:
             # Iterate chunks and calculate aspect
             for a, s in self.iterchunks(expand=(3, 3)):
@@ -523,11 +156,11 @@ class topo(raster):
         return topo(aspect_raster)
 
     def surface_roughness(self, size=(3, 3)):
-        '''
+        """
         Compute the roughness of a surface.
         Methods are:
         "std-elev": standard deviation of locally normalized elevation
-        '''
+        """
         def eval_roughness(a):
             # Generate nodata mask and get views
             view = util.get_window_views(a, size)
@@ -578,7 +211,7 @@ class topo(raster):
             return std
 
         # Allocate output
-        surf_rough = self.copy(True, 'srf_rgh')
+        surf_rough = self.empty()
         if self.useChunks:
             # Iterate chunks and calculate convergence
             for a, s in self.iterchunks(expand=size):
@@ -590,12 +223,10 @@ class topo(raster):
 
         return topo(surf_rough)
 
-    def align(self, input_raster, interpolation='nearest', idw_search=10, tolerance=1E-06, max_iter=5000):
+    def align(self, input_raster, interpolation='nearest', tolerance=1E-06, max_iter=5000):
         """
         Align two grids, and correct the z-value using difference in overlapping areas
         :param input_raster: Raster to align with self
-        :param idw_nbrs: Minimum number of points to search to interpolate gradient
-        :param chunk_size: Max memory of chunks (MB)
         :return: Aligned dataset with coverage from self, and input_raster
         """
         print "Matching rasters"
@@ -613,7 +244,7 @@ class topo(raster):
         selfChangeExtent = self.change_extent(bbox)  # Need extent of both rasters
 
         # Allocate output
-        outrast = selfChangeExtent.copy('align')
+        outrast = selfChangeExtent.empty()
 
         # Match both rasters
         with topo(input_raster).match_raster(selfChangeExtent) as inrast:
@@ -722,21 +353,6 @@ class topo(raster):
                 for i in iterator:
                     output[i[1][0]:i[1][1]] = i[0]
 
-                #################################
-                # Temporary to check calculations
-                # TODO: Remove
-                #################################
-                try:
-                    a = selfData.copy()
-                    a.fill(outrast.nodata)
-                    gradsave = outrast.copy()
-                    a[xi] = output
-                    gradsave[:] = a
-                    gradsave.save_gdal_raster('/working/canfor/palliser_grad.tif')
-                    del a
-                except:
-                    print "Unable to save the gradient"
-
                 selfData[xi] = targetData[xi] + output
 
             elif interpolation == 'progressive':
@@ -790,3 +406,216 @@ class topo(raster):
 
             outrast[:] = selfData
         return outrast
+
+
+def inverse_distance(pointGrid, xGrid, values):
+    @jit(nopython=True, nogil=True)
+    def idw(args):
+        points, xi, grad, output, mask = args
+        i_shape = xi.shape[0]
+        point_shape = points.shape[0]
+        for i in range(i_shape):
+            num = 0.0
+            denom = 0.0
+            for j in range(point_shape):
+                w = 1 / numpy.sqrt(
+                    ((points[j, 0] - xi[i, 0]) ** 2) + ((points[j, 1] - xi[i, 1]) ** 2)
+                ) ** 2
+                denom += w
+                num += w * grad[j]
+            output[i] = num / denom
+        return output, mask
+
+    # Compute chunk size from memory specification and neighbours
+    from multiprocessing import Pool, cpu_count
+    chunkSize = int(round(xGrid.shape[0] / (cpu_count() * 4)))
+    if chunkSize < 1:
+        chunkSize = 1
+    chunkRange = range(0, xGrid.shape[0] + chunkSize, chunkSize)
+
+    iterator = []
+    totalCalcs = 0
+    for fr, to in zip(chunkRange[:-1], chunkRange[1:-1] + [xGrid.shape[0]]):
+        xChunk = xGrid[fr:to]
+        totalCalcs += pointGrid.shape[0] * xChunk.shape[0]
+        iterator.append(
+            (pointGrid, xChunk, values, numpy.zeros(shape=(to - fr,), dtype='float32'), (fr, to))
+        )
+    print "Requires {} calculations".format(totalCalcs)
+
+    import time
+    now = time.time()
+    print "Interpolating"
+    p = Pool(cpu_count())
+    try:
+        iterator = list(p.imap_unordered(idw, iterator))
+    except Exception as e:
+        import sys
+        p.close()
+        p.join()
+        raise e, None, sys.exc_info()[2]
+    else:
+        p.close()
+        p.join()
+    print "Completed interpolation in %s minutes" % (round((time.time() - now) / 60, 3))
+    return iterator
+
+
+def correct_surface(surface, points, field):
+    """
+    Correct a surface to align with a set of points
+    :param surface: input surface to correct
+    :param points: points used to correct surface
+    :param field: field with the z-information
+    :return: raster instance
+    """
+    # Load datasets
+    points = vector(points)
+    surface = raster(surface)
+    # Project points to same spatial reference as the surface
+    points = points.transform(surface.projection)
+    z = points[field]
+    vertices = points.vertices
+
+    # Get indices of aligned cells
+    alignCells = util.coords_to_indices((vertices[:, 0], vertices[:, 1]),
+                                   surface.top, surface.left, surface.csx, surface.csy, surface.shape)
+    # Remove points that are not within the surface extent
+    m = util.intersect_mask((vertices[:, 0], vertices[:, 1]),
+                       surface.top, surface.left, surface.csx, surface.csy, surface.shape)
+    z = z[m]
+
+    # Create a difference surface using IDW
+    dif = numpy.squeeze([surface[i, j] for i, j in zip(alignCells[0], alignCells[1])])  # Slow for lots of points...
+    dif = z - dif
+    grid = surface.mgrid
+    grid = numpy.vstack([grid[1].ravel(), grid[0].ravel()]).T
+    iterator = inverse_distance(vertices[:, :2], grid, dif)
+
+    # Create an output raster and correct with interpolated difference
+    out = surface.copy()
+    grid = surface.array.ravel()
+    for i in iterator:
+        a = grid[i[1][0]:i[1][1]]
+        m = a != out.nodata
+        a[m] += i[0][m]
+        grid[i[1][0]:i[1][1]] = a
+    out[:] = grid.reshape(out.shape)
+    return out
+
+
+def raster_label(a):
+    """
+    Label an array and return the index
+    :param a: ndarray
+    :return: index of ravelled labels
+    """
+    labels, _ = ndimage.measurements.label(a, numpy.ones(shape=(3, 3), dtype='bool'))
+    labels = labels.ravel()
+    indices = numpy.argsort(labels)
+    bins = numpy.bincount(labels)
+    return dict(zip(numpy.unique(labels), numpy.split(indices, numpy.cumsum(bins[bins > 0][:-1]))))
+
+
+def bare_earth(surface, max_area=65., slope_threshold=40.):
+    """
+    Create a bare-earth representation of a surface model by removing objects
+    :param surface:
+    :param max_area:
+    :return:
+    """
+    # Create slope surface to work with
+    surface = topo(surface)
+    print "Computing gradient"
+    with surface.slope() as slopeData:
+        # Reclassify high-slope regions
+        print "Identifying objects"
+        slopeArray = slopeData.array
+        regions = numpy.ones(shape=slopeArray.shape, dtype='bool')
+        regions[(slopeArray > slope_threshold) & (slopeArray != slopeData.nodata)] = 0
+        del slopeArray
+
+    # Label benches and create index
+    bench_labels, _ = ndimage.measurements.label(regions, numpy.ones(shape=(3, 3), dtype='bool'))
+    bench_labels = bench_labels.ravel()
+    indices = numpy.argsort(bench_labels)
+    bins = numpy.bincount(bench_labels)
+    bench_labels = numpy.split(indices, numpy.cumsum(bins[bins > 0][:-1]))
+
+    # Label steep regions and create index as dict
+    steep_labels, _ = ndimage.measurements.label(~regions, numpy.ones(shape=(3, 3), dtype='bool'))
+    steep_index = steep_labels.ravel()
+    indices = numpy.argsort(steep_index)
+    bins = numpy.bincount(steep_index)
+    steep_index = dict(zip(numpy.unique(steep_index), numpy.split(indices, numpy.cumsum(bins[bins > 0][:-1]))))
+
+    #  Filter labels by area
+    print "Filtering objects"
+    regions.fill(0)
+    regions = regions.ravel()
+    for inds in bench_labels:
+        if inds.shape[0] * slopeData.csx * slopeData.csy <= max_area:
+            regions[inds] = 1
+    regions = regions.reshape(surface.shape)
+
+    # Dilate benches to intersect steep regions
+    print "Indexing objects"
+    steep_intersect = numpy.unique(steep_labels[
+        ~regions & ndimage.binary_dilation(regions, numpy.ones(shape=(3, 3), dtype='bool'))
+    ])
+
+    # Add steep regions to regions
+    regions = regions.ravel()
+    for i in steep_intersect:
+        regions[steep_index[i]] = 1
+    del steep_labels, steep_index, bench_labels
+    regions = regions.reshape(surface.shape)
+
+    # Relabel regions and interpolate grid
+    print "Interpolating over objects"
+    labels, _ = ndimage.measurements.label(regions, numpy.ones(shape=(3, 3), dtype='bool'))
+    labels = labels.ravel()
+    indices = numpy.argsort(labels)
+    bins = numpy.bincount(labels)
+    truncate = False
+    if numpy.any(labels == 0):
+        truncate = True
+    labels = numpy.split(indices, numpy.cumsum(bins[bins > 0][:-1]))
+    if truncate:
+        del labels[0]
+
+    # Interpolate grid over objects
+    new_surface = numpy.pad(surface.array, 1, 'edge')
+    for inds in labels:
+        i, j = numpy.unravel_index(inds, dims=surface.shape)
+        i_min, j_min = i.min(), j.min()
+        _i, _j = i - i_min + 1, j - j_min + 1
+        points = numpy.zeros(shape=(_i.max() + 2, _j.max() + 2), dtype='bool')
+        xi = points.copy()
+        xi[_i, _j] = 1
+        points[~xi & ndimage.binary_dilation(xi, numpy.ones(shape=(3, 3), dtype='bool'))] = 1
+        surface_values = new_surface[i_min:i.max() + 3, j_min:j.max() + 3]
+        values = surface_values[points]
+        points = numpy.vstack(numpy.where(points)[::-1]).T.astype('float32')
+        points[:, 0] *= surface.csx
+        points[:, 1] *= surface.csy
+        a = points[:, 1]
+        m, b = numpy.linalg.solve([[a.min(), 1.], [a.max(), 1.]], [a.max(), a.min()])
+        points[:, 1] = (a * m) + b
+        xi = numpy.vstack(numpy.where(xi)[::-1]).T.astype('float32')
+        xi[:, 0] *= surface.csx
+        xi[:, 1] *= surface.csy
+        a = xi[:, 1]
+        m, b = numpy.linalg.solve([[a.min(), 1.], [a.max(), 1.]], [a.max(), a.min()])
+        xi[:, 1] = (a * m) + b
+        iterator = inverse_distance(points, xi, values)
+        output = numpy.empty(shape=xi[0].shape, dtype='float32')
+        for i in iterator:
+            output[i[1][0]:i[1][1]] = i[0]
+        surface_values[_i, _j] = output
+        new_surface[i_min:i.max() + 3, j_min:j.max() + 3] = surface_values
+
+    # Return new raster
+    out = surface.copy()
+    out[:] = new_surface[1:-1, 1:-1]
+    return out

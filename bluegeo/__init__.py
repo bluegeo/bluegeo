@@ -1,8 +1,7 @@
-from raster import *
-import riparian
-import spatial
+import raster
 import terrain
+import water
+import measurement
+import rastfilter
 import util
-from bluegrass import GrassSession
-
-print("bluegeo GIS library V0.1 beta")
+import bluegrass

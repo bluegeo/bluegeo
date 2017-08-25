@@ -2,12 +2,49 @@
 
 import math
 import numpy
+import os
+from tempfile import _get_candidate_names
 from scipy import ndimage
 from osgeo import osr
 
 
 class BlueUtilError(Exception):
     pass
+
+
+def generate_name(parent_path, suffix, extension):
+    """Generate a unique file name"""
+    path_str = os.path.basename(parent_path)
+    path_dir = os.path.dirname(parent_path)
+
+    path = ('%s_%s_%s.%s' %
+            (''.join(path_str.split('.')[:-1])[:20], suffix,
+             next(_get_candidate_names()), extension)
+            )
+
+    return os.path.join(path_dir, path)
+
+
+def parse_projection(projection):
+    """Return a wkt from some argument"""
+    def raise_re():
+        raise BlueUtilError('Unable to determine projection from %s' %
+                            projection)
+    if isinstance(projection, basestring):
+        sr = osr.SpatialReference()
+        sr.ImportFromWkt(projection)
+        outwkt = sr.ExportToWkt()
+    elif isinstance(projection, osr.SpatialReference):
+        return projection.ExportToWkt()
+    elif isinstance(projection, int):
+        sr = osr.SpatialReference()
+        sr.ImportFromEPSG(projection)
+        outwkt = sr.ExportToWkt()
+    elif projection is None or projection == '':
+        outwkt = ''
+    else:
+        raise_re()
+    return outwkt
 
 
 def transform_points(points, inproj, outproj):
@@ -102,9 +139,46 @@ def indices_to_coords(indices, top, left, csx, csy):
     :param csy: 
     :return: Coordinates: ([y...], [x...])
     """
-    return ((top - (csy / 2.)) - (indices[0] * csy),
-            (left + (csx / 2.)) + (indices[1] * csx)
+    i, j = numpy.array(indices[0]), numpy.array(indices[1])
+    return ((top - (csy / 2.)) - (i * csy),
+            (left + (csx / 2.)) + (j * csx)
             )
+
+
+def intersect_mask(coords, top, left, csx, csy, shape):
+    """
+    Generate a mask of coordinates that intersect a domain
+    :param coords: Tuple of coordinates in the form ([x...], [y...])
+    :param top: Top coordinate of array
+    :param left: Left coordinate of array
+    :param csx: Cell size in the x-direction
+    :param csy: Cell size in the y-direction
+    :param shape: Shape of array (for bounds)
+    :return: 1-d mask where points intersect domain
+    """
+    x, y = numpy.array(coords[0]), numpy.array(coords[1])
+    i = numpy.int64((top - y) / csy)
+    j = numpy.int64((x - left) / csx)
+    return (i > 0) & (j > 0) & (i < shape[0]) & (j < shape[1])
+
+
+def coords_to_indices(coords, top, left, csx, csy, shape):
+    """
+    Convert coordinates to array indices using the given specs.
+    Coordinates outside of the shape are not returned.
+    :param coords: Tuple of coordinates in the form ([x...], [y...])
+    :param top: Top coordinate of array
+    :param left: Left coordinate of array
+    :param csx: Cell size in the x-direction
+    :param csy: Cell size in the y-direction
+    :param shape: Shape of array (for bounds)
+    :return: tuple of indices in the form ([i...], [j...])
+    """
+    x, y = numpy.array(coords[0]), numpy.array(coords[1])
+    i = numpy.int64((top - y) / csy)
+    j = numpy.int64((x - left) / csx)
+    m = (i > 0) & (j > 0) & (i < shape[0]) & (j < shape[1])
+    return i[m], j[m]
 
 
 def kernel_from_distance(distance, csx, csy):
@@ -115,187 +189,95 @@ def kernel_from_distance(distance, csx, csy):
     :param csy: 
     :return: kernel mask
     """
-    num_cells_x = numpy.ceil(round((distance * 2.) / csx))
-    num_cells_y = numpy.ceil(round((distance * 2.) / csy))
-    centroid = (int(num_cells_y / 2.), int(num_cells_x / 2.))
+    num_cells_x = numpy.ceil(round((distance * 2.) / csx)) + 1
+    num_cells_y = numpy.ceil(round((distance * 2.) / csy)) + 1
+    centroid = (int((num_cells_y - 1) / 2.), int((num_cells_x - 1) / 2.))
     kernel = numpy.ones(shape=(num_cells_y, num_cells_x), dtype='bool')
     kernel[centroid] = 0
     dt = ndimage.distance_transform_edt(kernel, (csy, csx))
     return dt <= distance
 
 
+def stride_hood(a, window=(3, 3), edge_mode='constant', constant_values=0):
+    """
+    Return views into array over a given neighbourhood window
+    :param a: ndarray
+    :param window: window shape
+    :param edge_mode: method to expand array to fit window
+    :param constant_values: if edge mode is 'constant', value to use
+    :return: views into a over with window as a last two axes
+    """
 
-## OLD stuff ##
-# def parseInput(data):
-#     if not isinstance(data, raster):
-#         raise Exception('Expected a raster instance, got a %s' % type(data))
-#     data.read()
-#
-#
-# def windowAs3D(a, window):
-#     '''
-#     Get a 3-dimensional array with all neighbours
-#     in the thrid dimension. Memory intensive!
-#     '''
-#     tarr = a.reshape(a.shape[0], a.shape[1], 1)
-#     tarr = tarr.repeat(window[0] * window[1], axis=2)
-#     cnt = -1
-#     iedge = (window[0] - 1) / 2
-#     jedge = (window[1] - 1) / 2
-#     ito = int(math.ceil((window[0] - 1) / 2.))
-#     jto = int(math.ceil((window[1] - 1) / 2.))
-#     for i in range(iedge * -1, ito + 1):
-#         for j in range(jedge * -1, jto + 1):
-#             if i == 0 and j == 0:
-#                 continue
-#             cnt += 1
-#             if i < 0 and j < 0:
-#                 tarr[:i, :j, cnt] = a[i * -1:, j * -1:]
-#             elif i < 0 and j == 0:
-#                 tarr[:i, :, cnt] = a[i * -1:, :]
-#             elif i < 0 and j > 0:
-#                 tarr[:i, j:, cnt] = a[i * -1:, :j * -1]
-#             elif i == 0 and j < 0:
-#                 tarr[:, :j, cnt] = a[:, j * -1:]
-#             elif i == 0 and j > 0:
-#                 tarr[:, j:, cnt] = a[:, :j * -1]
-#             elif i > 0 and j < 0:
-#                 tarr[i:, :j, cnt] = a[:i * -1, j * -1:]
-#             elif i > 0 and j == 0:
-#                 tarr[i:, :, cnt] = a[:i * -1, :]
-#             elif i > 0 and j > 0:
-#                 tarr[i:, j:, cnt] = a[:i * -1, :j * -1]
-#     return tarr
-#
-#
-# def getWindowViews(a, window):
-#     '''
-#     Get a "shaped" list of views into "a" to retrieve
-#     neighbouring cells in the form of "window."
-#     Note: asymmetrical shapes will be propagated
-#         up and left.
-#     '''
-#     i_offset = (window[0] - 1) * -1
-#     j_offset = (window[1] - 1) * -1
-#     output = []
-#     for i in range(i_offset, 1):
-#         output.append([])
-#         _i = abs(i_offset) + i
-#         if i == 0:
-#             i = None
-#         for j in range(j_offset, 1):
-#             _j = abs(j_offset) + j
-#             if j == 0:
-#                 j = None
-#             output[-1].append(a[_i:i, _j:j])
-#     return output
-#
-#
-# def getViewInsertLocation(nbrhood):
-#     itop = (nbrhood[0] - 1) / 2
-#     if itop == 0 and nbrhood[0] > 1:
-#         itop = 1
-#     ibot = (nbrhood[0] - 1) / 2
-#     if ibot == 0:
-#         ibot = None
-#     else:
-#         ibot *= -1
-#     jleft = (nbrhood[1] - 1) / 2
-#     if jleft == 0 and nbrhood[1] > 1:
-#         jleft = 1
-#     jright = (nbrhood[1] - 1) / 2
-#     if jright == 0:
-#         jright = None
-#     else:
-#         jright *= -1
-#     return itop, ibot, jleft, jright
-#
-#
-# def rolling_window_lastaxis(a, window):
-#     if window < 1:
-#         raise Exception("window must be at least 1.")
-#     if window > a.shape[-1]:
-#         raise Exception("window is too long.")
-#     shape = a.shape[:-1] + (a.shape[-1] - window + 1, window)
-#     strides = a.strides + (a.strides[-1],)
-#     return numpy.lib.stride_tricks.as_strided(a, shape=shape, strides=strides)
-#
-#
-# def strideHood(a, window, edge_method='reflect'):
-#     acopy = numpy.zeros(shape=(a.shape[0] + 2, a.shape[1] + 2), dtype=a.dtype)
-#     if edge_method == 'reflect':
-#         acopy[1:-1, 1:-1] = a
-#         acopy[1:-1, 0] = a[:, 0]
-#         acopy[1:-1, -1] = a[:, -1]
-#         acopy[0, :] = acopy[1, :]
-#         acopy[-1, :] = acopy[-2, :]
-#     if not hasattr(window, '__iter__'):
-#         return rolling_window_lastaxis(acopy, window)
-#     for i, win in enumerate(window):
-#         if win > 1:
-#             acopy = acopy.swapaxes(i, -1)
-#             acopy = rolling_window_lastaxis(acopy, win)
-#             acopy = acopy.swapaxes(-2, i)
-#     return acopy
-#
-#
-# def tileHood(tile, nbrhood, shape):
-#     '''Safely expand a tile to accommodate a neighborhood'''
-#     itop, ibot, jleft, jright = getViewInsertLocation(nbrhood)
-#     if ibot is None:
-#         ibot = 0
-#     else:
-#         ibot *= -1
-#     if jright is None:
-#         jright = 0
-#     else:
-#         jright *= -1
-#     xoff, yoff, win_xsize, win_ysize = tile
-#     if yoff - itop < 0:
-#         i = yoff
-#         i_ = 0
-#     else:
-#         i = yoff - itop
-#         i_ = itop
-#     if yoff + win_ysize + ibot > shape[0]:
-#         ispan = shape[0]
-#         _i = None
-#     else:
-#         ispan = yoff + win_ysize + ibot
-#         _i = ibot * -1
-#     if xoff - jleft < 0:
-#         j = xoff
-#         j_ = 0
-#     else:
-#         j = xoff - jleft
-#         j_ = jleft
-#     if xoff + win_xsize + jright > shape[1]:
-#         jspan = shape[1]
-#         _j = None
-#     else:
-#         jspan = xoff + win_xsize + jright
-#         _j = jright * -1
-#     return slice(i, ispan), slice(j, jspan), slice(i_, _i), slice(j_, _j)
-#
-#
-# def getSlice(i, j, shape, edges=(1, 1, 1, 1)):
-#     '''
-#     Return a safe slice based on shape.
-#     edges are: ifrom, ito, jfrom, jto'''
-#     if i - edges[0] < 0:
-#         i_ = 0
-#     else:
-#         i_ = i - edges[0]
-#     if i + edges[1] + 1 > shape[0]:
-#         _i = shape[0]
-#     else:
-#         _i = i + edges[1] + 1
-#     if j - edges[2] < 0:
-#         j_ = 0
-#     else:
-#         j_ = j - edges[2]
-#     if j + edges[3] + 1 > shape[1]:
-#         _j = shape[1]
-#     else:
-#         _j = j + edges[3] + 1
-#     return i_, _i, j_, _j
+    def rolling_window_lastaxis(a, window):
+        if window < 1:
+            raise ValueError, "window must be at least 1."
+        if window > a.shape[-1]:
+            raise ValueError, "window is too long."
+        shape = a.shape[:-1] + (a.shape[-1] - window + 1, window)
+        strides = a.strides + (a.strides[-1],)
+        return numpy.lib.stride_tricks.as_strided(a, shape=shape, strides=strides)
+
+    acopy = numpy.pad(a, ((window[0] - 1) / 2, (window[1] - 1) / 2), edge_mode,
+                      constant_values=constant_values)
+    if not hasattr(window, '__iter__'):
+        return rolling_window_lastaxis(acopy, window)
+    for i, win in enumerate(window):
+        if win > 1:
+            acopy = acopy.swapaxes(i, -1)
+            acopy = rolling_window_lastaxis(acopy, win)
+            acopy = acopy.swapaxes(-2, i)
+    return acopy
+
+
+
+def mode(ndarray, axis=0):
+    # Check inputs
+    ndarray = numpy.asarray(ndarray)
+    ndim = ndarray.ndim
+    if ndarray.size == 1:
+        return ndarray[0], 1
+    elif ndarray.size == 0:
+        raise hruError('Cannot compute mode on empty array')
+    try:
+        axis = range(ndarray.ndim)[axis]
+    except:
+        raise hruError('Axis "{}" incompatible with the {}-dimension array'.format(axis, ndim))
+
+    # If array is 1-D and numpy version is > 1.9 numpy.unique will suffice
+    if all([ndim == 1,
+            int(numpy.__version__.split('.')[0]) >= 1,
+            int(numpy.__version__.split('.')[1]) >= 9]):
+        modals, counts = numpy.unique(ndarray, return_counts=True)
+        index = numpy.argmax(counts)
+        return modals[index], counts[index]
+
+    # Sort array
+    sort = numpy.sort(ndarray, axis=axis)
+    # Create array to transpose along the axis and get padding shape
+    transpose = numpy.roll(numpy.arange(ndim)[::-1], axis)
+    shape = list(sort.shape)
+    shape[axis] = 1
+    # Create a boolean array along strides of unique values
+    strides = numpy.concatenate([numpy.zeros(shape=shape, dtype='bool'),
+                                 numpy.diff(sort, axis=axis) == 0,
+                                 numpy.zeros(shape=shape, dtype='bool')],
+                                axis=axis).transpose(transpose).ravel()
+    # Count the stride lengths
+    counts = numpy.cumsum(strides)
+    counts[~strides] = numpy.concatenate([[0], numpy.diff(counts[~strides])])
+    counts[strides] = 0
+    # Get shape of padded counts and slice to return to the original shape
+    shape = numpy.array(sort.shape)
+    shape[axis] += 1
+    shape = shape[transpose]
+    slices = [slice(None)] * ndim
+    slices[axis] = slice(1, None)
+    # Reshape and compute final counts
+    counts = counts.reshape(shape).transpose(transpose)[slices] + 1
+
+    # Find maximum counts and return modals/counts
+    slices = [slice(None, i) for i in sort.shape]
+    del slices[axis]
+    index = numpy.ogrid[slices]
+    index.insert(axis, numpy.argmax(counts, axis=axis))
+    return sort[index], counts[index]
