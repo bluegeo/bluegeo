@@ -139,7 +139,7 @@ def indices_to_coords(indices, top, left, csx, csy):
     :param csy: 
     :return: Coordinates: ([y...], [x...])
     """
-    i, j = numpy.array(indices[0]), numpy.array(indices[1])
+    i, j = numpy.asarray(indices[0]), numpy.asarray(indices[1])
     return ((top - (csy / 2.)) - (i * csy),
             (left + (csx / 2.)) + (j * csx)
             )
@@ -156,7 +156,7 @@ def intersect_mask(coords, top, left, csx, csy, shape):
     :param shape: Shape of array (for bounds)
     :return: 1-d mask where points intersect domain
     """
-    x, y = numpy.array(coords[0]), numpy.array(coords[1])
+    x, y = numpy.asarray(coords[0]), numpy.asarray(coords[1])
     i = numpy.int64((top - y) / csy)
     j = numpy.int64((x - left) / csx)
     return (i > 0) & (j > 0) & (i < shape[0]) & (j < shape[1])
@@ -174,7 +174,7 @@ def coords_to_indices(coords, top, left, csx, csy, shape):
     :param shape: Shape of array (for bounds)
     :return: tuple of indices in the form ([i...], [j...])
     """
-    x, y = numpy.array(coords[0]), numpy.array(coords[1])
+    x, y = numpy.asarray(coords[0]), numpy.asarray(coords[1])
     i = numpy.int64((top - y) / csy)
     j = numpy.int64((x - left) / csx)
     m = (i > 0) & (j > 0) & (i < shape[0]) & (j < shape[1])

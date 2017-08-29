@@ -210,7 +210,7 @@ class raster(object):
             self.new_hdf5_raster(output_path, compress=compress)
 
             # Transfer data
-            out_rast = raster(output_path)
+            out_rast = raster(output_path, mode='r+')
             for _ in self.bands:
                 if self.useChunks:
                     for a, s in self.iterchunks():
@@ -408,13 +408,9 @@ class raster(object):
             #   V
             ds = None
         elif self.format == 'HDF5':
-            try:
-                ds = h5py.File(self.path, mode=self.mode, libver='latest')
-                yield ds
-                ds.close()
-            except:
-                raise RasterError('Oops...the raster %s is now missing.' %
-                                  self.path)
+            ds = h5py.File(self.path, mode=self.mode, libver='latest')
+            yield ds
+            ds.close()
 
     @property
     def band(self):
@@ -1189,8 +1185,7 @@ class raster(object):
     def __setitem__(self, s, a):
         if self.mode == 'r':
             raise RasterError('Dataset open as read-only.')
-        if type(a) != numpy.ndarray:
-            a = numpy.array(a)
+        a = numpy.asarray(a)
         if self.format == 'gdal':
             xoff, yoff, win_xsize, win_ysize =\
                 self.gdal_args_from_slice(s, self.shape)

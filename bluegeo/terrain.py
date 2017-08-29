@@ -171,7 +171,10 @@ class topo(raster):
             # Normalize elevation over neighborhood
             max_ = numpy.zeros(shape=view[0][0].shape, dtype='float32')
             min_ = numpy.zeros(shape=view[0][0].shape, dtype='float32')
-            min_[~mask] = numpy.max(view[ic][jc][~mask])
+            try:
+                min_[~mask] = numpy.max(view[ic][jc][~mask])
+            except ValueError:
+                return
             # Max/Min filter
             for i in range(size[0]):
                 for j in range(size[1]):
@@ -216,7 +219,11 @@ class topo(raster):
             # Iterate chunks and calculate convergence
             for a, s in self.iterchunks(expand=size):
                 s_ = util.truncate_slice(s, size)
-                surf_rough[s_] = eval_roughness(a)
+                _a = eval_roughness(a)
+                if _a is None:
+                    a.fill(surf_rough.nodata)
+                    _a = a[1:-1, 1:-1]
+                surf_rough[s_] = _a
         else:
             # Calculate over all data
             surf_rough[:] = eval_roughness(self.array)
