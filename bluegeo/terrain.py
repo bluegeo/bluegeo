@@ -9,7 +9,7 @@ import util
 import math
 from numba.decorators import jit
 from vector import *
-from scipy import ndimage
+from scipy import ndimage, interpolate
 
 try:
     from bluegrass import GrassSession
@@ -415,24 +415,26 @@ class topo(raster):
         return outrast
 
 
-def inverse_distance(pointGrid, xGrid, values):
-    @jit(nopython=True, nogil=True)
-    def idw(args):
-        points, xi, grad, output, mask = args
-        i_shape = xi.shape[0]
-        point_shape = points.shape[0]
-        for i in range(i_shape):
-            num = 0.0
-            denom = 0.0
-            for j in range(point_shape):
-                w = 1 / numpy.sqrt(
-                    ((points[j, 0] - xi[i, 0]) ** 2) + ((points[j, 1] - xi[i, 1]) ** 2)
-                ) ** 2
-                denom += w
-                num += w * grad[j]
+@jit(nopython=True, nogil=True)
+def idw(args):
+    points, xi, values, output, mask = args
+    i_shape = xi.shape[0]
+    point_shape = points.shape[0]
+    for i in range(i_shape):
+        num = 0.0
+        denom = 0.0
+        for j in range(point_shape):
+            w = 1 / numpy.sqrt(
+                ((points[j, 0] - xi[i, 0]) ** 2) + ((points[j, 1] - xi[i, 1]) ** 2)
+            ) ** 2
+            denom += w
+            num += w * values[j]
+        if denom != 0:
             output[i] = num / denom
-        return output, mask
+    return output, mask
 
+
+def inverse_distance(pointGrid, xGrid, values):
     # Compute chunk size from memory specification and neighbours
     from multiprocessing import Pool, cpu_count
     chunkSize = int(round(xGrid.shape[0] / (cpu_count() * 4)))
@@ -524,7 +526,7 @@ def raster_label(a):
     return dict(zip(numpy.unique(labels), numpy.split(indices, numpy.cumsum(bins[bins > 0][:-1]))))
 
 
-def bare_earth(surface, max_area=65., slope_threshold=40.):
+def bare_earth(surface, max_area=65., slope_threshold=50.):
     """
     Create a bare-earth representation of a surface model by removing objects
     :param surface:
@@ -593,7 +595,9 @@ def bare_earth(surface, max_area=65., slope_threshold=40.):
 
     # Interpolate grid over objects
     new_surface = numpy.pad(surface.array, 1, 'edge')
-    for inds in labels:
+    iterable = []
+    reinsert = []
+    for enum, inds in enumerate(labels):
         i, j = numpy.unravel_index(inds, dims=surface.shape)
         i_min, j_min = i.min(), j.min()
         _i, _j = i - i_min + 1, j - j_min + 1
@@ -601,26 +605,35 @@ def bare_earth(surface, max_area=65., slope_threshold=40.):
         xi = points.copy()
         xi[_i, _j] = 1
         points[~xi & ndimage.binary_dilation(xi, numpy.ones(shape=(3, 3), dtype='bool'))] = 1
-        surface_values = new_surface[i_min:i.max() + 3, j_min:j.max() + 3]
-        values = surface_values[points]
+        values = new_surface[i_min:i.max() + 3, j_min:j.max() + 3][points]
+        m, b = numpy.linalg.solve([[0, 1.], [points.shape[0] - 1, 1.]],
+                                  [surface.csy * (points.shape[0] - 1), 0])
         points = numpy.vstack(numpy.where(points)[::-1]).T.astype('float32')
         points[:, 0] *= surface.csx
-        points[:, 1] *= surface.csy
-        a = points[:, 1]
-        m, b = numpy.linalg.solve([[a.min(), 1.], [a.max(), 1.]], [a.max(), a.min()])
-        points[:, 1] = (a * m) + b
-        xi = numpy.vstack(numpy.where(xi)[::-1]).T.astype('float32')
-        xi[:, 0] *= surface.csx
-        xi[:, 1] *= surface.csy
-        a = xi[:, 1]
-        m, b = numpy.linalg.solve([[a.min(), 1.], [a.max(), 1.]], [a.max(), a.min()])
-        xi[:, 1] = (a * m) + b
-        iterator = inverse_distance(points, xi, values)
-        output = numpy.empty(shape=xi[0].shape, dtype='float32')
-        for i in iterator:
-            output[i[1][0]:i[1][1]] = i[0]
-        surface_values[_i, _j] = output
-        new_surface[i_min:i.max() + 3, j_min:j.max() + 3] = surface_values
+        points[:, 1] = (points[:, 1] * m) + b
+        wxi = numpy.where(xi)
+        xi = numpy.vstack(wxi[::-1]).T.astype('float32')
+        xi[:, 1] = (xi[:, 1] * m) + b
+        reinsert.append(wxi)
+        iterable.append((points, xi, values, numpy.full(xi.shape[0], surface.nodata, 'float32'),
+                         (i_min, i.max() + 3, j_min, j.max() + 3, enum)))
+
+    from multiprocessing.dummy import Pool, cpu_count
+    p = Pool(cpu_count())
+    try:
+        ret = p.imap_unordered(idw, iterable)
+    except Exception as e:
+        import sys
+        p.close()
+        p.join()
+        raise e, None, sys.exc_info()[2]
+    else:
+        p.close()
+        p.join()
+
+    print "Applying changes to output raster"
+    for values, inds in ret:
+        new_surface[inds[0]:inds[1], inds[2]:inds[3]][reinsert[inds[4]]] = values
 
     # Return new raster
     out = surface.copy()

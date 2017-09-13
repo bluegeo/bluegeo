@@ -76,13 +76,13 @@ class raster(object):
                     ds = gdal.Open(input_data)
                     try:
                         gt = ds.GetGeoTransform()
-                        assert gt != (0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+                        # assert gt != (0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
                         self.load_from_gdal(ds)
                         ds = None
                         self.format = 'gdal'
-                    except:
-                        raise RasterError('Unable to open dataset %s' %
-                                          input_data)
+                    except Exception as e:
+                        raise RasterError('Unable to open dataset %s because:\n%s' %
+                                          (input_data, e))
         # If not a string, maybe an osgeo dataset?
         elif isinstance(input_data, gdal.Dataset):
             self.load_from_gdal(input_data)
@@ -167,7 +167,7 @@ class raster(object):
         :return: None
         """
         # Do not overwrite self
-        if os.path.normpath(output_path).lower() == os.path.normpath(self.path).lower() and mode == 'r':
+        if os.path.normpath(output_path).lower() == os.path.normpath(self.path).lower() and self.mode == 'r':
             raise RasterError('Cannot overwrite the source dataset because it is open as read-only')
 
         # Create new file
@@ -212,6 +212,7 @@ class raster(object):
             # Transfer data
             out_rast = raster(output_path, mode='r+')
             for _ in self.bands:
+                out_rast.activeBand = self.activeBand
                 if self.useChunks:
                     for a, s in self.iterchunks():
                         out_rast[s] = a
@@ -434,17 +435,6 @@ class raster(object):
         Load underlying data into a numpy array
         """
         if self.format == 'gdal':
-            # Do a simple check for necessary no data value fixes using topleft
-            if not self.ndchecked:
-                for band in self.bands:
-                    with self.dataset as ds:
-                        tlc = ds.GetRasterBand(self.band).ReadAsArray(
-                            xoff=0, yoff=0, win_xsize=1, win_ysize=1)
-                    ds = None
-                    if numpy.isclose(tlc, self.nodata) and tlc != self.nodata:
-                        print "Warning: No data values must be fixed."
-                        self.ndchecked = True
-                        self.fix_nodata()
             with self.dataset as ds:
                 a = ds.GetRasterBand(self.band).ReadAsArray()
             ds = None
@@ -1054,7 +1044,7 @@ class raster(object):
             blockysize = 'BLOCKYSIZE=%s' % chunks[0]
             tiled = 'TILED=YES'
         parszOptions = [tiled, blockysize, blockxsize, comp]
-        ds = driver.Create(output_path, shape[1], shape[0],
+        ds = driver.Create(output_path, int(shape[1]), int(shape[0]),
                            bands, raster.get_gdal_dtype(dtype),
                            parszOptions)
         if ds is None:
@@ -1153,6 +1143,7 @@ class raster(object):
         if self.format == 'gdal':
             # Do a simple check for necessary no data value fixes using topleft
             if not self.ndchecked:
+                ab = self.activeBand
                 for band in self.bands:
                     with self.dataset as ds:
                         tlc = ds.GetRasterBand(self.band).ReadAsArray(
@@ -1162,6 +1153,7 @@ class raster(object):
                         print "Warning: No data values must be fixed."
                         self.ndchecked = True
                         self.fix_nodata()
+                self.activeBand = ab
             # Tease gdal band args from s
             try:
                 xoff, yoff, win_xsize, win_ysize =\
@@ -1392,8 +1384,8 @@ class raster(object):
         else:
             datum = datum.replace('_', ' ')
         methods = {
-            'ne': 'numexpr (Parallel, cache-optimized)',
-            'np': 'numpy (single-threaded, vectorized)'
+            'ne': 'numexpr',
+            'np': 'numpy'
         }
         if os.path.isfile(self.path):
             prestr = ('A happy raster named %s of house %s\n' %

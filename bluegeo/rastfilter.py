@@ -1,9 +1,30 @@
 from raster import *
 import util
+from scipy.ndimage import binary_dilation
 
 
 class FilterError(Exception):
     pass
+
+
+def eval_op(a, nd, size, func, **kwargs):
+    """
+    Factory for all numpy statistical function filters
+    :param a: input 2-D array
+    :param nd: No data value
+    :param size: window size for filter
+    :param func: numpy stats function
+    :param kwargs: additional args for functions
+    :return: 2-D output array
+    """
+    ndMask = binary_dilation(a == nd, structure=numpy.ones(shape=size, dtype='bool'))[1:-1, 1:-1]
+    percentile = kwargs.get('percentile', None)
+    if percentile is not None:
+        A = func(util.stride_hood(a, size), percentile=percentile, axis=(3, 2))
+    else:
+        A = func(util.stride_hood(a, size), axis=(3, 2))
+    A[ndMask] = a[1:-1, 1:-1][ndMask]
+    return A
 
 
 def min_filter(input_raster, size=(3, 3)):
@@ -12,26 +33,17 @@ def min_filter(input_raster, size=(3, 3)):
     :param size: Window size
     :return: Raster with local minima
     """
-    def eval_min(a, nd):
-        # Pad with the maximum value
-        ndMask = a == nd
-        aMax = a[~ndMask].max()
-        a[ndMask] = aMax
-        minA = numpy.min(util.stride_hood(a, size, constant_values=aMax), axis=(3, 2))
-        minA[ndMask] = nd
-        return minA
-
-    # Allocate output
     input_raster = raster(input_raster)
-    with input_raster.empty() as min_raster:
-        if input_raster.useChunks:
-            for a, s in input_raster.iterchunks(expand=size):
-                min_raster[s] = eval_min(a, input_raster.nodata)
-        else:
-            # Calculate over all data
-            min_raster[:] = eval_min(input_raster.array, input_raster.nodata)
+    out_raster = input_raster.full(input_raster.nodata)
+    if input_raster.useChunks:
+        for a, s in input_raster.iterchunks(expand=size):
+            s_ = util.truncate_slice(s, size)
+            out_raster[s_] = eval_op(a, input_raster.nodata, size, numpy.min)
+    else:
+        # Calculate over all data
+        out_raster[1:-1, 1:-1] = eval_op(input_raster.array, input_raster.nodata, size, numpy.min)
 
-    return min_raster
+    return out_raster
 
 
 def max_filter(input_raster, size=(3, 3)):
@@ -40,26 +52,17 @@ def max_filter(input_raster, size=(3, 3)):
     :param size: Window size
     :return: Raster with local maxima values
     """
-    def eval_max(a, nd):
-        # Pad with the minimum value
-        ndMask = a == nd
-        aMin = a[~ndMask].min()
-        a[ndMask] = aMin
-        maxA = numpy.max(util.stride_hood(a, size, constant_values=aMin), axis=(3, 2))
-        maxA[ndMask] = nd
-        return maxA
-
-    # Allocate output
     input_raster = raster(input_raster)
-    with input_raster.empty() as max_raster:
-        if input_raster.useChunks:
-            for a, s in input_raster.iterchunks(expand=size):
-                max_raster[s] = eval_max(a, input_raster.nodata)
-        else:
-            # Calculate over all data
-            max_raster[:] = eval_max(input_raster.array, input_raster.nodata)
+    out_raster = input_raster.full(input_raster.nodata)
+    if input_raster.useChunks:
+        for a, s in input_raster.iterchunks(expand=size):
+            s_ = util.truncate_slice(s, size)
+            out_raster[s_] = eval_op(a, input_raster.nodata, size, numpy.max)
+    else:
+        # Calculate over all data
+        out_raster[1:-1, 1:-1] = eval_op(input_raster.array, input_raster.nodata, size, numpy.max)
 
-    return max_raster
+    return out_raster
 
 
 def mean_filter(input_raster, size=(3, 3)):
@@ -68,23 +71,18 @@ def mean_filter(input_raster, size=(3, 3)):
     :param size: Window size
     :return: Raster with local mean values
     """
-    def eval_mean(a, nd):
-        ndMask = a == nd
-        meanA = numpy.mean(util.stride_hood(a, size, edge_mode='edge'), axis=(3, 2))
-        meanA[ndMask] = nd
-        return meanA
-
     # Allocate output
     input_raster = raster(input_raster)
-    with input_raster.empty() as mean_raster:
-        if input_raster.useChunks:
-            for a, s in input_raster.iterchunks(expand=size):
-                mean_raster[s] = eval_mean(a, input_raster.nodata)
-        else:
-            # Calculate over all data
-            mean_raster[:] = eval_mean(input_raster.array, input_raster.nodata)
+    out_raster = input_raster.full(input_raster.nodata)
+    if input_raster.useChunks:
+        for a, s in input_raster.iterchunks(expand=size):
+            s_ = util.truncate_slice(s, size)
+            out_raster[s_] = eval_op(a, input_raster.nodata, size, numpy.mean)
+    else:
+        # Calculate over all data
+        out_raster[1:-1, 1:-1] = eval_op(input_raster.array, input_raster.nodata, size, numpy.mean)
 
-    return mean_raster
+    return out_raster
 
 
 def std_filter(input_raster, size=(3, 3)):
@@ -93,23 +91,17 @@ def std_filter(input_raster, size=(3, 3)):
     :param size: Window size
     :return: Raster with local standard deviation values
     """
-    def eval_std(a, nd):
-        ndMask = a == nd
-        stdA = numpy.std(util.stride_hood(a, size, edge_mode='edge'), axis=(3, 2))
-        stdA[ndMask] = nd
-        return stdA
-
-    # Allocate output
     input_raster = raster(input_raster)
-    with input_raster.empty() as std_raster:
-        if input_raster.useChunks:
-            for a, s in input_raster.iterchunks(expand=size):
-                std_raster[s] = eval_std(a, input_raster.nodata)
-        else:
-            # Calculate over all data
-            std_raster[:] = eval_std(input_raster.array, input_raster.nodata)
+    out_raster = input_raster.full(input_raster.nodata)
+    if input_raster.useChunks:
+        for a, s in input_raster.iterchunks(expand=size):
+            s_ = util.truncate_slice(s, size)
+            out_raster[s_] = eval_op(a, input_raster.nodata, size, numpy.std)
+    else:
+        # Calculate over all data
+        out_raster[1:-1, 1:-1] = eval_op(input_raster.array, input_raster.nodata, size, numpy.std)
 
-    return std_raster
+    return out_raster
 
 
 def var_filter(input_raster, size=(3, 3)):
@@ -118,23 +110,17 @@ def var_filter(input_raster, size=(3, 3)):
     :param size: Window size
     :return: Raster with local variance values
     """
-    def eval_var(a, nd):
-        ndMask = a == nd
-        varA = numpy.var(util.stride_hood(a, size, edge_mode='edge'), axis=(3, 2))
-        varA[ndMask] = nd
-        return varA
-
-    # Allocate output
     input_raster = raster(input_raster)
-    with input_raster.empty() as var_raster:
-        if input_raster.useChunks:
-            for a, s in input_raster.iterchunks(expand=size):
-                var_raster[s] = eval_var(a, input_raster.nodata)
-        else:
-            # Calculate over all data
-            var_raster[:] = eval_var(input_raster.array, input_raster.nodata)
+    out_raster = input_raster.full(input_raster.nodata)
+    if input_raster.useChunks:
+        for a, s in input_raster.iterchunks(expand=size):
+            s_ = util.truncate_slice(s, size)
+            out_raster[s_] = eval_op(a, input_raster.nodata, size, numpy.var)
+    else:
+        # Calculate over all data
+        out_raster[1:-1, 1:-1] = eval_op(input_raster.array, input_raster.nodata, size, numpy.var)
 
-    return var_raster
+    return out_raster
 
 
 def median_filter(input_raster, size=(3, 3)):
@@ -143,49 +129,38 @@ def median_filter(input_raster, size=(3, 3)):
     :param size: Window size
     :return: Raster with local median values
     """
-    def eval_med(a, nd):
-        ndMask = a == nd
-        medA = numpy.median(util.stride_hood(a, size, edge_mode='edge'), axis=(3, 2))
-        medA[ndMask] = nd
-        return medA
-
-    # Allocate output
     input_raster = raster(input_raster)
-    with input_raster.empty() as med_raster:
-        if input_raster.useChunks:
-            for a, s in input_raster.iterchunks(expand=size):
-                med_raster[s] = eval_med(a, input_raster.nodata)
-        else:
-            # Calculate over all data
-            med_raster[:] = eval_med(input_raster.array, input_raster.nodata)
+    out_raster = input_raster.full(input_raster.nodata)
+    if input_raster.useChunks:
+        for a, s in input_raster.iterchunks(expand=size):
+            s_ = util.truncate_slice(s, size)
+            out_raster[s_] = eval_op(a, input_raster.nodata, size, numpy.median)
+    else:
+        # Calculate over all data
+        out_raster[1:-1, 1:-1] = eval_op(input_raster.array, input_raster.nodata, size, numpy.median)
 
-    return med_raster
+    return out_raster
 
 
 def percentile_filter(input_raster, percentile=25, size=(3, 3)):
     """
-        Perform a median filter
-        :param size: Window size
-        :return: Raster with local median values
-        """
+    Perform a median filter
+    :param size: Window size
+    :return: Raster with local median values
+    """
 
-    def eval_perc(a, nd):
-        ndMask = a == nd
-        percA = numpy.percentile(util.stride_hood(a, size, edge_mode='edge'), percentile, axis=(3, 2))
-        percA[ndMask] = nd
-        return percA
-
-    # Allocate output
     input_raster = raster(input_raster)
-    with input_raster.empty() as perc_raster:
-        if input_raster.useChunks:
-            for a, s in input_raster.iterchunks(expand=size):
-                perc_raster[s] = eval_perc(a, input_raster.nodata)
-        else:
-            # Calculate over all data
-            perc_raster[:] = eval_perc(input_raster.array, input_raster.nodata)
+    out_raster = input_raster.full(input_raster.nodata)
+    if input_raster.useChunks:
+        for a, s in input_raster.iterchunks(expand=size):
+            s_ = util.truncate_slice(s, size)
+            out_raster[s_] = eval_op(a, input_raster.nodata, size, numpy.percentile, percentile=percentile)
+    else:
+        # Calculate over all data
+        out_raster[1:-1, 1:-1] = eval_op(input_raster.array, input_raster.nodata, size, numpy.percentile,
+                                         percentile=percentile)
 
-    return perc_raster
+    return out_raster
 
 
 def most_common(input_raster, size=(3, 3)):
@@ -196,15 +171,15 @@ def most_common(input_raster, size=(3, 3)):
     """
     # Allocate output
     input_raster = raster(input_raster)
-    with input_raster.empty() as mode_raster:
-        if input_raster.useChunks:
-            # Iterate chunks and calculate mode (memory-intensive, so don't fill cache)
-            for a, s in input_raster.iterchunks(expand=size, fill_cache=False):
-                s_ = util.truncate_slice(s, size)
-                mode_raster[s_] = util.mode(util.window_on_last_axis(a, size), 2)[0]
-        else:
-            # Calculate over all data
-            mode_raster[1:-1, 1:-1] = util.mode(util.window_on_last_axis(input_raster.array, size), 2)[0]
+    mode_raster = input_raster.empty()
+    if input_raster.useChunks:
+        # Iterate chunks and calculate mode (memory-intensive, so don't fill cache)
+        for a, s in input_raster.iterchunks(expand=size, fill_cache=False):
+            s_ = util.truncate_slice(s, size)
+            mode_raster[s_] = util.mode(util.window_on_last_axis(a, size), 2)[0]
+    else:
+        # Calculate over all data
+        mode_raster[1:-1, 1:-1] = util.mode(util.window_on_last_axis(input_raster.array, size), 2)[0]
 
     return mode_raster
 

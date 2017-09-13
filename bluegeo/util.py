@@ -198,7 +198,7 @@ def kernel_from_distance(distance, csx, csy):
     return dt <= distance
 
 
-def stride_hood(a, window=(3, 3), edge_mode='constant', constant_values=0):
+def stride_hood(a, window=(3, 3)):
     """
     Return views into array over a given neighbourhood window
     :param a: ndarray
@@ -217,16 +217,13 @@ def stride_hood(a, window=(3, 3), edge_mode='constant', constant_values=0):
         strides = a.strides + (a.strides[-1],)
         return numpy.lib.stride_tricks.as_strided(a, shape=shape, strides=strides)
 
-    acopy = numpy.pad(a, ((window[0] - 1) / 2, (window[1] - 1) / 2), edge_mode,
-                      constant_values=constant_values)
     if not hasattr(window, '__iter__'):
-        return rolling_window_lastaxis(acopy, window)
+        return rolling_window_lastaxis(a, window)
     for i, win in enumerate(window):
-        if win > 1:
-            acopy = acopy.swapaxes(i, -1)
-            acopy = rolling_window_lastaxis(acopy, win)
-            acopy = acopy.swapaxes(-2, i)
-    return acopy
+        a = a.swapaxes(i, -1)
+        a = rolling_window_lastaxis(a, win)
+        a = a.swapaxes(-2, i)
+    return a
 
 
 

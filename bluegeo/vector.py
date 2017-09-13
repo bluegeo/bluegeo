@@ -184,6 +184,29 @@ class vector(object):
 
             ds.Destroy()
 
+    def define_projection(self, spatial_reference):
+        """
+        Define a projection for the shapefile
+        :param spatial_reference: EPSG, wkt, or osr object
+        :return: None
+        """
+        # Don't overwrite if it's open in read-only mode
+        if self.projection != '' and self.mode == 'r':
+            raise VectorError('Vector source file has a defined projection, and is open in read-only mode')
+
+        # Parse projection argument into wkt
+        wkt = parse_projection(spatial_reference)
+
+        # If the source is a .shp create path for output .prj file
+        if self.driver == 'ESRI Shapefile':
+            prj_path = '.'.join(self.path.split('.')[:-1]) + '.prj'
+            with open(prj_path, 'w') as f:
+                f.write(wkt)
+        else:
+            # Need to write it out
+            # TODO: this
+            raise VectorError('Not implemented yet')
+
     def empty(self, spatial_reference=None, fields=[], prestr='copy'):
         """
         Create a copy of self as an output shp without features
