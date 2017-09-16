@@ -535,10 +535,9 @@ def bare_earth(surface, max_area=65., slope_threshold=50.):
     """
     # Create slope surface to work with
     surface = topo(surface)
-    print "Computing gradient"
+    print "Computing gradients and identifying objects"
     with surface.slope() as slopeData:
         # Reclassify high-slope regions
-        print "Identifying objects"
         slopeArray = slopeData.array
         regions = numpy.ones(shape=slopeArray.shape, dtype='bool')
         regions[(slopeArray > slope_threshold) & (slopeArray != slopeData.nodata)] = 0
@@ -612,16 +611,18 @@ def bare_earth(surface, max_area=65., slope_threshold=50.):
         points[:, 0] *= surface.csx
         points[:, 1] = (points[:, 1] * m) + b
         wxi = numpy.where(xi)
-        xi = numpy.vstack(wxi[::-1]).T.astype('float32')
-        xi[:, 1] = (xi[:, 1] * m) + b
+        xi = (wxi[1] * surface.csx, (wxi[0] * m) + b)
         reinsert.append(wxi)
-        iterable.append((points, xi, values, numpy.full(xi.shape[0], surface.nodata, 'float32'),
-                         (i_min, i.max() + 3, j_min, j.max() + 3, enum)))
+        iterable.append((points, xi, values, surface.nodata, (i_min, i.max() + 3, j_min, j.max() + 3, enum)))
+
+    def perform_interpolation(args):
+        points, xi, values, nodata, flowthrough = args
+        return interpolate.griddata(points, values, xi, fill_value=nodata), flowthrough
 
     from multiprocessing.dummy import Pool, cpu_count
     p = Pool(cpu_count())
     try:
-        ret = p.imap_unordered(idw, iterable)
+        ret = p.imap_unordered(perform_interpolation, iterable)
     except Exception as e:
         import sys
         p.close()

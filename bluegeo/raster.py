@@ -323,6 +323,7 @@ class raster(object):
             # Data will be broadcast to nodata if it is not specified
             new_rast = self.full(self.nodataValues[0], path, compress=compress)
         else:
+            # TODO: Change to support bands
             new_rast = self.empty(path, compress=compress)
             new_rast[:] = data
         self.__dict__.update(new_rast.__dict__)
@@ -373,6 +374,8 @@ class raster(object):
         :return: raster instance
         """
         outrast = self.empty(path=path, compress=compress)
+        # h5py is very slow to broadcast and write- broadcast in advance
+        data = numpy.broadcast_to(data, self.shape)
         outrast[:] = data
         return outrast
 
@@ -700,7 +703,7 @@ class raster(object):
                                       interpolation=self.interpolation)
             else:
                 return self.transform(csx=inrast.csx, csy=inrast.csy,
-                                      projection=inrast, bbox=inrast_bbox,
+                                      projection=inrast.projection, bbox=inrast_bbox,
                                       interpolation=self.interpolation)
 
     def slice_from_bbox(self, bbox):
