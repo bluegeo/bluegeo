@@ -472,7 +472,7 @@ def inverse_distance(pointGrid, xGrid, values):
 
 def correct_surface(surface, points, field):
     """
-    Correct a surface to align with a set of points
+    Correct a surface to align with a z value from a set of points based on their difference
     :param surface: input surface to correct
     :param points: points used to correct surface
     :param field: field with the z-information

@@ -693,7 +693,7 @@ class raster(object):
                 isclose((self.left - inrast.left) % self.csx, [0, self.csx]),
                 samesrs]):
             # Simple slicing is sufficient
-            return self.change_extent(inrast_bbox)
+            return self.clip(inrast_bbox)
         else:
             # Transform required
             print "Transforming to match rasters..."
@@ -764,7 +764,7 @@ class raster(object):
                 shape,
                 (top, bottom, left, right))
 
-    def change_extent(self, bbox_or_raster):
+    def clip(self, bbox_or_raster):
         """
         Slice self using bounding box coordinates.
 
@@ -789,10 +789,10 @@ class raster(object):
         # Check if no change
         if all([self.top == bbox[0], self.bottom == bbox[1],
                 self.left == bbox[2], self.right == bbox[3]]):
-            return self.copy('change_extent')
+            return self.copy('clip')
 
         # Create output dataset with new extent
-        path = generate_name(self.path, 'change_extent', 'h5')
+        path = generate_name(self.path, 'clip', 'h5')
         kwargs = {
             'projection': self.projection,
             'csx': self.csx,
@@ -1046,7 +1046,11 @@ class raster(object):
             blockxsize = 'BLOCKXSIZE=%s' % chunks[1]
             blockysize = 'BLOCKYSIZE=%s' % chunks[0]
             tiled = 'TILED=YES'
-        parszOptions = [tiled, blockysize, blockxsize, comp]
+        if self.size > 4.:
+            bigtiff='BIGTIFF=YES'
+        else:
+            bigtiff = 'BIGTIFF=NO'
+        parszOptions = [tiled, blockysize, blockxsize, comp, bigtiff]
         ds = driver.Create(output_path, int(shape[1]), int(shape[0]),
                            bands, raster.get_gdal_dtype(dtype),
                            parszOptions)
@@ -1533,6 +1537,30 @@ class mosaic(raster):
 
 
 # Numpy-like methods
+def rastround(input_raster, decimal_places):
+    """
+    Round a raster to a defined number of decimal places
+    :param input_raster: raster to be rounded
+    :param decimal_places: (int) number of decimal places
+    :return: raster instance
+    """
+    # Open everything
+    dp = int(decimal_places)
+    r = raster(input_raster)
+    out = r.empty()
+
+    # Perform rounding
+    if r.useChunks:
+        for a, s in r.iterchunks():
+            m = a != r.nodata
+            a[m] = numpy.round(a[m], dp)
+            out[s] = a
+    else:
+        out[:] = numpy.round(r.array, dp)
+
+    return out
+
+
 def copy(input_raster):
     """Copy a raster dataset"""
     return raster(input_raster).copy('copy')

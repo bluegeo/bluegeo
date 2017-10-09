@@ -1,4 +1,5 @@
-import raster
+from raster import *
+from vector import *
 import terrain
 import water
 import measurement

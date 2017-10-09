@@ -1,6 +1,7 @@
 from raster import *
 import util
-from scipy.ndimage import binary_dilation
+from scipy.ndimage import binary_dilation, gaussian_filter
+from scipy.interpolate import griddata
 
 
 class FilterError(Exception):
@@ -182,6 +183,74 @@ def most_common(input_raster, size=(3, 3)):
         mode_raster[1:-1, 1:-1] = util.mode(util.window_on_last_axis(input_raster.array, size), 2)[0]
 
     return mode_raster
+
+
+def gaussian(input_raster, sigma):
+    """
+    Perform a gaussian filter with a specific standard deviation
+    :param input_raster: Input raster
+    :param sigma: Standard deviation
+    :return: raster instance
+    """
+    # Allocate output
+    input_raster = raster(input_raster)
+    gauss = input_raster.empty()
+
+    # Create mask from nodata values
+    m = input_raster.array == input_raster.nodata
+
+    # Regions of no data must be interpolated first
+    interp_rast = interpolate_nodata(input_raster)
+
+    # Perform filter
+    a = gaussian_filter(interp_rast.array, sigma)
+    a[m] = gauss.nodata
+
+    gauss[:] = a
+    return gauss
+
+
+def interpolate_nodata(input_raster, method='nearest'):
+    """
+    Fill no data values with interpolated values from the edge of valid data
+    :param input_raster: input raster
+    :param method: interpolation method
+    :return: raster instance
+    """
+    inrast = raster(input_raster)
+
+    # Check if no data values exist
+    a = inrast.array
+    xi = a == inrast.nodata
+    if xi.sum() == 0:
+        return inrast
+
+    # Interpolate values
+    points = binary_dilation(xi, structure=numpy.ones(shape=(3, 3), dtype='bool')) & ~xi
+    values = a[points]
+    points = numpy.where(points)
+    points = numpy.vstack([points[0] * inrast.csy, points[1] * inrast.csx]).T
+    xi = numpy.where(xi)
+    if method != 'nearest':
+        # Corners of raster must have data to ensure convex hull encompasses entire raster
+        index = map(numpy.array, ([0, 0, a.shape[0] - 1, a.shape[0] - 1], [0, a.shape[1] - 1, 0, a.shape[1] - 1]))
+        corner_nodata = a[index] == inrast.nodata
+        if corner_nodata.sum() != 0:
+            index = (index[0][corner_nodata], index[1][corner_nodata])
+            points_append = (index[0] * inrast.csy, index[1] * inrast.csx)
+            corners = griddata(points, values, points_append, method='nearest')
+            values = numpy.append(values, corners)
+            points = numpy.append(points, numpy.vstack(points_append).T, axis=0)
+            a[index] = corners
+            xi = a == inrast.nodata
+            xi = numpy.where(xi)
+
+    a[xi] = griddata(points, values, (xi[0] * inrast.csy, xi[1] * inrast.csx), method)
+
+    # Return output
+    outrast = inrast.empty()
+    outrast[:] = a
+    return outrast
 
 
 def dilate(input_raster, dilate_value=1, iterations=1):
