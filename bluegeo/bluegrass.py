@@ -260,7 +260,7 @@ def water_outlet(coordinates, dem=None, direction=None,  basin_path=None):
     # Write rasters to single dataset
     output = numpy.zeros(shape=outrast.shape, dtype='uint32')
     areas = numpy.array(areas)
-    for c, i in enumerate(numpy.arange(areas.shape[0])[numpy.argsort(areas)]):
+    for c, i in enumerate(numpy.arange(areas.shape[0])[numpy.argsort(areas)][::-1]):
         output[index[i]] = c + 1
     outrast[:] = output
 
