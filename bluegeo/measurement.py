@@ -5,6 +5,7 @@ blueGeo 2017
 '''
 from raster import *
 from skimage.measure import label as sklabel
+from skimage.graph import MCP_Geometric
 
 
 class MeasurementError(Exception):
@@ -52,3 +53,35 @@ def centroid():
 
 def zonal():
     pass
+
+
+def cost_surface(sources, cost, reverse=False):
+    """
+    Generate a cost surface using a source raster and a cost raster
+    :return:
+    """
+    # Generate cost surface
+    cost = raster(cost).astype('float32')
+    sources = raster(sources).match_raster(cost)
+    sources = sources.array != sources.nodata
+    _cost = cost.array
+    m = _cost != cost.nodata
+    data = _cost[m]
+    dataMin = data.min()
+    data = (data - dataMin) / (data.max() - dataMin)
+    if reverse:
+        data = 1. - data
+    _cost[m] = data
+    _cost[~m] = data.max()  # Fill no data with large values
+    _cost[sources] = 0
+
+    # Compute cost network
+    mcp = MCP_Geometric(_cost, sampling=(cost.csy, cost.csx))
+    cost_network, traceback = mcp.find_costs(numpy.array(numpy.where(sources)).T)
+
+    # Prepare output
+    out = cost.empty()
+    cost_network[numpy.isnan(cost_network) | numpy.isinf(cost_network) | ~m] = out.nodata
+    out[:] = cost_network
+
+    return out

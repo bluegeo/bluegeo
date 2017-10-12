@@ -11,6 +11,7 @@ from scipy import ndimage, interpolate
 from numba.decorators import jit
 from terrain import *
 from rastfilter import *
+from measurement import *
 from skimage.measure import label
 try:
     from bluegrass import GrassSession
@@ -1522,3 +1523,38 @@ def vegEffectiveness(stream_raster, canopy_height_surface, tree_height=45):
     a.flush()
     del a
     return root_height, litter_height, shade, coarse
+
+
+def connectivity(dem, streams):
+    # Calculate slope
+    print "Calculating slope"
+    slope = topo(dem).slope()
+
+    # Complete first network analysis
+    print "Creating initial cost surface"
+    cost = cost_surface(streams, slope)
+
+    # Reclassify network to highest connectivity
+    print "Adding proximal regions to source"
+    a = cost.array
+    thresh = numpy.percentile(a[a != cost.nodata], 50)
+    new_sources = (a < thresh) & (a != cost.nodata)
+    streams = raster(streams).copy()
+    st = streams.array != streams.nodata
+    st[new_sources] = 1
+    st = st.astype(streams.dtype)
+    streams.nodataValues = [0]
+    streams[:] = st
+
+    # Complete second network analysis
+    print "Recalculating cost"
+    cost = cost_surface(streams, slope)
+
+    # Reclassify regions into non-contributing
+    print "Reclassifying cost"
+    a = cost.array
+    thresh = numpy.percentile(a[a != cost.nodata], 90)
+    a[a < thresh] = cost.nodata
+    cost[:] = a
+
+    return cost

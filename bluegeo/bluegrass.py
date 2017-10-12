@@ -232,6 +232,8 @@ def water_outlet(coordinates, dem=None, direction=None,  basin_path=None):
             raise BlueGrassError('If a flow direction raster is not specified, a valid DEM must be specified')
         fd = fd.path
 
+    csx, csy = raster(fd).csx, raster(fd).csy
+
     with GrassSession(fd):
         from grass.pygrass.modules.shortcuts import raster as graster
         from grass.script import core as grass
@@ -246,7 +248,9 @@ def water_outlet(coordinates, dem=None, direction=None,  basin_path=None):
             a = garray.array()
             a.read("b%i" % (i))
             m = numpy.where(a == 1)
-            areas.append(m[0].shape[0])
+            area = m[0].shape[0] * (csx * csy)
+            areas.append(area)
+            print "Basin {} area: {}".format(i, area)
             index.append(m)
 
     # Allocate output
