@@ -22,7 +22,7 @@ class GrassSession(object):
 
         # If temp is specified, use a different temporary directory
         if TEMP_DIR is not None:
-            self.tempdir = temp
+            self.tempdir = TEMP_DIR
         else:
             self.tempdir = tempfile.gettempdir()
         self.persist = persist
@@ -81,7 +81,7 @@ class GrassSession(object):
             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         out, err = p.communicate()
         if p.returncode != 0:
-            raise Exception("ERROR: GRASS GIS 7 start script ({})".format(createcmd))
+            raise Exception("ERROR: GRASS GIS 7 start script ({}) because:\n{}".format(createcmd, err))
 
     @property
     def location_path(self):
@@ -194,6 +194,7 @@ def stream_order(dem, minimum_contributing_area, stream_order_path=None, method=
         grass.run_command('r.stream.extract', elevation='dem',
                           threshold=threshold, stream_raster='streams',
                           direction='fd')
+
         if method.lower() == 'strahler':
             grass.run_command('r.stream.order', stream_rast='streams',
                               direction='fd', strahler="order")

@@ -22,7 +22,6 @@ def is_installed(name):
 
 requires = ['numpy', 'scipy', 'scikit-image', 'h5py', 'numexpr']
 
-
 setup(name='bluegeo',
       version=version,
       description='Bluegeo python library for data manipulation',
