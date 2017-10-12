@@ -153,8 +153,8 @@ def watershed(dem, flow_direction='SFD', accumulation_path=None, direction_path=
         from grass.script import core as grass
         graster.external(input=dem, output='surface')
         grass.run_command('r.watershed', elevation='surface', drainage='fd', accumulation='fa', flags=flags)
-        graster.out_gdal('fd', format="GTiff", output=accupath)
-        graster.out_gdal('fa', format="GTiff", output=dirpath)
+        graster.out_gdal('fd', format="GTiff", output=dirpath)
+        graster.out_gdal('fa', format="GTiff", output=accupath)
 
     # Return raster instances
     return raster(dirpath), raster(accupath)
@@ -250,7 +250,7 @@ def water_outlet(coordinates, dem=None, direction=None,  basin_path=None):
             m = numpy.where(a == 1)
             area = m[0].shape[0] * (csx * csy)
             areas.append(area)
-            print "Basin {} area: {}".format(i, area)
+            print "Basin {} area: {}".format(i + 1, area)
             index.append(m)
 
     # Allocate output
