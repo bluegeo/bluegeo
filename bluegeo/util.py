@@ -166,7 +166,7 @@ def coords_to_indices(coords, top, left, csx, csy, shape):
     """
     Convert coordinates to array indices using the given specs.
     Coordinates outside of the shape are not returned.
-    :param coords: Tuple of coordinates in the form ([x...], [y...])
+    :param coords: Tuple of coordinates in the form ([x...],    [y...])
     :param top: Top coordinate of array
     :param left: Left coordinate of array
     :param csx: Cell size in the x-direction

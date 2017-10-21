@@ -12,7 +12,7 @@ from numba.decorators import jit
 from terrain import *
 from rastfilter import *
 from measurement import *
-from skimage.measure import label
+from skimage.measure import label as sklabel
 try:
     from bluegrass import GrassSession
 except ImportError:
@@ -850,8 +850,8 @@ def h60(dem, basins, output_raster):
     output = raster(bas)
     loadout = output.load('r+')
     # Create an index for basins
-    out = label(loadout, connectivity=2, background=bas.nodata[0],
-                return_num=False)
+    out = sklabel(loadout, connectivity=2, background=bas.nodata[0],
+                  return_num=False)
     cursor = numpy.max(out)
     h60basins = []
     # Compute H60 Elevation at each region
@@ -1406,70 +1406,47 @@ def bank_slope(dem, slope_threshold=15, streams=None, slope=None, min_contrib_ar
 
 
 
-def cumulativeEffectiveness(stream_raster, fa_dilation,
-                            slope_dilation, tree_height=50):
+def cumulativeEffectiveness(stream_raster, tree_height=50):
     """
     Define zones of riparian cumulative effectiveness.
-
+    Updated Oct 21, 2017
     """
-    # Read input
-    util.parseInput(stream_raster)
-    util.parseInput(fa_dilation)
-    util.parseInput(slope_dilation)
-    # Compute distance
-    dist = streamDistance(stream_raster)
-    dist.changeDataType('float32')
-    # Buffer width is associated with contributing area
-    conta = fa_dilation.load('r+')
-    dista = dist.load('r+')
-    # Scale contributing area
-    m = conta != fa_dilation.nodata[0]
-    conta[m] = numpy.sqrt(conta[m]) / numpy.sqrt(numpy.max(conta[m][dista[m] <= tree_height]))
-    # Scale Distance
-    m = dista != dist.nodata[0]
-    dista[m] /= tree_height
-    # Create similarity index
-    m = m & (conta != 0) & (conta != fa_dilation.nodata[0])
-    dista[m] = dista[m] / conta[m]
-    dista[dista > 1] = dist.nodata[0]
-    dista[~m] = dist.nodata[0]
-    del conta
-    del dista
-    # Index slope dilation
-    sl = slope_dilation.load('r+')
-    m = sl != slope_dilation.nodata[0]
-    sl[m] /= numpy.percentile(sl[m], 85)
-    sl[(sl > 1) & m] = 1
-    sl[m] = 1 - sl[m]
-    # Shade is equal to dist
-    shade = raster(dist)
-    a = shade.load('r+')
-    m = a != shade.nodata[0]
-    a[m] = 1 - a[m]
-    del a
+    # Compute distance to streams
+    dist = distance(stream_raster)
+    distA = dist.array
+    # Create mask where distance is less than tree height and scale to index from 0-1
+    m = distA < tree_height
+    distA[m] = (distA[m] - distA[m].min()) / (distA[m].max() - distA[m].min())
+    nodata = dist.nodata
+
+    # Shade is equal to the inverse of dist
+    a = distA.copy()
+    a[m] = 1. - a[m]
+    a[~m] = nodata
+    shade = dist.empty()
+    shade[:] = a
+
     # Litter
-    litter = raster(dist)
-    la = litter.load('r+')
-    la[m][la[m] > 0.6] = litter.nodata[0]
-    m = la != litter.nodata[0]
-    la[m] /= 0.6
-    la[m] = (1 - la[m]) * sl[m]
-    del la
+    a = distA.copy()
+    a[m][a[m] > 0.6] = 0.6
+    a[m] /= 0.6
+    a[m] = (1. - a[m])
+    a[~m] = nodata
+    litter = dist.empty()
+    litter[:] = a
+
     # Coarse
-    coarse = raster(dist)
-    co = coarse.load('r+')
-    m = co != coarse.nodata[0]
-    co[m] = (1 - co[m]) * sl[m]
-    del co
+    coarse = shade.copy()
+
     # Root
-    root = raster(dist)
-    a = root.load('r+')
-    m = a != root.nodata[0]
-    a[a < 0.25] = root.nodata[0]
-    a[a >= 0.25] = 1
-    m = a != root.nodata[0]
-    a[m] *= sl[m]
-    del a
+    a = distA.copy()
+    a = dist.array
+    a[a[m] < 0.25] = nodata
+    a[a[m] != nodata] = 1.
+    a[~m] = nodata
+    root = dist.empty()
+    root[:] = a
+
     return root, litter, shade, coarse
 
 
@@ -1525,36 +1502,69 @@ def vegEffectiveness(stream_raster, canopy_height_surface, tree_height=45):
     return root_height, litter_height, shade, coarse
 
 
-def connectivity(dem, streams):
-    # Calculate slope
-    print "Calculating slope"
+def non_contributing_regions(dem, streams, distance_weight=0.6):
+    # Make sure DEM aligns
+    dem = raster(dem)
+    dem.interpolationMethod = 'bilinear'
+    dem = dem.match_raster(streams)
+
+    # Delineate the riparian (to exclude)
     slope = topo(dem).slope()
-
-    # Complete first network analysis
-    print "Creating initial cost surface"
     cost = cost_surface(streams, slope)
-
-    # Reclassify network to highest connectivity
-    print "Adding proximal regions to source"
     a = cost.array
-    thresh = numpy.percentile(a[a != cost.nodata], 50)
-    new_sources = (a < thresh) & (a != cost.nodata)
-    streams = raster(streams).copy()
-    st = streams.array != streams.nodata
-    st[new_sources] = 1
-    st = st.astype(streams.dtype)
-    streams.nodataValues = [0]
-    streams[:] = st
+    m = a != cost.nodata
+    thresh = numpy.percentile(a[m], 5)
+    riparian = m & (a < thresh)
+    del a, m
 
-    # Complete second network analysis
-    print "Recalculating cost"
-    cost = cost_surface(streams, slope)
+    # Calculate slope
+    print "Calculating height above streams"
+    # Generate mask from streams
+    streams = raster(streams)
+    stream_nodata = streams.array == streams.nodata
 
-    # Reclassify regions into non-contributing
-    print "Reclassifying cost"
-    a = cost.array
-    thresh = numpy.percentile(a[a != cost.nodata], 90)
-    a[a < thresh] = cost.nodata
-    cost[:] = a
+    # Generate stream elevation raster
+    print "Adding elevation to streams"
+    streams = dem.copy()
+    streamA = streams.array
+    streamA[stream_nodata] = streams.nodata
+    streams[:] = streamA
+    del streamA
 
-    return cost
+    #  Interpolate no data values around streams
+    print "Interpolating regions around streams"
+    stream_surface = interpolate_nodata(streams)
+
+    # Subtract interpolated elevations from dem
+    print "Subtracting stream elevations from DEM"
+    demA = dem.array
+    m = demA != dem.nodata
+    demA[m] -= stream_surface.array[m]
+
+    # Create index where closest value to 0 is highest
+    print "Creating index from elevation difference"
+    over = m & (demA > 0) & ~riparian
+    over_set = demA[over]
+    over_set = (over_set - over_set.min()) / (over_set.max() - over_set.min())
+    demA[over] = 1. - over_set
+    del over_set
+    under = m & (demA < 0) & ~riparian
+    under_set = demA[under]
+    under_set = (under_set - under_set.min()) / (under_set.max() - under_set.min())
+    demA[under] = under_set
+    del under_set
+    demA[demA == 0] = 1.
+
+    # Calculate distance array to streams and normalize
+    print "Creating final connectivity index"
+    d = distance(streams).array
+    m = m & ~riparian
+    data = d[m]
+    dataMin = data.min()
+    demA[m] += (data - dataMin) / (data.max() - dataMin) * distance_weight
+    demA[m] /= 1 + distance_weight
+    demA[riparian] = 0
+
+    out = dem.empty()
+    out[:] = demA
+    return out

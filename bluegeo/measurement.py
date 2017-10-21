@@ -6,29 +6,40 @@ blueGeo 2017
 from raster import *
 from skimage.measure import label as sklabel
 from skimage.graph import MCP_Geometric
+from scipy.ndimage import distance_transform_edt
 
 
 class MeasurementError(Exception):
     pass
 
 
-def label(data, return_map=False):
+def label(data, return_map=False, raster_template=None):
     """
     Label contiguous regions in a raster or an array
     :param data: raster or numpy array
     :param return_map: Return a dictionary of cell indices associated with each label
-    :return: output labelled raster, and map of the flattened labels if return_map is True
+    :return: output labelled raster or array (if no template), and map of labels if return_map is True
     """
+    array_only = False
     if isinstance(data, numpy.ndarray):
         a = data
         background = 0
+        if raster_template is not None:
+            rast = raster(raster_template)
+            if any([rast.shape[0] != data.shape[0], rast.shape[1] != data.shape[1]]):
+                raise MeasurementError("Input raster template does not match array")
+        else:
+            array_only = True
     else:
         rast = raster(data)
         a = rast.array
         background = rast.nodata
 
-    a = sklabel(a, background=background)
-    with rast.astype(a.dtype.name) as outrast:
+    a = sklabel(a, background=background, return_num=False)
+    if array_only:
+        outrast = a
+    else:
+        outrast = rast.astype(a.dtype.name)
         outrast.nodataValues = [0]
         outrast[:] = a
 
@@ -55,6 +66,18 @@ def zonal():
     pass
 
 
+def distance(sources):
+    """
+    Calculate distance to sources everywhere in the dataset
+    :param sources: raster with sources as legitimate data
+    :return: distance array
+    """
+    r = raster(sources)
+    out = r.empty()
+    out[:] = distance_transform_edt(r.array == r.nodata, [r.csx, r.csy])
+    return out
+
+
 def cost_surface(sources, cost, reverse=False):
     """
     Generate a cost surface using a source raster and a cost raster
@@ -66,13 +89,12 @@ def cost_surface(sources, cost, reverse=False):
     sources = sources.array != sources.nodata
     _cost = cost.array
     m = _cost != cost.nodata
-    data = _cost[m]
-    dataMin = data.min()
-    data = (data - dataMin) / (data.max() - dataMin)
+
     if reverse:
-        data = 1. - data
-    _cost[m] = data
-    _cost[~m] = data.max()  # Fill no data with large values
+        data = _cost[m]
+        _cost[m] = data.max() - data
+
+    _cost[~m] = numpy.inf # Fill no data with infinity
     _cost[sources] = 0
 
     # Compute cost network
