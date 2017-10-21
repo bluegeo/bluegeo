@@ -1406,7 +1406,7 @@ def bank_slope(dem, slope_threshold=15, streams=None, slope=None, min_contrib_ar
 
 
 
-def cumulativeEffectiveness(stream_raster, tree_height=50):
+def cumulative_effectiveness(stream_raster, tree_height=50):
     """
     Define zones of riparian cumulative effectiveness.
     Updated Oct 21, 2017
@@ -1429,7 +1429,7 @@ def cumulativeEffectiveness(stream_raster, tree_height=50):
     # Litter
     a = distA.copy()
     a[m][a[m] > 0.6] = 0.6
-    a[m] /= 0.6
+    a[m] = a[m] / 0.6
     a[m] = (1. - a[m])
     a[~m] = nodata
     litter = dist.empty()
