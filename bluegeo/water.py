@@ -1441,9 +1441,9 @@ def cumulative_effectiveness(stream_raster, tree_height=50):
     # Root
     a = distA.copy()
     a = dist.array
-    a[m][a[m] < 0.25] = nodata
-    a[m][a[m] != nodata] = 1.
-    a[~m] = nodata
+    root_mask = m & (a >= 0.25)
+    a[root_mask] = 1.
+    a[~root_mask] = nodata
     root = dist.empty()
     root[:] = a
 
