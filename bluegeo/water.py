@@ -1428,10 +1428,10 @@ def cumulative_effectiveness(stream_raster, tree_height=50):
 
     # Litter
     a = distA.copy()
-    a[m][a[m] > 0.6] = 0.6
-    a[m] /= 0.6
-    a[m] = (1. - a[m])
-    a[~m] = nodata
+    litter_mask = m & (a <= 0.6)
+    a[litter_mask] /= 0.6
+    a[litter_mask] = (1. - a[litter_mask])
+    a[~litter_mask] = nodata
     litter = dist.empty()
     litter[:] = a
 
