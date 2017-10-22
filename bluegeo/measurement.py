@@ -73,7 +73,7 @@ def distance(sources):
     :return: distance array
     """
     r = raster(sources)
-    out = r.empty()
+    out = r.astype('float32')
     out[:] = distance_transform_edt(r.array == r.nodata, [r.csx, r.csy])
     return out
 
@@ -102,7 +102,7 @@ def cost_surface(sources, cost, reverse=False):
     cost_network, traceback = mcp.find_costs(numpy.array(numpy.where(sources)).T)
 
     # Prepare output
-    out = cost.empty()
+    out = cost.astype('float32')
     cost_network[numpy.isnan(cost_network) | numpy.isinf(cost_network) | ~m] = out.nodata
     out[:] = cost_network
 
