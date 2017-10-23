@@ -18,6 +18,7 @@ def label(data, return_map=False, raster_template=None):
     Label contiguous regions in a raster or an array
     :param data: raster or numpy array
     :param return_map: Return a dictionary of cell indices associated with each label
+    :param raster_template: Template raster to use if using an array
     :return: output labelled raster or array (if no template), and map of labels if return_map is True
     """
     array_only = False
