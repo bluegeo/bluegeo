@@ -63,7 +63,7 @@ class raster(object):
             if self.mode == 'w':
                 self.build_new_raster(input_data, **kwargs)
             # Check if input_data is a valid file
-            elif not os.path.isfile(input_data) or not os.path.isdir(input_data):
+            elif not os.path.isfile(input_data) and not os.path.isdir(input_data):
                 raise RasterError('%s is not a raster file' % input_data)
             else:
                 # Try an HDF5 input_data source
