@@ -248,7 +248,7 @@ class topo(raster):
                 min(self.bottom, inrastBbox[2][1], inrastBbox[3][1]),
                 min(self.left, inrastBbox[0][0], inrastBbox[2][0]),
                 max(self.right, inrastBbox[1][0], inrastBbox[3][0]))
-        selfChangeExtent = self.change_extent(bbox)  # Need extent of both rasters
+        selfChangeExtent = self.clip(bbox)  # Need extent of both rasters
 
         # Allocate output
         outrast = selfChangeExtent.empty()
