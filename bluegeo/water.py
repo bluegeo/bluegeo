@@ -13,10 +13,6 @@ from terrain import *
 from rastfilter import *
 from measurement import *
 from skimage.measure import label as sklabel
-try:
-    from bluegrass import GrassSession
-except ImportError:
-    print "Warning: Grass functions not available"
 
 
 class WatershedError(Exception):
@@ -713,41 +709,28 @@ class hru(raster):
                 'Zonal Datasets': self.zonalData.keys()}
 
 
-def sinuosity(**kwargs):
+def sinuosity(dem, stream_order, sample_distance=100):
     """
     Calculate sinuosity from a dem or streams
     :param kwargs: dem=path to dem _or_ stream_order=path to strahler stream order raster
         distance=search distance to calculate sinuosity ratio
     :return: sinuosity as a ratio
+
+    Updated October 25, 2017
     """
     # Collect as raster of streams
-    dem = kwargs.get('dem', None)
-    stream_order = kwargs.get('stream_order')
-    distance = kwargs.get('sample_distance', 100)  # Default measurement distance is 100m
+    distance = sample_distance
     radius = distance / 2.
     if distance <= 0:
         raise Exception('Sinuosity sampling distance must be greater than 0')
-    if stream_order is not None:
-        stream_order = raster(stream_order)
-    elif dem is not None:
-        min_contrib_area = kwargs.get('min_contrib_area')
-        tempdir = kwargs.get('tempdir', None)
-        if min_contrib_area is None:
-            raise Exception('Minimum contributing area required if deriving streams from DEM')
-        stream_order = watershed(dem, tempdir=tempdir).stream_order(min_contrib_area)
-    else:
-        raise Exception('Sinuosity needs requires either a dem or streams dataset')
 
     # Remove connecting regions to avoid over-counting
-    m = rastfilter(stream_order).min_filter().array != rastfilter(stream_order).max_filter().array
-    streamCopy = stream_order.copy()
-    a = streamCopy.array
+    m = min_filter(stream_order).array != max_filter(stream_order).array
+    a = stream_order.array
     a[m] = stream_order.nodata
-    streamCopy[:] = a
-    del a
 
     # Label and map stream order
-    stream_order, stream_map = region_label(streamCopy, True)
+    stream_labels, stream_map = label(a, True)
     # Get window kernel using distance
     kernel = util.kernel_from_distance(radius, stream_order.csx, stream_order.csy)
 
@@ -805,9 +788,10 @@ def sinuosity(**kwargs):
             output[i, j] = distance
         return output
 
-    sinuosity_raster = stream_order.copy().astype('float32')
-    outa = sinuosity_raster.array
-    sinuNodata = outa == sinuosity_raster.nodata
+    outa = stream_order.array
+    nodata_mask = outa == stream_order.nodata
+    sinuosity_raster = stream_order.astype('float32')
+    outa = outa.astype('float32')
     cnt = 0
     for region, indices in stream_map.iteritems():
         cnt += 1
@@ -827,11 +811,12 @@ def sinuosity(**kwargs):
         # Avoid false negatives where a full reach does not exist
         count_arr[count_arr < distance] = distance
         outa[iSlice, jSlice][sinu] = count_arr[sinu]
+
     sinuosity_raster.nodataValues = [-1]
-    outa[sinuNodata] = sinuosity_raster.nodata
-    outaVals = outa[~sinuNodata]
+    outa[nodata_mask] = sinuosity_raster.nodata
+    outaVals = outa[~nodata_mask]
     outaMin = outaVals.min()
-    outa[~sinuNodata] = (outaVals - outaMin) / (outaVals.max() - outaMin)
+    outa[~nodata_mask] = (outaVals - outaMin) / (outaVals.max() - outaMin)
     sinuosity_raster[:] = outa
 
     return sinuosity_raster
@@ -1285,88 +1270,27 @@ def streamDistance(streams):
     return strdist
 
 
-def riparianDelineation(dem, streams=None, slope=None, cost_rasters=[], min_contrib_area=None, reclass_percentile=10):
+def riparianDelineation(dem, stream_order, flow_accumulation):
     """
-    Define zones of riparian connectivity.
-
-    min_cut_slope is the lowest slope of cut point slopes.
-    max_bench_slope is the maximum slope a bench can be.
-    number_benches is the number of sequential benches to delineate as part of
-    the riparian zone.
+    Define zones of riparian connectivity.  Assumes all arrays match
     """
-    # Delineate streams
-    if streams is None:
-        if min_contrib_area is None:
-            raise RasterError('No minimum contributing area specified to delineate streams')
-        print "Delineating streams"
-        with watershed(dem).stream_order(min_contrib_area) as streamOrder:
-            streams = streamOrder.array != streamOrder.nodata
-        demRast = topo(dem)
-    else:
-        streamData = raster(streams)
-        # Match DEM to streams
-        demRast = topo(topo(dem).match_raster(streamData))
-        streams = streamData.array != streamData.nodata
-
+    # Calculate network of costs and normalize result
     print "Creating cost surface"
-    # Slope and distance to streams are always used to create a cost surface
-    if slope is None:
-        print "Calculating Slope"
-        with demRast.slope() as slope:
-            sla = slope.array
-            slnd = slope.nodata
-    else:
-        with topo(slope).match_raster(demRast) as slope:
-            sla = slope.array
-            slnd = slope.nodata
+    cost = normalize(cost_surface(stream_order, topo(dem).slope()))
 
-    costMask = sla != slnd
-    cost = numpy.zeros(shape=sla.shape, dtype='float32')
-    if len(cost_rasters) > 0:
-        slopeFactor = len(cost_rasters)
-    else:
-        slopeFactor = 1
-    cost[costMask] = (sla[costMask] / sla[costMask].max()) * slopeFactor
-    del sla
+    # Calculate indexed sinuosity/stream slope and extrapolate outwards
+    stream_slope = interpolate_nodata(normalize(topo(dem).stream_slope(stream_order)))
+    sinu = interpolate_nodata(normalize(sinuosity(dem, stream_order)))
 
-    # Add distance to streams to cost
-    # streamDist = ndimage.distance_transform_edt(~streams, (demRast.csx, demRast.csy))
-    # streamDist /= streamDist.max()
-    # cost[costMask] += streamDist[costMask]
+    # Reclassify flow accumulation and extrapolate outwards
+    stream_order, flow_accumulation = raster(stream_order), raster(flow_accumulation).copy()
+    fa = flow_accumulation.array
+    fa[stream_order.array == stream_order.nodata] = flow_accumulation.nodata
+    flow_accumulation[:] = fa
+    flow_accumulation = interpolate_nodata(normalize(flow_accumulation))
 
-    # Apply additional cost surfaces
-    for surface in cost_rasters:
-        with topo(surface).match_raster(demRast) as cr:
-            a = cr.array
-            costMask = costMask & (a != cr.nodata)
-            cost[costMask] += a[costMask]
-            del a
-
-    cost[~costMask] = -1
-    cost[streams] = 0
-    cost[cost != -1] /= cost.max()
-
-    # Calculate least cost path surface from outlet
-    print "Calculating network"
-    streamElev = demRast.array
-    streamElev[~streams] = demRast.nodata
-    i, j = numpy.where(streamElev == numpy.min(streamElev[streamElev != demRast.nodata]))
-    i, j = i[0], j[0]
-    mcp = MCP_Geometric(cost, sampling=(demRast.csy, demRast.csx))
-    cost, traceback = mcp.find_costs([(i, j)])
-
-    m = numpy.isnan(cost) | numpy.isinf(cost)
-
-    cost[m] = demRast.nodata
-    # cost[cost > numpy.percentile(cost[~m], reclass_percentile)] = demRast.nodata
-    costData = cost != demRast.nodata
-    aVals = cost[costData]
-    aMin = aVals.min()
-    cost[costData] = 1 - ((aVals - aMin) / (aVals.max() - aMin))
-    # Prepare and send output
-    outrast = demRast.copy()
-    outrast[:] = cost
-    return outrast
+    # Combine all data
+    return (cost + stream_slope + sinu + flow_accumulation) / 4
 
 
 def bank_slope(dem, slope_threshold=15, streams=None, slope=None, min_contrib_area=None):

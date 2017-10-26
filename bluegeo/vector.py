@@ -325,7 +325,10 @@ class vector(object):
 
         vertices = []
         for wkb in self[:]:
-            get_next(ogr.CreateGeometryFromWkb(wkb), vertices)
+            try:
+                get_next(ogr.CreateGeometryFromWkb(wkb), vertices)
+            except:
+                pass
 
         return numpy.array(vertices)
 
@@ -346,7 +349,11 @@ class vector(object):
                 for i in iter:
                     feature = lyr.GetFeature(i)
                     geo = feature.GetGeometryRef()
-                    data.append(geo.ExportToWkb())
+                    try:
+                        data.append(geo.ExportToWkb())
+                    except:
+                        # Null geometry
+                        data.append('')
                     feature.Destroy()
 
             elif isinstance(item, basestring):

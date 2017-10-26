@@ -253,6 +253,16 @@ def interpolate_nodata(input_raster, method='nearest'):
     return outrast
 
 
+def normalize(input_raster):
+    """
+    Normalize the range of raster data values (make range from 0 to 1)
+    :param input_raster:
+    :return:
+    """
+    min_val = rastmin(input_raster)
+    return (raster(input_raster) - min_val) / (rastmax(input_raster) - min_val)
+
+
 def dilate(input_raster, dilate_value=1, iterations=1):
     """
     Perform a region dilation
