@@ -168,29 +168,17 @@ class watershed(raster):
         st.nodataValues = [0]
         return st
 
-    def stream_slope(self, iterations=1, streams=None, min_contrib_area=None,
-                     fa=None, units='degrees'):
+    def stream_slope(self, streams, units='degrees'):
         '''
         Compute the slope from cell to cell in streams with a minimum
         contributing area.  If streams are specified, they will not be
         computed.
         '''
-        if streams is not None:
-            with self.match_raster(streams) as dem:
-                elev = dem.array
-            strms = raster(streams)
-            m = strms.array != strms.nodata
-        else:
-            if min_contrib_area is None:
-                raise WatershedError('min_contrib_area must be specified if no'
-                                     ' stream layer is provided')
-            if fa is not None:
-                with self.stream_reclass(fa, min_contrib_area) as ws:
-                    m = ws.array != ws.nodata
-            else:
-                with self.stream_order(min_contrib_area) as ws:
-                    m = ws.array != ws.nodata
-            elev = self.array
+        with self.match_raster(streams) as dem:
+            elev = dem.array
+        strms = raster(streams)
+        m = strms.array != strms.nodata
+
         # Compute stream slope
         inds = numpy.where(m)
         diag = math.sqrt(self.csx**2 + self.csy**2)
@@ -219,10 +207,9 @@ class watershed(raster):
 
         output = self.empty()
         a = numpy.full(output.shape, output.nodata, output.dtype)
-        for _iter in range(iterations):
-            slopefill = [compute(inds[0][i], inds[1][i])
-                         for i in range(inds[0].shape[0])]
-            a[m] = slopefill
+        slopefill = [compute(inds[0][i], inds[1][i])
+                     for i in range(inds[0].shape[0])]
+        a[m] = slopefill
         output[:] = a
         return output
 
