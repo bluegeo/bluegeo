@@ -1270,7 +1270,7 @@ def streamDistance(streams):
     return strdist
 
 
-def riparianDelineation(dem, stream_order, flow_accumulation):
+def riparian_delineation(dem, stream_order, flow_accumulation):
     """
     Define zones of riparian connectivity.  Assumes all arrays match
     """
@@ -1279,10 +1279,13 @@ def riparianDelineation(dem, stream_order, flow_accumulation):
     cost = normalize(cost_surface(stream_order, topo(dem).slope()))
 
     # Calculate indexed sinuosity/stream slope and extrapolate outwards
-    stream_slope = interpolate_nodata(normalize(topo(dem).stream_slope(stream_order)))
+    print "Calculating stream slope"
+    stream_slope = interpolate_nodata(normalize(watershed(dem).stream_slope(stream_order)))
+    print "Calculating sinuosity"
     sinu = interpolate_nodata(normalize(sinuosity(dem, stream_order)))
 
     # Reclassify flow accumulation and extrapolate outwards
+    print "Reclassifying flow accumulation"
     stream_order, flow_accumulation = raster(stream_order), raster(flow_accumulation).copy()
     fa = flow_accumulation.array
     fa[stream_order.array == stream_order.nodata] = flow_accumulation.nodata
@@ -1290,6 +1293,7 @@ def riparianDelineation(dem, stream_order, flow_accumulation):
     flow_accumulation = interpolate_nodata(normalize(flow_accumulation))
 
     # Combine all data
+    print "Aggregating output"
     return (cost + stream_slope + sinu + flow_accumulation) / 4
 
 

@@ -18,7 +18,7 @@ except ImportError:
 
 
 class RasterError(Exception):
-    '''Custom Exception'''
+    """Custom Exception"""
     pass
 
 
