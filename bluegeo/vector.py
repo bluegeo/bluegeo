@@ -596,3 +596,60 @@ class vector(object):
             return _types[code]
         except KeyError:
             raise VectorError('Unrecognized Geometry type OGRwkbGeometryType: {}'.format(code))
+
+
+    def rasterize(self, template_raster, attribute_field=None):
+        outarray = numpy.zeros(shape=(num_rows, num_cols), dtype='uint8')
+        dtype = 'uint8'
+
+        for gind in range(len(vect.geometries)):
+            if value_field is not None:
+                if solidval:
+                    val = value_field
+                else:
+                    val = vect.fields[value_field][gind]
+            vertices, geom_type = extractVertices(vect.geometries[gind])
+            gcnt = -1
+            for polygon in vertices:
+                gcnt += 1
+                ret = rasterizeWindow(top, left, outarray.shape[0], outarray.shape[1], abs(csy), csx, polygon,
+                                      geom_type[gcnt])
+                if type(ret).__name__ == 'tuple':
+                    i, j, windowi, windowj, window = ret
+                    if value_field is not None:
+                        if geom_type[gcnt] == 'HOLE':
+                            outarray[windowi:i, windowj:j][window == 0] = nodata
+                        else:
+                            outarray[windowi:i, windowj:j][window == 0] = val
+                    else:
+                        if geom_type[gcnt] == 'HOLE':
+                            outarray[windowi:i, windowj:j][window == 1] = 0
+                        else:
+                            outarray[windowi:i, windowj:j][window == 1] = 1
+                else:
+                    for pixel in ret:
+                        if value_field is not None:
+                            if geom_type[gcnt] == 'HOLE':
+                                outarray[pixel[1], pixel[0]] = nodataYeah,
+                            else:
+                                outarray[pixel[1], pixel[0]] = val
+                        else:
+                            if geom_type[gcnt] == 'HOLE':
+                                outarray[pixel[1], pixel[0]] = 0
+                            else:
+                                outarray[pixel[1], pixel[0]] = 1
+
+        top, left, shapei, shapej, csy, csx, polygon, geom_type
+        pixels = [coord_ind(top, left, csy, csx, point[0], point[1]) for point in polygon]
+        pixels = [pixels[0]] + [pixels[i] for i in range(1, len(pixels)) if pixels[i] != pixels[i - 1]]
+        if geom_type in pointtypes or len(pixels) == 1:
+            return pixels
+        shape, windowi, windowj, pixels = get_shape(pixels, shapei, shapej)
+        rasterPoly = Image.new("L", (shape[0], shape[1]), 0)
+        rasterize = ImageDraw.Draw(rasterPoly)
+        if geom_type in polygontypes:
+            rasterize.polygon(pixels, outline=1, fill=1)
+        elif geom_type in linetypes:
+            rasterize.line(pixels, 1)
+        i, j = windowi + shape[1], windowj + shape[0]
+        return i, j, windowi, windowj, numpy.array(rasterPoly, dtype='uint8').reshape(shape[1], shape[0])

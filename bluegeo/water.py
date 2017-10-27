@@ -174,6 +174,7 @@ class watershed(raster):
         contributing area.  If streams are specified, they will not be
         computed.
         '''
+        print "Calculating stream slope"
         with self.match_raster(streams) as dem:
             elev = dem.array
         strms = raster(streams)
@@ -706,6 +707,7 @@ def sinuosity(dem, stream_order, sample_distance=100):
     Updated October 25, 2017
     """
     # Collect as raster of streams
+    stream_order = raster(stream_order)
     distance = sample_distance
     radius = distance / 2.
     if distance <= 0:
@@ -1266,7 +1268,6 @@ def riparian_delineation(dem, stream_order, flow_accumulation):
     cost = normalize(cost_surface(stream_order, topo(dem).slope()))
 
     # Calculate indexed sinuosity/stream slope and extrapolate outwards
-    print "Calculating stream slope"
     stream_slope = interpolate_nodata(normalize(watershed(dem).stream_slope(stream_order)))
     print "Calculating sinuosity"
     sinu = interpolate_nodata(normalize(sinuosity(dem, stream_order)))

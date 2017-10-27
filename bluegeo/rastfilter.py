@@ -217,6 +217,7 @@ def interpolate_nodata(input_raster, method='nearest'):
     :param method: interpolation method
     :return: raster instance
     """
+    print "Interpolating no data values"
     inrast = raster(input_raster)
 
     # Check if no data values exist
