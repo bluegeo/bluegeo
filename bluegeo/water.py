@@ -1264,7 +1264,7 @@ def riparian_delineation(dem, stream_order, flow_accumulation):
     # Calculate indexed sinuosity/stream slope and extrapolate outwards
     stream_slope = extrapolate_buffer(normalize(watershed(dem).stream_slope(stream_order)), 150)
     print "Calculating sinuosity"
-    sinu = extrapolate_buffer(normalize(sinuosity(dem, stream_order)), 150)
+    sinu = extrapolate_buffer(normalize(sinuosity(dem, stream_order, 20)), 150)
 
     # Reclassify flow accumulation and extrapolate outwards
     print "Reclassifying flow accumulation"
