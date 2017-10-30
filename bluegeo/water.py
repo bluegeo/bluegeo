@@ -7,6 +7,7 @@ from terrain import *
 from filters import *
 from measurement import *
 from skimage.measure import label as sklabel
+from scipy.ndimage import convolve
 
 
 class WatershedError(Exception):
@@ -691,6 +692,33 @@ class hru(raster):
                 'Zonal Datasets': self.zonalData.keys()}
 
 
+def channel_density(streams, sample_distance=50):
+    """
+    Compute channel density- poor man's sinuosity
+    :param streams: stream raster
+    :param sample_distance: distance to sample density
+    :return: raster instance
+    """
+    # Allocate output as a raster cast to 32-bit floating points
+    output_raster = raster(streams).astype('float32')
+    conv = (output_raster.array != output_raster.nodata).astype('float32')
+
+    i = numpy.ceil(streams.csy / distance)
+    if i < 1:
+        i = 1
+    j = numpy.ceil(streams.csx / distance)
+    if j < 1:
+        j = 1
+    shape = map(int, (i, j))
+    weights = numpy.ones(shape=shape)
+    convolve(conv, weights=weights, output=conv)
+
+    output_raster.nodataValues = [0.]
+    output_raster[:] = conv
+
+    return output_raster
+
+
 def sinuosity(dem, stream_order, sample_distance=100):
     """
     Calculate sinuosity from a dem or streams
@@ -1263,8 +1291,8 @@ def riparian_delineation(dem, stream_order, flow_accumulation):
 
     # Calculate indexed sinuosity/stream slope and extrapolate outwards
     stream_slope = extrapolate_buffer(normalize(watershed(dem).stream_slope(stream_order)), 150)
-    # print "Calculating sinuosity"
-    # sinu = extrapolate_buffer(normalize(sinuosity(dem, stream_order, 20)), 150)
+    print "Calculating sinuosity"
+    sinu = extrapolate_buffer(normalize(channel_density(stream_order)), 150)
 
     # Reclassify flow accumulation and extrapolate outwards
     print "Reclassifying flow accumulation"
