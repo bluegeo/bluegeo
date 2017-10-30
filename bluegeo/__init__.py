@@ -1,8 +1,7 @@
-from raster import *
-from vector import *
+from spatial import *
 import terrain
 import water
 import measurement
-import rastfilter
+import filters
 import util
 import bluegrass

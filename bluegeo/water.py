@@ -3,14 +3,8 @@ Hydrologic analysis library
 
 Blue Geosimulation, 2017
 '''
-
-from raster import *
-import util
-import math
-from scipy import ndimage, interpolate
-from numba.decorators import jit
 from terrain import *
-from rastfilter import *
+from filters import *
 from measurement import *
 from skimage.measure import label as sklabel
 
@@ -1268,9 +1262,9 @@ def riparian_delineation(dem, stream_order, flow_accumulation):
     cost = normalize(cost_surface(stream_order, topo(dem).slope()))
 
     # Calculate indexed sinuosity/stream slope and extrapolate outwards
-    stream_slope = interpolate_nodata(normalize(watershed(dem).stream_slope(stream_order)))
+    stream_slope = extrapolate_buffer(normalize(watershed(dem).stream_slope(stream_order)), 150)
     print "Calculating sinuosity"
-    sinu = interpolate_nodata(normalize(sinuosity(dem, stream_order)))
+    sinu = extrapolate_buffer(normalize(sinuosity(dem, stream_order)), 150)
 
     # Reclassify flow accumulation and extrapolate outwards
     print "Reclassifying flow accumulation"
@@ -1278,7 +1272,7 @@ def riparian_delineation(dem, stream_order, flow_accumulation):
     fa = flow_accumulation.array
     fa[stream_order.array == stream_order.nodata] = flow_accumulation.nodata
     flow_accumulation[:] = fa
-    flow_accumulation = interpolate_nodata(normalize(flow_accumulation))
+    flow_accumulation = extrapolate_buffer(normalize(flow_accumulation), 150)
 
     # Combine all data
     print "Aggregating output"

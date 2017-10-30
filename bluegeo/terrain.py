@@ -4,11 +4,10 @@ Terrain and Hydrologic routing analysis
 Blue Geosimulation, 2017
 '''
 
-from raster import *
+from spatial import *
 import util
 import math
 from numba.decorators import jit
-from vector import *
 from scipy import ndimage, interpolate
 
 try:
@@ -28,7 +27,8 @@ class topo(raster):
     def __init__(self, surface):
         # Open and change to float if not already
         if 'float' not in raster(surface).dtype:
-            super(topo, self).__init__(surface.astype('float32'))
+            surface = raster(surface).astype('float32')
+            super(topo, self).__init__(surface)
         else:
             super(topo, self).__init__(surface)
         # Change interpolation method unless otherwise specified

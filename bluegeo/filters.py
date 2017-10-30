@@ -1,4 +1,4 @@
-from raster import *
+from spatial import *
 import util
 from scipy.ndimage import binary_dilation, gaussian_filter
 from scipy.interpolate import griddata
@@ -194,13 +194,14 @@ def gaussian(input_raster, sigma):
     """
     # Allocate output
     input_raster = raster(input_raster)
-    gauss = input_raster.empty()
+    gauss = input_raster.astype('float32')
 
     # Create mask from nodata values
     m = input_raster.array == input_raster.nodata
 
-    # Regions of no data must be interpolated first
-    interp_rast = interpolate_nodata(input_raster)
+    # Dilate no data regions so sample does not use no data
+    distance = int(4 * sigma + 0.5) * max([input_raster.csx, input_raster.csy])
+    interp_rast = extrapolate_buffer(input_raster, distance)
 
     # Perform filter
     a = gaussian_filter(interp_rast.array, sigma)
@@ -208,6 +209,38 @@ def gaussian(input_raster, sigma):
 
     gauss[:] = a
     return gauss
+
+
+def extrapolate_buffer(input_raster, distance, method='nearest'):
+    """
+    Extrapolate outside of data regions over a specified distance
+    :param input_raster: Input raster to be extrapolated
+    :param distance: (double) Distance of buffer (will be snapped to a fixed number of grid cells)
+    :param method: (str) interpolation method (nearest, bilinear, cubic).  Only the nearest method will ensure values are added outside the convex hull
+    :return: raster instance
+    """
+    # Read input and find the number of cells to dilate
+    input_raster = raster(input_raster)
+    iterations = int(numpy.ceil(distance / min([input_raster.csx, input_raster.csy])))
+    a = input_raster.array
+
+    # Create mask for no data values
+    m = a == input_raster.nodata
+    # Coordinates to interpolate data
+    xi = numpy.where(m & binary_dilation(~m, numpy.ones((3, 3)), iterations))
+    # Coordinates to be used in interpolation
+    points = numpy.where(binary_dilation(m, numpy.ones((3, 3))) & ~m)
+    # Data to be used in interpolation
+    values = a[points]
+    # Change configuration of interpolation points
+    points = numpy.vstack([points[0] * input_raster.csy, points[1] * input_raster.csx]).T
+    # Complete and insert interpolation
+    a[xi] = griddata(points, values, (xi[0] * input_raster.csy, xi[1] * input_raster.csx), method)
+
+    # Prepare and return output
+    output_raster = input_raster.empty()
+    output_raster[:] = a
+    return output_raster
 
 
 def interpolate_nodata(input_raster, method='nearest'):

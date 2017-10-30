@@ -1,11 +1,9 @@
 import subprocess
 import sys
 import tempfile
-import os
 import time
-import shutil
 import util
-from raster import *
+from spatial import *
 
 
 # Global temporary directory

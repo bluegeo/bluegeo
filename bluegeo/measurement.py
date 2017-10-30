@@ -3,7 +3,7 @@ Library for segmentation and label measurement using rasters
 
 blueGeo 2017
 '''
-from raster import *
+from spatial import *
 from skimage.measure import label as sklabel
 from skimage.graph import MCP_Geometric
 from scipy.ndimage import distance_transform_edt
