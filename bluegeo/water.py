@@ -703,10 +703,10 @@ def channel_density(streams, sample_distance=50):
     output_raster = raster(streams).astype('float32')
     conv = (output_raster.array != output_raster.nodata).astype('float32')
 
-    i = numpy.ceil(streams.csy / distance)
+    i = numpy.ceil(output_raster.csy / distance)
     if i < 1:
         i = 1
-    j = numpy.ceil(streams.csx / distance)
+    j = numpy.ceil(output_raster.csx / distance)
     if j < 1:
         j = 1
     shape = map(int, (i, j))
