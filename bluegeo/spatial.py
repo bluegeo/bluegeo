@@ -991,13 +991,13 @@ class raster(object):
             csy = dif / int(numpy.ceil(dif / self.csy))
 
         # Check that bbox and cell sizes align
-        xresid = round((bbox[3] - bbox[2]) % csx, 9)
-        yresid = round((bbox[0] - bbox[1]) % csy, 9)
-        if xresid != round(csx, 9) and xresid != 0:
+        xresid = round((bbox[3] - bbox[2]) % csx, 5)
+        yresid = round((bbox[0] - bbox[1]) % csy, 5)
+        if xresid != round(csx, 5) and xresid != 0:
             raise RasterError('Transform cannot be completed due to an'
                               ' incompatible extent %s and cell size (%s) in'
                               ' the x-direction' % ((bbox[3], bbox[2]), csx))
-        if yresid != round(csy, 9) and yresid != 0:
+        if yresid != round(csy, 5) and yresid != 0:
             raise RasterError('Transform cannot be completed due to an'
                               ' incompatible extent %s and cell size (%s) in'
                               ' the y-direction' % ((bbox[0], bbox[1]), csy))
