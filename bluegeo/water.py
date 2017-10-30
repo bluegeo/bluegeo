@@ -703,10 +703,10 @@ def channel_density(streams, sample_distance=50):
     output_raster = raster(streams).astype('float32')
     conv = (output_raster.array != output_raster.nodata).astype('float32')
 
-    i = numpy.ceil(output_raster.csy / sample_distance)
+    i = numpy.ceil(sample_distance / output_raster.csy)
     if i < 1:
         i = 1
-    j = numpy.ceil(output_raster.csx / sample_distance)
+    j = numpy.ceil(sample_distance / output_raster.csx)
     if j < 1:
         j = 1
     shape = map(int, (i, j))
@@ -1289,10 +1289,17 @@ def riparian_delineation(dem, stream_order, flow_accumulation):
     print "Creating cost surface"
     cost = normalize(cost_surface(stream_order, topo(dem).slope()))
 
+    cost.save('/home/ubuntu/white/cost.tif')
+
     # Calculate indexed sinuosity/stream slope and extrapolate outwards
     stream_slope = extrapolate_buffer(normalize(watershed(dem).stream_slope(stream_order)), 150)
+
+    stream_slope.save('/home/ubuntu/white/stream_slope.tif')
+
     print "Calculating sinuosity"
     sinu = extrapolate_buffer(normalize(channel_density(stream_order)), 150)
+
+    sinu.save('/home/ubuntu/white/sinu.tif')
 
     # Reclassify flow accumulation and extrapolate outwards
     print "Reclassifying flow accumulation"
@@ -1301,6 +1308,8 @@ def riparian_delineation(dem, stream_order, flow_accumulation):
     fa[stream_order.array == stream_order.nodata] = flow_accumulation.nodata
     flow_accumulation[:] = fa
     flow_accumulation = extrapolate_buffer(normalize(flow_accumulation), 150)
+
+    flow_accumulation.save('/home/ubuntu/white/contributing_area.tif')
 
     # Combine all data
     print "Aggregating output"
