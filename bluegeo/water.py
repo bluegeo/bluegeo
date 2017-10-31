@@ -1284,20 +1284,20 @@ def riparian_delineation(dem, stream_order, flow_accumulation):
 
     cost = raster('/home/ubuntu/white/cost.tif', mode='r+')
 
-    a = cost.array
-    m = a != cost.nodata
-    a[m] = a[m].max() - a[m]
-    cost[:] = a
+    # a = cost.array
+    # m = a != cost.nodata
+    # a[m] = a[m].max() - a[m]
+    # cost[:] = a
 
     # Calculate indexed sinuosity/stream slope and extrapolate outwards
     # stream_slope = extrapolate_buffer(normalize(watershed(dem).stream_slope(stream_order)), 150)
 
     stream_slope = raster('/home/ubuntu/white/stream_slope.tif', mode='r+')
 
-    a = stream_slope.array
-    m = a != stream_slope.nodata
-    a[m] = a[m].max() - a[m]
-    stream_slope[:] = a
+    # a = stream_slope.array
+    # m = a != stream_slope.nodata
+    # a[m] = a[m].max() - a[m]
+    # stream_slope[:] = a
 
     # print "Calculating sinuosity"
     # dens = raster('white_1m_channel_density.tif')
@@ -1317,12 +1317,12 @@ def riparian_delineation(dem, stream_order, flow_accumulation):
     #
     # flow_accumulation = extrapolate_buffer(normalize(output), 150)
 
-    flow_accumulation = raster('/home/ubuntu/white/contributing_area.tif')
+    # flow_accumulation = raster('/home/ubuntu/white/contributing_area.tif')
 
 
     # Combine all data
     print "Aggregating output"
-    return ((cost * 3) + (stream_slope * 1.5) + (sinu * 1.5) + flow_accumulation) / 7
+    return ((cost * 3) + stream_slope + sinu) / 5
 
 
 def bank_slope(dem, slope_threshold=15, streams=None, slope=None, min_contrib_area=None):
