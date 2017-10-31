@@ -1302,14 +1302,14 @@ def riparian_delineation(dem, stream_order, flow_accumulation):
     sinu = raster('/home/ubuntu/white/sinu.tif')
 
     # Reclassify flow accumulation and extrapolate outwards
-    print "Reclassifying flow accumulation"
-    output = raster(flow_accumulation).astype('float32')
-    stream_order, flow_accumulation = raster(stream_order), raster(flow_accumulation)
-    fa = flow_accumulation.array.astype('float32')
-    fa[stream_order.array == stream_order.nodata] = output.nodata
-    output[:] = fa
+    # print "Reclassifying flow accumulation"
+    # output = raster(flow_accumulation).astype('float32')
+    # stream_order, flow_accumulation = raster(stream_order), raster(flow_accumulation)
+    # fa = flow_accumulation.array.astype('float32')
+    # fa[stream_order.array == stream_order.nodata] = output.nodata
+    # output[:] = fa
 
-    output.save('/home/ubuntu/white/fa_rec.tif')
+    output = raster('/home/ubuntu/white/fa_rec.tif')
 
     flow_accumulation = extrapolate_buffer(normalize(output), 150)
 
