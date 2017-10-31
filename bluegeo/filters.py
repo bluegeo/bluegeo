@@ -316,7 +316,7 @@ def convolve(input_raster, kernel):
     # Perform convolution
     views = util.get_window_views(a, kernel.shape)  # Views into a over the kernel
     local_dict = util.window_local_dict(views)  # Views turned into a pointer dictionary for numexpr
-    output = numpy.zeros(shape=a.shape, dtype='float32')  # Allocate output
+    output = numpy.zeros(shape=inrast.shape, dtype='float32')  # Allocate output
     # ne.evaluate only allows 32 arrays in one expression.  Need to chunk it up.
     keys = local_dict.keys()
     kernel_len = len(keys)
