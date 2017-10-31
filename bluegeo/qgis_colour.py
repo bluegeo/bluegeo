@@ -1,4 +1,4 @@
-from raster import *
+from spatial import *
 import tempfile
 
 
