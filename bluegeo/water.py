@@ -1286,27 +1286,28 @@ def riparian_delineation(dem, stream_order, flow_accumulation):
     Define zones of riparian connectivity.  Assumes all arrays match
     """
     # Calculate network of costs and normalize result
-    print "Creating cost surface"
-    cost = normalize(cost_surface(stream_order, topo(dem).slope()))
+    # print "Creating cost surface"
+    # cost = normalize(cost_surface(stream_order, topo(dem).slope()))
 
-    cost.save('/home/ubuntu/white/cost.tif')
+    cost = raster('/home/ubuntu/white/cost.tif')
 
     # Calculate indexed sinuosity/stream slope and extrapolate outwards
-    stream_slope = extrapolate_buffer(normalize(watershed(dem).stream_slope(stream_order)), 150)
+    # stream_slope = extrapolate_buffer(normalize(watershed(dem).stream_slope(stream_order)), 150)
 
-    stream_slope.save('/home/ubuntu/white/stream_slope.tif')
+    stream_slope = raster('/home/ubuntu/white/stream_slope.tif')
 
     print "Calculating sinuosity"
-    sinu = extrapolate_buffer(normalize(channel_density(stream_order)), 150)
+    # sinu = extrapolate_buffer(normalize(channel_density(stream_order)), 150)
 
-    sinu.save('/home/ubuntu/white/sinu.tif')
+    sinu = raster('/home/ubuntu/white/sinu.tif')
 
     # Reclassify flow accumulation and extrapolate outwards
     print "Reclassifying flow accumulation"
-    stream_order, flow_accumulation = raster(stream_order), raster(flow_accumulation).copy()
+    output = raster(flow_accumulation).astype('float32')
+    stream_order, flow_accumulation = raster(stream_order), raster(flow_accumulation)
     fa = flow_accumulation.array
-    fa[stream_order.array == stream_order.nodata] = flow_accumulation.nodata
-    flow_accumulation[:] = fa
+    fa[stream_order.array == stream_order.nodata] = output.nodata
+    output[:] = fa.astype('float32')
     flow_accumulation = extrapolate_buffer(normalize(flow_accumulation), 150)
 
     flow_accumulation.save('/home/ubuntu/white/contributing_area.tif')
