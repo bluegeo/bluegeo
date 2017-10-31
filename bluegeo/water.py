@@ -7,7 +7,6 @@ from terrain import *
 from filters import *
 from measurement import *
 from skimage.measure import label as sklabel
-from scipy.ndimage import convolve
 
 
 class WatershedError(Exception):
@@ -701,28 +700,16 @@ def channel_density(streams, sample_distance=50):
     """
     # Allocate output as a raster cast to 32-bit floating points
     streams = raster(streams)
-    output_raster = raster(streams).astype('float32')
-    conv = (streams.array != streams.nodata).astype('float32')
 
-    i = numpy.ceil(sample_distance / output_raster.csy)
+    i = numpy.ceil(sample_distance / streams.csy)
     if i < 1:
         i = 1
-    j = numpy.ceil(sample_distance / output_raster.csx)
+    j = numpy.ceil(sample_distance / streams.csx)
     if j < 1:
         j = 1
     shape = map(int, (i, j))
     weights = numpy.ones(shape=shape)
-    conv = convolve(conv, weights=weights)
-
-    conv[numpy.isinf(conv) | (conv > i * j)] = 0
-
-    output_raster.nodataValues = [0.]
-
-    import pdb;pdb.set_trace()
-
-    output_raster[:] = conv
-
-    return output_raster
+    return convolve(streams, weights)
 
 
 def sinuosity(dem, stream_order, sample_distance=100):
@@ -1303,8 +1290,8 @@ def riparian_delineation(dem, stream_order, flow_accumulation):
     stream_slope = raster('/home/ubuntu/white/stream_slope.tif')
 
     print "Calculating sinuosity"
-    dens = channel_density(stream_order)
-    sinu = extrapolate_buffer(normalize(dens), 150)
+    # dens = raster('white_1m_channel_density.tif')
+    sinu = extrapolate_buffer(normalize(channel_density(stream_order)), 150)
 
     sinu.save('/home/ubuntu/white/sinu.tif')
 
