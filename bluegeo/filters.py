@@ -225,7 +225,7 @@ def extrapolate_buffer(input_raster, distance, method='nearest'):
     a = input_raster.array
 
     # Create mask for no data values
-    m = a == input_raster.nodata
+    m = (a == input_raster.nodata) | numpy.isnan(a)
     # Coordinates to interpolate data
     xi = numpy.where(m & binary_dilation(~m, numpy.ones((3, 3)), iterations))
     # Coordinates to be used in interpolation
@@ -235,7 +235,6 @@ def extrapolate_buffer(input_raster, distance, method='nearest'):
     # Change configuration of interpolation points
     points = numpy.vstack([points[0] * input_raster.csy, points[1] * input_raster.csx]).T
     # Complete and insert interpolation
-    import pdb;pdb.set_trace()
     a[xi] = griddata(points, values, (xi[0] * input_raster.csy, xi[1] * input_raster.csx), method)
 
     # Prepare and return output
