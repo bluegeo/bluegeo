@@ -304,14 +304,17 @@ def convolve(input_raster, kernel):
     :param kernel: numpy 2-d array of floats
     :return: raster instance
     """
+    if kernel.size == 1:
+        return input_raster * numpy.squeeze(kernel)
+
     # Create a padded array
     inrast = raster(input_raster)
-    edge_distance = max([int(numpy.ceil((kernel.shape[0] - 1.) / 2)),
-                         int(numpy.ceil((kernel.shape[1] - 1.) / 2))])
+    padding = (map(int, ((kernel.shape[0] - 1.) / 2, numpy.ceil((kernel.shape[0] - 1.) / 2))),
+               map(int, ((kernel.shape[1] - 1.) / 2, numpy.ceil((kernel.shape[1] - 1.) / 2))))
     a = inrast.array
     mask = a == inrast.nodata
     a[mask] = 0
-    a = numpy.pad(a.astype('float32'), edge_distance, 'constant')
+    a = numpy.pad(a.astype('float32'), padding, 'constant')
 
     # Perform convolution
     views = util.get_window_views(a, kernel.shape)  # Views into a over the kernel
