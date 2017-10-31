@@ -297,6 +297,49 @@ def normalize(input_raster):
     return (raster(input_raster) - min_val) / (rastmax(input_raster) - min_val)
 
 
+def convolve(input_raster, kernel):
+    """
+    Perform convolution using the specified kernel of weights
+    :param input_raster: raster to perform convolution
+    :param kernel: numpy 2-d array of floats
+    :return: raster instance
+    """
+    # Create a padded array
+    inrast = raster(input_raster)
+    edge_distance = max([int(numpy.ceil((kernel.shape[0] - 1.) / 2)),
+                         int(numpy.ceil((kernel.shape[1] - 1.) / 2))])
+    a = inrast.array
+    mask = a == inrast.nodata
+    a[mask] = 0
+    a = numpy.pad(a.astype('float32'), edge_distance, 'constant')
+
+    # Perform convolution
+    views = util.get_window_views(a, kernel.shape)  # Views into a over the kernel
+    local_dict = util.window_local_dict(views)  # Views turned into a pointer dictionary for numexpr
+    output = numpy.zeros(shape=a.shape, dtype='float32')  # Allocate output
+    # ne.evaluate only allows 32 arrays in one expression.  Need to chunk it up.
+    keys = local_dict.keys()
+    kernel_len = len(keys)
+    keychunks = range(0, len(local_dict) + 31, 31)
+    keychunks = zip(keychunks[:-1],
+                    keychunks[1:-1] + [len(keys)])
+    kernel = kernel.ravel()
+    for ch in keychunks:
+        new_local = {k: local_dict[k] for k in keys[ch[0]: ch[1]]}
+        expression = '+'.join(['{}*{}'.format(prod_1, prod_2)
+                               for prod_1, prod_2 in zip(new_local.keys(), kernel[ch[0]: ch[1]])])
+        output += ne.evaluate(expression, local_dict=new_local)
+
+    # Allocate output
+    outrast = inrast.astype('float32')
+
+    # Mask previous nodata and write to output
+    output[mask] = outrast.nodata
+    outrast[:] = output
+
+    return outrast
+
+
 def dilate(input_raster, dilate_value=1, iterations=1):
     """
     Perform a region dilation
