@@ -700,8 +700,9 @@ def channel_density(streams, sample_distance=50):
     :return: raster instance
     """
     # Allocate output as a raster cast to 32-bit floating points
+    streams = raster(streams)
     output_raster = raster(streams).astype('float32')
-    conv = (output_raster.array != output_raster.nodata).astype('float32')
+    conv = (streams.array != streams.nodata).astype('float32')
 
     i = numpy.ceil(sample_distance / output_raster.csy)
     if i < 1:
@@ -711,9 +712,14 @@ def channel_density(streams, sample_distance=50):
         j = 1
     shape = map(int, (i, j))
     weights = numpy.ones(shape=shape)
-    convolve(conv, weights=weights, output=conv)
+    conv = convolve(conv, weights=weights)
+
+    conv[numpy.isinf(conv) | (conv > i * j)] = 0
 
     output_raster.nodataValues = [0.]
+
+    import pdb;pdb.set_trace()
+
     output_raster[:] = conv
 
     return output_raster
@@ -1298,7 +1304,6 @@ def riparian_delineation(dem, stream_order, flow_accumulation):
 
     print "Calculating sinuosity"
     dens = channel_density(stream_order)
-    import pdb;pdb.set_trace()
     sinu = extrapolate_buffer(normalize(dens), 150)
 
     sinu.save('/home/ubuntu/white/sinu.tif')

@@ -406,7 +406,7 @@ class raster(object):
 
     @property
     def size(self):
-        return (self.itemsize * self.shape[0] * self.shape[1] *
+        return (float(self.itemsize) * self.shape[0] * self.shape[1] *
                 self.bandCount / 1E9)
 
     @property

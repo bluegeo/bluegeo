@@ -36,7 +36,7 @@ def label(data, return_map=False, raster_template=None):
         a = rast.array
         background = rast.nodata
 
-    a = sklabel(a, background=background, return_num=False)
+    a = sklabel(a, background=background, return_num=False).astype('uint32')
     if array_only:
         outrast = a
     else:
