@@ -1308,6 +1308,9 @@ def riparian_delineation(dem, stream_order, flow_accumulation):
     fa = flow_accumulation.array.astype('float32')
     fa[stream_order.array == stream_order.nodata] = output.nodata
     output[:] = fa
+
+    output.save('/home/ubuntu/white/fa_rec.tif')
+
     flow_accumulation = extrapolate_buffer(normalize(output), 150)
 
     flow_accumulation.save('/home/ubuntu/white/contributing_area.tif')
