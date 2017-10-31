@@ -1317,12 +1317,11 @@ def riparian_delineation(dem, stream_order, flow_accumulation):
     #
     # flow_accumulation = extrapolate_buffer(normalize(output), 150)
 
-    # flow_accumulation = raster('/home/ubuntu/white/contributing_area.tif')
-
+    flow_accumulation = raster('/home/ubuntu/white/contributing_area.tif')
 
     # Combine all data
     print "Aggregating output"
-    return ((cost * 3) + stream_slope + sinu) / 5
+    return ((cost * 3) + gaussian(stream_slope, 15) + gaussian(sinu, 15) + gaussian(flow_accumulation, 15)) / 6
 
 
 def bank_slope(dem, slope_threshold=15, streams=None, slope=None, min_contrib_area=None):
