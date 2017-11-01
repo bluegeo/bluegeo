@@ -1292,8 +1292,8 @@ def riparian_delineation(dem, stream_order, flow_accumulation):
     # Calculate indexed sinuosity/stream slope and extrapolate outwards
     # stream_slope = extrapolate_buffer(normalize(watershed(dem).stream_slope(stream_order)), 150)
 
-    stream_slope = gaussian('/home/ubuntu/white/stream_slope.tif', 15)
-    stream_slope.save('/home/ubuntu/white/stream_slope.tif')
+    # stream_slope = gaussian('/home/ubuntu/white/stream_slope.tif', 15)
+    stream_slope = raster('/home/ubuntu/white/stream_slope.tif')
 
     # a = stream_slope.array
     # m = a != stream_slope.nodata
@@ -1304,8 +1304,8 @@ def riparian_delineation(dem, stream_order, flow_accumulation):
     # dens = raster('white_1m_channel_density.tif')
     # sinu = extrapolate_buffer(normalize(channel_density(stream_order)), 150)
 
-    sinu = gaussian('/home/ubuntu/white/sinu.tif', 15)
-    sinu.save(r'/home/ubuntu/white/sinu.tif')
+    # sinu = gaussian('/home/ubuntu/white/sinu.tif', 15)
+    sinu = raster(r'/home/ubuntu/white/sinu.tif')
 
     # Reclassify flow accumulation and extrapolate outwards
     # print "Reclassifying flow accumulation"
@@ -1319,8 +1319,8 @@ def riparian_delineation(dem, stream_order, flow_accumulation):
     #
     # flow_accumulation = extrapolate_buffer(normalize(output), 150)
 
-    flow_accumulation = gaussian('/home/ubuntu/white/contributing_area.tif', 15)
-    flow_accumulation.save('/home/ubuntu/white/contributing_area.tif')
+    # flow_accumulation = gaussian('/home/ubuntu/white/contributing_area.tif', 15)
+    flow_accumulation = raster('/home/ubuntu/white/contributing_area.tif')
 
     # Combine all data
     print "Aggregating output"

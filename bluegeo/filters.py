@@ -297,6 +297,19 @@ def normalize(input_raster):
     return (raster(input_raster) - min_val) / (rastmax(input_raster) - min_val)
 
 
+def inverse(input_raster):
+    """Return the inverse of data values"""
+    inrast = raster(input_raster)
+    outrast = inrast.empty()
+    a = inrast.array
+    mask = a != inrast.nodata
+    a_min, a_max = a[mask].min(), a[mask].max()
+    m, b = numpy.linalg.solve([[a_max, 1.], [a_min, 1.]], [a_min, a_max])
+    a[mask] = (a[mask] * m) + b
+    outrast[:] = a
+    return outrast
+
+
 def convolve(input_raster, kernel):
     """
     Perform convolution using the specified kernel of weights
