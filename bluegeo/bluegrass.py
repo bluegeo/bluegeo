@@ -105,7 +105,7 @@ def external(input_raster):
     if r.format == 'HDF5':
         path = util.generate_name(r.path, 'copy', 'tif')
         r.save(path)
-    return r.path
+    return path
 
 
 # r. functions
