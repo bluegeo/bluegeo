@@ -20,7 +20,7 @@ try:
 except ImportError:
     NUMEXPR = False
 
-from util import parse_projection, generate_name, coords_to_indices
+from util import parse_projection, generate_name, coords_to_indices, indices_to_coords
 
 
 """Custom Exceptions"""
@@ -258,7 +258,10 @@ class raster(object):
             for band in self.bands:
                 outraster.activeBand = band
                 with outraster.dataset as ds:
-                    ds.GetRasterBand(outraster.band).SetNoDataValue(self.nodata)
+                    try:
+                        ds.GetRasterBand(outraster.band).SetNoDataValue(self.nodata)
+                    except TypeError:
+                        ds.GetRasterBand(outraster.band).SetNoDataValue(float(self.nodata))
                 ds = None
                 if self.useChunks:
                     for a, s in self.iterchunks():
@@ -856,6 +859,17 @@ class raster(object):
                 insert_array[~cutline] = outds.nodata
             outds[insert_slice] = insert_array
         return outds
+
+    def clip_to_data(self):
+        """
+        Change raster extent to include the minimum bounds where data exist
+        :return: raster instance
+        """
+        i, j = numpy.where(self.array != self.nodata)
+        y, x = indices_to_coords(([i.min(), i.max()], [j.min(), j.max()]),
+                                 self.top, self.left, self.csx, self.csy)
+        return self.clip((y[0] + self.csy / 2, y[1] - self.csy / 2,
+                          x[0] - self.csx / 2, x[1] + self.csx / 2))
 
     def transform(self, **kwargs):
         """
@@ -1703,7 +1717,10 @@ class vector(object):
             self.path = None
 
         # Collect meta
-        layer = _data.GetLayer()
+        try:
+            layer = _data.GetLayer()
+        except:
+            raise VectorError('Could not open the dataset "{}"'.format(data))
         layerDefn = layer.GetLayerDefn()
 
         # Spatial Reference
@@ -2273,18 +2290,20 @@ class vector(object):
         # Allocate output array and raster for writing raster values
         outarray = numpy.full(r.shape, nodata, dtype)
         outrast = r.astype(dtype)
+        outrast.nodataValues = [nodata]
 
-        def get_next(geo, vertices, hole=False):
+        def get_next(geo, vertices, hole, geom_type):
             """Recursive function to return lists of vertices in geometries"""
             count = geo.GetGeometryCount()
-            geom_type = vector.geom_wkb_to_name(geo.GetGeometryType())
             if count > 0:
                 for i in range(count):
-                    if i > 0 and 'Polygon' in geom_type:
+                    _geo = geo.GetGeometryRef(i)
+                    next_is_zero = _geo.GetGeometryCount() == 0
+                    if i > 0 and 'Polygon' in geom_type and next_is_zero:
                         hole = True
-                    get_next(geo.GetGeometryRef(i), vertices, hole)
+                    get_next(_geo, vertices, hole, geom_type)
             else:
-                vertices.append(([(geo.GetX(i),geo.GetY(i)) for i in range(geo.GetPointCount())],
+                vertices.append(([(geo.GetX(i), geo.GetY(i)) for i in range(geo.GetPointCount())],
                                  hole))  # Tuple in the form ([(x1, y1),...(xn, yn)], hole or not)
 
         def _rasterize(vertices, hole, geom_type):
@@ -2329,24 +2348,23 @@ class vector(object):
             # Return output image as array (which needs to be reshaped) and the insertion location
             return numpy.array(window, dtype='bool').reshape(nrows, ncols), i_insert, j_insert
 
+        # Need to track where data have been inserted to ensure holes don't overwrite data from other features
+        data_track = numpy.zeros(shape=outarray.shape, dtype='bool')
         for feature_index, wkb in enumerate(vector[:]):
             vertices = []
-            try:
-                parent_geo = ogr.CreateGeometryFromWkb(wkb)
-            except:
-                continue
-            count = parent_geo.GetGeometryCount()
-            if count == 0:
-                get_next(parent_geo, vertices)
-            else:
-                for i in range(count):
-                    geo = parent_geo.GetGeometryRef(i)
-                    get_next(geo, vertices)
+            geo = ogr.CreateGeometryFromWkb(wkb)
+            get_next(geo, vertices, False, self.geom_wkb_to_name(geo.GetGeometryType()))
+
+            # Track slices from this feature
+            mask_update = []
+
             for points_and_hole in vertices:
                 point_set, is_hole = points_and_hole
                 window, i_insert, j_insert = _rasterize(point_set, is_hole, vector.geometryType)
                 i_end = i_insert + window.shape[0]
                 j_end = j_insert + window.shape[1]
+
+                window = window & ~(data_track[i_insert:i_end, j_insert:j_end])
 
                 # Use window as mask to insert data into output
                 if is_hole:
@@ -2354,6 +2372,12 @@ class vector(object):
                 else:
                     write_value = write_data[feature_index]
                 outarray[i_insert:i_end, j_insert:j_end][window] = write_value
+
+                mask_update.append((i_insert, i_end, j_insert, j_end))
+
+            # Update data track
+            for i_, _i, j_, _j in mask_update:
+                data_track[i_:_i, j_:_j][outarray[i_:_i, j_:_j] != nodata] = 1
 
         outrast[:] = outarray
 

@@ -6,6 +6,7 @@ Blue Geosimulation, 2017
 from terrain import *
 from filters import *
 from measurement import *
+import bluegrass
 from skimage.measure import label as sklabel
 
 
@@ -1279,52 +1280,50 @@ def riparian_delineation(dem, stream_order, flow_accumulation):
     Define zones of riparian connectivity.  Assumes all arrays match
     """
     # Calculate network of costs and normalize result
-    # print "Creating cost surface"
-    # cost = normalize(cost_surface(stream_order, topo(dem).slope()))
-
-    cost = raster('/home/ubuntu/white/cost.tif')
-
-    # a = cost.array
-    # m = a != cost.nodata
-    # a[m] = a[m].max() - a[m]
-    # cost[:] = a
+    print "Creating cost surface"
+    cost = inverse(normalize(cost_surface(stream_order, topo(dem).slope())))
 
     # Calculate indexed sinuosity/stream slope and extrapolate outwards
-    # stream_slope = extrapolate_buffer(normalize(watershed(dem).stream_slope(stream_order)), 150)
+    print "Calculating stream slope"
+    stream_slope = gaussian(extrapolate_buffer(inverse(normalize(watershed(dem).stream_slope(stream_order))), 150), 15)
 
-    # stream_slope = gaussian('/home/ubuntu/white/stream_slope.tif', 15)
-    stream_slope = raster('/home/ubuntu/white/stream_slope.tif')
-
-    # a = stream_slope.array
-    # m = a != stream_slope.nodata
-    # a[m] = a[m].max() - a[m]
-    # stream_slope[:] = a
-
-    # print "Calculating sinuosity"
-    # dens = raster('white_1m_channel_density.tif')
-    # sinu = extrapolate_buffer(normalize(channel_density(stream_order)), 150)
-
-    # sinu = gaussian('/home/ubuntu/white/sinu.tif', 15)
-    sinu = raster(r'/home/ubuntu/white/sinu.tif')
+    print "Calculating sinuosity"
+    sinu = gaussian(extrapolate_buffer(normalize(channel_density(stream_order)), 150), 15)
 
     # Reclassify flow accumulation and extrapolate outwards
-    # print "Reclassifying flow accumulation"
-    # output = raster(flow_accumulation).astype('float32')
-    # stream_order, flow_accumulation = raster(stream_order), raster(flow_accumulation)
-    # fa = flow_accumulation.array.astype('float32')
-    # fa[stream_order.array == stream_order.nodata] = output.nodata
-    # output[:] = fa
+    print "Reclassifying flow accumulation"
+    flow_accumulation = raster(flow_accumulation)
+    stream_order = raster(stream_order)
 
-    # output = raster('/home/ubuntu/white/fa_rec.tif')
-    #
-    # flow_accumulation = extrapolate_buffer(normalize(output), 150)
+    output = raster(flow_accumulation).astype('float32')
+    fa = flow_accumulation.array.astype('float32')
+    fa[stream_order.array == stream_order.nodata] = output.nodata
+    output[:] = fa
+    flow_accumulation = gaussian(extrapolate_buffer(normalize(output), 150), 15)
 
-    # flow_accumulation = gaussian('/home/ubuntu/white/contributing_area.tif', 15)
-    flow_accumulation = raster('/home/ubuntu/white/contributing_area.tif')
+    # Reclassify and aggregate data
+    print "Reclassifying cost"
+    percentile = 92
+    a = cost.array
+    m = a != cost.nodata
+    thresh = numpy.percentile(a[m], percentile)
+    thresh_m = a < thresh
+    a[thresh_m] = cost.nodata
+    _min = a[thresh_m].min()
+    a[thresh_m] = (a[thresh_m] - _min) / (a[thresh_m].max() - _min)
 
-    # Combine all data
     print "Aggregating output"
-    return ((cost * 5) + (stream_slope * 2) + (sinu * 2) + flow_accumulation) / 10
+    strslo = stream_slope.array
+    sinua = sinu.array
+    faa = flow_accumulation.array
+    m = (a != cost.nodata) & (strslo != stream_slope.nodata) & (sinua != sinu.nodata) & (faa != flow_accumulation.nodata)
+    a[~m] = cost.nodata
+    a[m] *= 10
+    a[m] += strslo[m] + sinua[m] + faa[m]
+    a[m] /= 13
+
+    cost[:] = a
+    return cost
 
 
 def bank_slope(dem, slope_threshold=15, streams=None, slope=None, min_contrib_area=None):
@@ -1406,6 +1405,16 @@ def cumulative_effectiveness(stream_raster, tree_height=50):
     root[:] = a
 
     return root, litter, shade, coarse
+
+
+def wetness(dem, minimum_area):
+    """
+    Calculate a wetness index using streams of a minimum contributing area
+    :param dem: dem (raster)
+    :param minimum_area: area in units^2
+    :return: raster instance
+    """
+    return normalize(inverse(cost_surface(bluegrass.stream_order(dem, minimum_area), topo(dem).slope())))
 
 
 def vegEffectiveness(stream_raster, canopy_height_surface, tree_height=45):
