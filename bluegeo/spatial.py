@@ -1008,8 +1008,7 @@ class raster(object):
                 print ("Warning: No transformation operation was necessary")
                 return self.copy('transform')
 
-            # Refine each of the inputs, based on each of the args
-            # Projection
+            # Recalculate the extent and calculate potential new cell sizes if a coordinate system change is necessary
             if insrs is not None:
                 # Get the corners and transform the extent
                 try:
@@ -1024,8 +1023,9 @@ class raster(object):
                 ncsx = min([corners[1][0] - corners[0][0], corners[2][0] - corners[3][0]]) / self.shape[1]
                 ncsy = min([corners[0][1] - corners[3][1], corners[1][1] - corners[2][1]]) / self.shape[0]
             else:
-                top, bottom, left, right = bbox.bounds
                 ncsx, ncsy = self.csx, self.csy
+
+            top, bottom, left, right = bbox.bounds
 
             # Snap the potential new cell sizes to the extent
             ncsx = (right - left) / int(round((right - left) / ncsx))
