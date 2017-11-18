@@ -177,7 +177,7 @@ def coords_to_indices(coords, top, left, csx, csy, shape):
     x, y = numpy.asarray(coords[0]), numpy.asarray(coords[1])
     i = numpy.int64((top - y) / csy)
     j = numpy.int64((x - left) / csx)
-    m = (i > 0) & (j > 0) & (i < shape[0]) & (j < shape[1])
+    m = (i >= 0) & (j >= 0) & (i < shape[0]) & (j < shape[1])
     return i[m], j[m]
 
 

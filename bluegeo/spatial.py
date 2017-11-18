@@ -20,7 +20,7 @@ try:
 except ImportError:
     NUMEXPR = False
 
-from util import parse_projection, generate_name, coords_to_indices, indices_to_coords
+from util import parse_projection, generate_name, coords_to_indices, indices_to_coords, transform_points
 
 
 """Custom Exceptions"""
@@ -32,11 +32,16 @@ class VectorError(Exception):
     pass
 
 
+class ExtentError(Exception):
+    pass
+
+
 class extent(object):
+
     def __init__(self, data):
         """
         Extent to be used to control geometries
-        :param data: iterable of (top, bottom, left, right) or vector class instance
+        :param data: iterable of (top, bottom, left, right) or vector class instance, or instance of raster class
         """
         if any(isinstance(data, o) for o in [tuple, list, numpy.ndarray]):
             self.bounds = data
@@ -44,8 +49,91 @@ class extent(object):
         elif isinstance(data, vector):
             self.bounds = (data.top, data.bottom, data.left, data.right)
             self.geo = data
+        elif isinstance(data, raster):
+            self.bounds = (data.top, data.bottom, data.left, data.right)
+            self.geo = data
+        elif isinstance(data, extent):
+            self.__dict__.update(data.__dict__)
         else:
-            raise VectorError('Unsupported extent argument of type {}'.format(type(data).__name__))
+            raise ExtentError('Unsupported extent argument of type {}'.format(type(data).__name__))
+
+        try:
+            if self.bounds[0] <= self.bounds[1] or self.bounds[2] >= self.bounds[3]:
+                assert False
+        except:
+            raise ExtentError("Invalid or null extent")
+
+    def within(self, other):
+        """
+        Check if this extent is within another
+        :param other: other data that can be instantiated using the extent class
+        :return: boolean
+        """
+        try:
+            same = self.compare_projections(other)
+        except:
+            same = True
+        if not same:
+            # Need to transform
+            other = extent(other).transform(self.geo.projection)
+        top, bottom, left, right = self.bounds
+        _top, _bottom, _left, _right = extent(other).bounds
+        if all([top <= _top, bottom >= _bottom, left >= _left, right <= _right]):
+            return True
+        else:
+            return False
+
+    def intersects(self, other):
+        """
+        Check if this extent intersects another
+        :param other: other data that can be instantiated using the extent class
+        :return: boolean
+        """
+        try:
+            same = self.compare_projections(other)
+        except:
+            same = True
+        if not same:
+            # Need to transform
+            other = extent(other).transform(self.geo.projection)
+        top, bottom, left, right = self.bounds
+        _top, _bottom, _left, _right = extent(other).bounds
+        if any([top <= _bottom, bottom >= _top, left >= _right, right <= _left]):
+            return False
+        else:
+            return True
+
+    def contains(self, other):
+        return extent(other).within(self)
+
+    def compare_projections(self, other):
+        other_extent = extent(other)
+        if self.geo is not None and other_extent.geo is not None:
+            insr = osr.SpatialReference()
+            insr.ImportFromWkt(self.geo.projection)
+            outsr = osr.SpatialReference()
+            outsr.ImportFromWkt(other_extent.geo.projection)
+            return insr.IsSame(outsr)
+        else:
+            raise ExtentError('Cannot compare projections, as one of the extents'
+                              'does not have a corresponding geometry')
+
+    def transform(self, projection):
+        """
+        Transform the current extent to the defined projection.
+        Note, the geo attribute will be disconnected for safety.
+        :param projection: input projection argument
+        :return: new extent instance
+        """
+        wkt = parse_projection(projection)
+        points = transform_points(self.corners, self.geo.projection, wkt)
+        return extent((points[0][1], points[2][1], points[0][0], points[1][0]))
+
+    @property
+    def corners(self):
+        """Get corners of extent as coordinates [(x1, y1), ...(xn, yn)]"""
+        top, bottom, left, right = self.bounds
+        return [(left, top), (right, top), (right, bottom), (left, bottom)]
 
 
 class raster(object):
@@ -1206,6 +1294,12 @@ class raster(object):
             return numpy.min(self.array[self.array != self.nodata])
 
     def __getitem__(self, s):
+        """
+        Slice a raster using numpy-like syntax.
+        :param s: item for slicing, may be a slice object, integer, instance of the extent class
+        :return:
+        """
+        # TODO: add boolean, fancy, and extent slicing
         if self.format == 'gdal':
             # Do a simple check for necessary no data value fixes using topleft
             if not self.ndchecked:
@@ -1502,8 +1596,9 @@ class raster(object):
             else:
                 try:
                     os.remove(self.garbage['path'])
-                except:
-                    pass
+                except Exception as e:
+                    print "Unable to remove temporary file {} because:\n{}".format(
+                        self.garbage['path'], e)
 
 
 class mosaic(raster):
@@ -1692,6 +1787,7 @@ class vector(object):
         self.mode = mode.lower()
         if self.mode not in ['r', 'w', 'r+']:
             raise VectorError('Unsupported file mode {}'.format(mode))
+        populate_from_ogr = False
         if isinstance(data, basestring):
             if os.path.isfile(data):
                 # Open a vector file or a table
@@ -1705,6 +1801,7 @@ class vector(object):
                     _data = driver.Open(data)
                     if _data is None:
                         raise VectorError('Unable to open the dataset {} as a vector'.format(data))
+                    populate_from_ogr = True
                     self.path = data
             else:
                 # Try to open as wkt
@@ -1715,42 +1812,56 @@ class vector(object):
             # Instantiate as ogr instance
             _data = data
             self.path = None
+            populate_from_ogr = True
 
-        # Collect meta
-        try:
-            layer = _data.GetLayer()
-        except:
-            raise VectorError('Could not open the dataset "{}"'.format(data))
-        layerDefn = layer.GetLayerDefn()
+        elif isinstance(data, vector):
+            # Update to new vector instance
+            self.__dict__.update(data.__dict__)
+            # Garbage is only collected if one instance exists
+            if hasattr(self, 'garbage'):
+                self.garbage['num'] += 1
+            # Re-populate from source file
+            populate_from_ogr = True
+            driver = ogr.GetDriverByName(data.driver)
+            _data = driver.Open(data.path)
 
-        # Spatial Reference
-        insr = layer.GetSpatialRef()
-        if insr is not None:
-            self.projection = str(insr.ExportToWkt())
-        else:
-            self.projection = ''
+        if populate_from_ogr:
+            # Collect meta
+            try:
+                layer = _data.GetLayer()
+            except:
+                raise VectorError('Could not open the dataset "{}"'.format(data))
+            layerDefn = layer.GetLayerDefn()
 
-        # Extent
-        self.left, self.right, self.bottom, self.top = layer.GetExtent()
+            # Spatial Reference
+            insr = layer.GetSpatialRef()
+            if insr is not None:
+                self.projection = str(insr.ExportToWkt())
+            else:
+                self.projection = ''
 
-        # Geometry type
-        self.geometryType = str(self.geom_wkb_to_name(layer.GetGeomType()))
+            # Extent
+            self.left, self.right, self.bottom, self.top = layer.GetExtent()
 
-        # Feature count
-        self.featureCount = layer.GetFeatureCount()
+            # Geometry type
+            self.geometryType = str(self.geom_wkb_to_name(layer.GetGeomType()))
 
-        # Fields
-        self.fieldCount = layerDefn.GetFieldCount()
-        self.fieldTypes = []
-        for i in range(self.fieldCount):
-            fieldDefn = layerDefn.GetFieldDefn(i)
-            name = fieldDefn.GetName()
-            width = fieldDefn.GetWidth()
-            dtype = self.ogr_dtype_to_numpy(fieldDefn.GetFieldTypeName(fieldDefn.GetType()),
-                                            name, width)
-            precision = fieldDefn.GetPrecision()
-            self.fieldTypes.append((name, dtype, width, precision))
-        self.fieldNames = [meta[0] for meta in self.fieldTypes]
+            # Feature count
+            self.featureCount = layer.GetFeatureCount()
+
+            # Fields
+            self.fieldCount = layerDefn.GetFieldCount()
+            self.fieldTypes = []
+            self.fieldWidth, self.fieldPrecision = {}, {}
+            for i in range(self.fieldCount):
+                fieldDefn = layerDefn.GetFieldDefn(i)
+                name = fieldDefn.GetName()
+                dtype = self.ogr_dtype_to_numpy(fieldDefn.GetFieldTypeName(fieldDefn.GetType()),
+                                                name, fieldDefn.GetWidth())
+                self.fieldTypes.append((name, dtype))
+                self.fieldWidth[name] = fieldDefn.GetWidth()
+                self.fieldPrecision[name] = fieldDefn.GetPrecision()
+            self.fieldNames = [meta[0] for meta in self.fieldTypes]
 
     @contextmanager
     def layer(self, i=0):
@@ -1802,11 +1913,11 @@ class vector(object):
             outlyr = ds.CreateLayer('bluegeo_vector', outsr, self.geometry_type)
 
             # Add fields
-            for name, dtype, width, precision in newFields:
+            for name, dtype in newFields:
                 # Create field definition
                 fieldDefn = ogr.FieldDefn(name, self.numpy_dtype_to_ogr(dtype))
-                fieldDefn.SetWidth(width)
-                fieldDefn.SetPrecision(precision)
+                fieldDefn.SetWidth(self.fieldWidth[name])
+                fieldDefn.SetPrecision(self.fieldPrecision[name])
                 # Create field
                 outlyr.CreateField(fieldDefn)
 
@@ -1824,7 +1935,7 @@ class vector(object):
 
                     # Write output fields and geometries
                     outFeat = ogr.Feature(outLyrDefn)
-                    for name, dtype, width, precision in newFields:
+                    for name, dtype in newFields:
                         outFeat.SetField(name, fields[name][i])
                     outFeat.SetGeometry(geo)
 
@@ -1880,18 +1991,101 @@ class vector(object):
         layer = ds.CreateLayer('bluegeo vector', outsr, self.geometry_type)
 
         # Add fields
-        for name, dtype, width, precision in fields:
+        for name, dtype in fields:
             # Create field definition
             fieldDefn = ogr.FieldDefn(name, self.numpy_dtype_to_ogr(dtype))
-            fieldDefn.SetWidth(width)
-            fieldDefn.SetPrecision(precision)
+            try:
+                fieldDefn.SetWidth(self.fieldWidth[name])
+                fieldDefn.SetPrecision(self.fieldPrecision[name])
+            except KeyError:
+                pass  # Field is new and does not have a width or precision assigned
             # Create field
             layer.CreateField(fieldDefn)
 
         # Clean up and return vector instance
         del layer
         ds.Destroy()
-        return vector(outPath, mode='r+')
+
+        return_vect = vector(outPath, mode='r+')
+        return_vect.garbage = {'path': outPath, 'num': 1}
+        return return_vect
+
+    def add_fields(self, name, dtype, data=None):
+        """
+        Create a new vector with the output field(s)
+        :param name: single or list of names to create
+        :param dtype: single or list of data types for each field
+        :param data: list of lists to write to each new field
+        :return: vector instance
+        """
+        if isinstance(name, basestring):
+            name, dtype = [name], [dtype]  # Need to be iterable (and not strings)
+
+        if data is not None:
+            # Broadcast data to the necessary shape
+            shape = 1 if isinstance(name, basestring) else len(name)
+            shape = (shape, self.featureCount)
+            try:
+                data = numpy.broadcast_to(data, shape)
+            except:
+                raise VectorError("Unable to fit the data to the number of fields/features")
+            data = [self.field_to_pyobj(a) for a in data]
+
+        # Input null or input data for new fields
+        else:
+            data = self.field_to_pyobj(numpy.array([[self.guess_nodata(_dtype) for _ in range(self.featureCount)]
+                                                    for _, _dtype in zip(name, dtype)]).astype(dtype))
+
+        if self.mode in ['r+', 'w']:
+            # Iterate features and insert data
+            with self.layer() as inlyr:
+                for _name, _dtype in zip(name, dtype):
+                    # Modify the current vector with the field
+                    fieldDefn = ogr.FieldDefn(_name, self.numpy_dtype_to_ogr(_dtype))
+                    # Create field
+                    inlyr.CreateField(fieldDefn)
+                # Iterate features
+                for _name, _data in zip(name, data):
+                    for i in range(self.featureCount):
+                        inFeat = inlyr.GetFeature(i)
+                        # Write output field
+                        inFeat.SetField(_name, _data[i])
+                        inlyr.SetFeature(inFeat)
+
+        else:
+            # Create a new data source
+            new_fieldtypes = self.check_fields(self.fieldTypes + zip(name, dtype))
+
+            # Gather data to write into fields
+            fields = {field[0]: self.field_to_pyobj(self[field[0]]) for field in self.fieldTypes}
+
+            fields.update({name_and_dtype[0]: data[i]
+                           for i, name_and_dtype in enumerate(zip(name, dtype))})
+
+            # Create empty output
+            outVect = self.empty(self.projection, new_fieldtypes, prestr='add_field')
+
+            # Populate output with new field(s)
+            with self.layer() as inlyr:
+                with outVect.layer() as outlyr:
+                    # Output layer definition
+                    outLyrDefn = outlyr.GetLayerDefn()
+                    # Iterate features
+                    for i in range(self.featureCount):
+                        inFeat = inlyr.GetFeature(i)
+                        geo = inFeat.GetGeometryRef()
+
+                        # Write output fields and geometries
+                        outFeat = ogr.Feature(outLyrDefn)
+                        for _name, _dtype in new_fieldtypes:
+                            outFeat.SetField(_name, fields[_name][i])
+                        outFeat.SetGeometry(geo)
+
+                        # Add to output layer and clean up
+                        outlyr.CreateFeature(outFeat)
+                        outFeat.Destroy()
+
+            return vector(outVect)  # Re-read vector to ensure meta up to date
 
     def transform(self, sr):
         """
@@ -1935,15 +2129,14 @@ class vector(object):
 
                     # Write output fields and geometries
                     outFeat = ogr.Feature(outLyrDefn)
-                    for name, dtype, width, precision in newFields:
+                    for name, dtype in newFields:
                         outFeat.SetField(name, fields[name][i])
                     outFeat.SetGeometry(geo)
 
                     # Add to output layer and clean up
                     outlyr.CreateFeature(outFeat)
                     outFeat.Destroy()
-
-        return vector(outVect.path)
+        return vector(outVect)  # Re-read vector to ensure meta up to date
 
     @staticmethod
     def check_fields(fields):
@@ -1954,14 +2147,14 @@ class vector(object):
         """
         outputFields = []
         cursor = []
-        for name, dtype, width, precision in fields:
+        for name, dtype in fields:
             name = name[:10]
             i = 0
             while name in cursor:
                 i += 1
                 name = name[:10-len(str(r))] + str(i)
             cursor.append(name)
-            outputFields.append((name, dtype, width, precision))
+            outputFields.append((name, dtype))
         return outputFields
 
     @property
@@ -2014,7 +2207,7 @@ class vector(object):
             elif isinstance(item, basestring):
                 # Check that the field exists
                 try:
-                    _, dtype, _, _ = [ft for ft in self.fieldTypes if ft[0] == str(item)][0]
+                    _, dtype = [ft for ft in self.fieldTypes if ft[0] == str(item)][0]
                 except IndexError:
                     raise VectorError('No field named {} in the file {}'.format(item, self.path))
 
@@ -2036,6 +2229,59 @@ class vector(object):
                             cliplyr.Clip(extlyr, outlyr)
 
         return data
+
+    def __setitem__(self, item, val):
+        """Set a field or geometry if the vector is open for writing"""
+        if self.mode not in ['r+', 'w']:
+            raise VectorError('Current vector open as read-only')
+
+        # Check the type of input
+        if isinstance(item, basestring):
+            # Need to overwrite field data or create a new field
+            write_data = numpy.broadcast_to(val, self.featureCount).copy()
+            try:
+                dtype = [dt for name, dt in self.fieldTypes if name == item][0]
+            except IndexError:
+                # New field required
+                self.add_fields(item, write_data.dtype.name, write_data)
+            else:
+                write_data = self.field_to_pyobj(write_data.astype(dtype))
+                # Iterate features and insert data
+                with self.layer() as inlyr:
+                    # Iterate features
+                    for i in range(self.featureCount):
+                        inFeat = inlyr.GetFeature(i)
+                        # Write output field
+                        inFeat.SetField(item, write_data[i])
+                        inlyr.SetFeature(inFeat)
+            return
+        elif isinstance(item, slice):
+            start, stop = slice.start, slice.stop
+        elif isinstance(item, int):
+            start, stop = item, item + 1
+
+        # Make input iterable
+        val = val if hasattr(val, '__iter__') else [val]
+
+        # Check for bounds
+        if start > self.featureCount or (stop - 1) > self.featureCount:
+            raise VectorError('Input feature slice outside of current feature bounds')
+        # Check for wkbs
+        if not isinstance(val[0], basestring):
+            raise VectorError('Item to set must be a wkb geometry')
+
+        # Update feature geometries using the val
+        with self.layer() as inlyr:
+            for geo_index, i in enumerate(range(start, stop)):
+                # Gather and insert geometry
+                inFeat = inlyr.GetFeature(i)
+                try:
+                    geo = ogr.CreateGeometryFromWkb(val[geo_index])
+                except:
+                    raise VectorError('Unable to load geometry from index {}'.format(geo_index))
+                inFeat.SetGeometry(geo)
+                # Write feature
+                inlyr.SetFeature(inFeat)
 
     @property
     def filenames(self):
@@ -2095,6 +2341,21 @@ class vector(object):
                 '    File Size  : %s KB\n' %
                 (self.featureCount, self.fieldCount, (self.top, self.bottom, self.left, self.right),
                  projcs, datum, size))
+
+    @staticmethod
+    def guess_nodata(dtype):
+        """"""
+        _dtype = dtype.lower()
+        if 'float' in _dtype:
+            return float(numpy.nan)
+        elif 'int' in _dtype:
+            return 0
+        elif 's' in _dtype:
+            return " "
+        elif 'datetime' in _dtype:
+            return 0
+        else:
+            raise VectorError('Cannot determine default no data values with the data type {}'.format(dtype))
 
     @staticmethod
     def field_to_pyobj(a):
@@ -2174,7 +2435,7 @@ class vector(object):
         return _types[dtype]
 
     @staticmethod
-    def ogr_dtype_to_numpy(field_type, field_name, width):
+    def ogr_dtype_to_numpy(field_type, field_name, width=None):
         """
         Convert an ogr field type name to a numpy dtype equivalent
         :param field_type: type string
@@ -2306,7 +2567,7 @@ class vector(object):
                 vertices.append(([(geo.GetX(i), geo.GetY(i)) for i in range(geo.GetPointCount())],
                                  hole))  # Tuple in the form ([(x1, y1),...(xn, yn)], hole or not)
 
-        def _rasterize(vertices, hole, geom_type):
+        def _rasterize(vertices, geom_type):
             """Rasterize a list of vertices within the containing envelope"""
             pixels = coords_to_indices(zip(*vertices), top, left, csx, csy, r.shape)
 
@@ -2360,7 +2621,7 @@ class vector(object):
 
             for points_and_hole in vertices:
                 point_set, is_hole = points_and_hole
-                window, i_insert, j_insert = _rasterize(point_set, is_hole, vector.geometryType)
+                window, i_insert, j_insert = _rasterize(point_set, vector.geometryType)
                 i_end = i_insert + window.shape[0]
                 j_end = j_insert + window.shape[1]
 
@@ -2382,3 +2643,24 @@ class vector(object):
         outrast[:] = outarray
 
         return outrast
+
+    def __del__(self):
+        """Oh Well"""
+        self.clean_garbage()
+
+    def clean_garbage(self):
+        """Remove all temporary files"""
+        extensions = ['shp', 'shx', 'dbf', 'prj', 'xml', 'sbn', 'sbx', 'cpg']
+        if hasattr(self, 'garbage'):
+            if self.garbage['num'] > 1:
+                self.garbage['num'] -= 1
+            else:
+                for ext in extensions:
+                    p = self.garbage['path']
+                    p = os.path.join(os.path.dirname(p),
+                                     '.'.join(os.path.basename(p).split('.')[:-1]) + '.{}'.format(ext))
+                    if os.path.isfile(p):
+                        try:
+                            os.remove(p)
+                        except:
+                            pass
