@@ -117,7 +117,11 @@ class extent(object):
         if insr.IsSame(outsr):
             return extent(self.bounds)
         points = transform_points(self.corners, self.geo.projection, wkt)
-        return extent((points[0][1], points[2][1], points[0][0], points[1][0]))
+        top = max([points[0][1], points[1][1]])
+        bottom = min([points[2][1], points[3][1]])
+        left = min([points[0][0], points[3][0]])
+        right = max([points[1][0], points[2][0]])
+        return extent((top, bottom, left, right))
 
     @property
     def corners(self):
@@ -1007,14 +1011,15 @@ class raster(object):
             # Refine each of the inputs, based on each of the args
             # Projection
             if insrs is not None:
-                # Reproject the extent if it has a spatial reference
-                bbox = bbox.transform(outsrs)
-                # Collect the new bounds
-                corners = bbox.corners
-                top = max([corners[0][1], corners[1][1]])
-                bottom = min([corners[2][1], corners[3][1]])
-                left = min([corners[0][0], corners[3][0]])
-                right = max([corners[1][0], corners[2][0]])
+                # Get the corners and transform the extent
+                try:
+                    corners = transform_points(bbox.corners, bbox.geo.projection, projection)
+                    bbox = bbox.transform(outsrs)
+                except AttributeError:
+                    # Can't get transformed corners because of unknown extent coordinate system
+                    bbox = bbox.transform(outsrs)
+                    corners = bbox.corners
+
                 # Preserve finest resolution and snap to extent
                 ncsx = min([corners[1][0] - corners[0][0], corners[2][0] - corners[3][0]]) / self.shape[1]
                 ncsy = min([corners[0][1] - corners[3][1], corners[1][1] - corners[2][1]]) / self.shape[0]
