@@ -70,12 +70,9 @@ class extent(object):
         :return: boolean
         """
         try:
-            same = self.compare_projections(other)
-        except:
-            same = True
-        if not same:
-            # Need to transform
             other = extent(other).transform(self.geo.projection)
+        except AttributeError:
+            other = extent(other)
         top, bottom, left, right = self.bounds
         _top, _bottom, _left, _right = extent(other).bounds
         if all([top <= _top, bottom >= _bottom, left >= _left, right <= _right]):
@@ -90,12 +87,9 @@ class extent(object):
         :return: boolean
         """
         try:
-            same = self.compare_projections(other)
-        except:
-            same = True
-        if not same:
-            # Need to transform
             other = extent(other).transform(self.geo.projection)
+        except AttributeError:
+            other = extent(other)
         top, bottom, left, right = self.bounds
         _top, _bottom, _left, _right = extent(other).bounds
         if any([top <= _bottom, bottom >= _top, left >= _right, right <= _left]):
@@ -106,18 +100,6 @@ class extent(object):
     def contains(self, other):
         return extent(other).within(self)
 
-    def compare_projections(self, other):
-        other_extent = extent(other)
-        if self.geo is not None and other_extent.geo is not None:
-            insr = osr.SpatialReference()
-            insr.ImportFromWkt(self.geo.projection)
-            outsr = osr.SpatialReference()
-            outsr.ImportFromWkt(other_extent.geo.projection)
-            return insr.IsSame(outsr)
-        else:
-            raise ExtentError('Cannot compare projections, as one of the extents'
-                              'does not have a corresponding geometry')
-
     def transform(self, projection):
         """
         Transform the current extent to the defined projection.
@@ -125,7 +107,15 @@ class extent(object):
         :param projection: input projection argument
         :return: new extent instance
         """
+        if self.geo is None:
+            return extent(self.bounds)
         wkt = parse_projection(projection)
+        insr = osr.SpatialReference()
+        insr.ImportFromWkt(self.geo.projection)
+        outsr = osr.SpatialReference()
+        outsr.ImportFromWkt(wkt)
+        if insr.IsSame(outsr):
+            return extent(self.bounds)
         points = transform_points(self.corners, self.geo.projection, wkt)
         return extent((points[0][1], points[2][1], points[0][0], points[1][0]))
 
@@ -134,6 +124,12 @@ class extent(object):
         """Get corners of extent as coordinates [(x1, y1), ...(xn, yn)]"""
         top, bottom, left, right = self.bounds
         return [(left, top), (right, top), (right, bottom), (left, bottom)]
+
+    def __eq__(self, other):
+        check = extent(other)
+        if not self.geo is None:
+            check = check.transform(self.geo.projection)
+        return numpy.all(numpy.isclose(self.bounds, check.bounds))
 
 
 class raster(object):
@@ -972,14 +968,95 @@ class raster(object):
 
         "cxy": output cell size in the y-direction
 
-        "bbox": bounding box for output (top, bottom, left, right)
-            Note- if projection specified, bbox must be in the output
-            coordinate system
+        "extent": (extent instance) bounding box for output
+            Note- if extent does not have a defined coordinate system,
+            it is assumed to be in the output spatial reference
+
+        "template": other raster instance, overrides all other arguments and projects into the raster
         """
-        def expand_extent(csx, csy, bbox, shape):
-            '''Expand extent to snap to cell size'''
-            top, bottom, left, right = bbox
+        template = kwargs.get('template', None)
+        if template is None:
+            # Get keyword args to determine what's done
+            csx = kwargs.get('csx', None)
             if csx is not None:
+                csx = float(csx)
+            csy = kwargs.get('csy', None)
+            if csy is not None:
+                csy = float(csy)
+            projection = parse_projection(kwargs.get('projection', None))
+            output_extent = kwargs.get('extent', None)
+            if output_extent is None:
+                bbox = extent(self)
+            else:
+                bbox = extent(output_extent)
+
+            # Check for spatial reference change
+            if projection != '':
+                insrs = osr.SpatialReference()
+                insrs.ImportFromWkt(self.projection)
+                outsrs = osr.SpatialReference()
+                outsrs.ImportFromWkt(projection)
+                if insrs.IsSame(outsrs):
+                    insrs, outsrs = None, None
+            else:
+                insrs, outsrs = None, None
+            if all([i is None for i in [insrs, outsrs, csx, csy]] + [bbox == extent(self)]):
+                print ("Warning: No transformation operation was necessary")
+                return self.copy('transform')
+
+            # Refine each of the inputs, based on each of the args
+            # Projection
+            if insrs is not None:
+                # Reproject the extent if it has a spatial reference
+                bbox = bbox.transform(outsrs)
+                # Collect the new bounds
+                corners = bbox.corners
+                top = max([corners[0][1], corners[1][1]])
+                bottom = min([corners[2][1], corners[3][1]])
+                left = min([corners[0][0], corners[3][0]])
+                right = max([corners[1][0], corners[2][0]])
+                # Preserve finest resolution and snap to extent
+                ncsx = min([corners[1][0] - corners[0][0], corners[2][0] - corners[3][0]]) / self.shape[1]
+                ncsy = min([corners[0][1] - corners[3][1], corners[1][1] - corners[2][1]]) / self.shape[0]
+            else:
+                top, bottom, left, right = bbox.bounds
+                ncsx, ncsy = self.csx, self.csy
+
+            # Snap the potential new cell sizes to the extent
+            ncsx = (right - left) / int(round((right - left) / ncsx))
+            ncsy = (top - bottom) / int(round((top - bottom) / ncsy))
+
+            # One of extent or cell sizes must be updated to match depending on args
+            if output_extent is not None:
+                # Check that cell sizes are compatible if they are inputs
+                if csx is not None:
+                    xresid = round((bbox.bounds[3] - bbox.bounds[2]) % csx, 5)
+                    if xresid != round(csx, 5) and xresid != 0:
+                        raise RasterError('Transform cannot be completed due to an'
+                                          ' incompatible extent %s and cell size (%s) in'
+                                          ' the x-direction' % ((bbox.bounds[3], bbox.bounds[2]), csx))
+                else:
+                    # Use ncsx
+                    csx = ncsx
+                if csy is not None:
+                    yresid = round((bbox.bounds[0] - bbox.bounds[1]) % csy, 5)
+                    if yresid != round(csy, 5) and yresid != 0:
+                        raise RasterError('Transform cannot be completed due to an'
+                                          ' incompatible extent %s and cell size (%s) in'
+                                          ' the y-direction' % ((bbox.bounds[0], bbox.bounds[1]), csy))
+                else:
+                    # Use ncsy
+                    csy = ncsy
+            else:
+                # Use the cell size to modify the output extent
+                if csx is None:
+                    csx = ncsx
+                if csy is None:
+                    csy = ncsy
+
+                # Compute the shape using the existing extent and input cell sizes
+                shape = (int(round((top - bottom) / csy)), int(round(right - left) / csx))
+
                 # Expand extent to fit cell size
                 resid = (right - left) - (csx * shape[1])
                 if resid < 0:
@@ -989,7 +1066,7 @@ class raster(object):
                     resid = (numpy.ceil(resid) - resid) * csx
                 left -= resid
                 right += resid
-            if csy is not None:
+
                 # Expand extent to fit cell size
                 resid = (top - bottom) - (csy * shape[0])
                 if resid < 0:
@@ -999,126 +1076,33 @@ class raster(object):
                     resid = (numpy.ceil(resid) - resid) * csy
                 bottom -= resid
                 top += resid
-            return (top, bottom, left, right)
+                bbox = extent((top, bottom, left, right))
 
-        # Get keyword args to determine what's done
-        csx = kwargs.get('csx', None)
-        if csx is not None:
-            csx = float(csx)
-        csy = kwargs.get('csy', None)
-        if csy is not None:
-            csy = float(csy)
-        projection = parse_projection(kwargs.get('projection', None))
-        bbox = kwargs.get('bbox', None)
-        if bbox is not None:
-            bbox = map(float, bbox)
-            if any([bbox[0] < bbox[1],
-                    bbox[1] > bbox[0],
-                    bbox[3] < bbox[2],
-                    bbox[2] > bbox[3]]):
-                raise RasterError('Bounding box is invalid, check that the'
-                                  ' coordinate positions are (top, bottom,'
-                                  ' left, right)')
-        if all([i is None for i in [csx, csy, projection, bbox]]):
-            print ("Warning: Did not perform transform, as no arguments"
-                   " provided.")
-            return self.copy(file_suffix='transform')
+            print "Output csx: {} Output csy: {}".format(csx, csy)
 
-        # Check for spatial reference change
-        if projection != '':
-            insrs = osr.SpatialReference()
-            insrs.ImportFromWkt(self.projection)
-            outsrs = osr.SpatialReference()
-            outsrs.ImportFromWkt(projection)
-            if insrs.IsSame(outsrs):
-                insrs, outsrs = None, None
-        else:
-            insrs, outsrs = None, None
-        if all([insrs is None, outsrs is None, csx is None, csy is None,
-                bbox is None]):
-            return self.copy('transform')
+            # Compute new shape
+            shape = (int(round((bbox.bounds[0] - bbox.bounds[1]) / csy)),
+                     int(round((bbox.bounds[3] - bbox.bounds[2]) / csx)))
 
-        # Refine each of the inputs, based on each of the args
-        # Projection
-        if insrs is not None:
-            coordTransform = osr.CoordinateTransformation(insrs, outsrs)
-            left, top, _ = coordTransform.TransformPoint(self.left,
-                                                         self.top)
-            right, bottom, _ = coordTransform.TransformPoint(self.right,
-                                                             self.bottom)
-            ncsx = (right - left) / self.shape[1]
-            ncsy = (top - bottom) / self.shape[0]
-            # If bbox not specified, create one using new system
-            if bbox is None:
-                bbox = (top, bottom, left, right)
-                # If cell sizes not specified, create those using new system
-                if csx is None:
-                    csx = ncsx
-                if csy is None:
-                    csy = ncsy
-                # Expand extent if cell sizes not compatible
-                shape = (int(round((top - bottom) / csy)),
-                         int(round((right - left) / csx)))
-                bbox = expand_extent(csx, csy, bbox, shape)
+            # Create output raster dataset
+            if insrs is not None:
+                insrs = insrs.ExportToWkt()
+            if outsrs is not None:
+                outsrs = outsrs.ExportToWkt()
+                output_srs = outsrs
             else:
-                # Raw bbox input is used as extent, check csx and csy
-                if csx is None:
-                    # Adjust new x cell size fit in bbox
-                    dif = bbox[3] - bbox[2]
-                    csx = dif / int(numpy.ceil(dif / ncsx))
-                if csy is None:
-                    # Adjust new y cell size fit in bbox
-                    dif = bbox[0] - bbox[1]
-                    csy = dif / int(numpy.ceil(dif / ncsy))
+                output_srs = self.projection
 
-        # bbox
-        if bbox is None:
-            # Create using current extent, and expand as necessary, given cell
-            #   size arguments
-            shape = (int(round((self.top - self.bottom) / csy)),
-                     int(round((self.right - self.left) / csx)))
-            bbox = expand_extent(csx, csy, (self.top, self.bottom,
-                                            self.left, self.right), shape)
-
-        # csx
-        if csx is None:
-            # Set as current csx, and change to fit bbox if necessary
-            dif = bbox[3] - bbox[2]
-            csx = dif / int(numpy.ceil(dif / self.csx))
-
-        # csy
-        if csy is None:
-            # Set as current csx, and change to fit bbox if necessary
-            dif = bbox[0] - bbox[1]
-            csy = dif / int(numpy.ceil(dif / self.csy))
-
-        # Check that bbox and cell sizes align
-        xresid = round((bbox[3] - bbox[2]) % csx, 5)
-        yresid = round((bbox[0] - bbox[1]) % csy, 5)
-        if xresid != round(csx, 5) and xresid != 0:
-            raise RasterError('Transform cannot be completed due to an'
-                              ' incompatible extent %s and cell size (%s) in'
-                              ' the x-direction' % ((bbox[3], bbox[2]), csx))
-        if yresid != round(csy, 5) and yresid != 0:
-            raise RasterError('Transform cannot be completed due to an'
-                              ' incompatible extent %s and cell size (%s) in'
-                              ' the y-direction' % ((bbox[0], bbox[1]), csy))
-
-        # Compute new shape
-        shape = (int(round((bbox[0] - bbox[1]) / csy)),
-                 int(round((bbox[3] - bbox[2]) / csx)))
-
-        # Create output raster dataset
-        if insrs is not None:
-            insrs = insrs.ExportToWkt()
-        if outsrs is not None:
-            outsrs = outsrs.ExportToWkt()
-            output_srs = outsrs
         else:
-            output_srs = self.projection
+            t = raster(template)
+            insrs = self.projection
+            outsrs = t.projection
+            output_srs = t.projection
+            shape, bbox, csx, csy = t.shape, extent(t), t.csx, t.csy
+
         path = generate_name(self.path, 'transform', 'tif')
         out_raster = self.new_gdal_raster(path, shape, self.bandCount,
-                                          self.dtype, bbox[2], bbox[0], csx,
+                                          self.dtype, bbox.bounds[2], bbox.bounds[0], csx,
                                           csy, output_srs, (256, 256))
 
         # Set/fill nodata value
