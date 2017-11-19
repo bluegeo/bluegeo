@@ -1122,8 +1122,6 @@ class raster(object):
                 top += resid
                 bbox = extent((top, bottom, left, right))
 
-            print "Output csx: {}, Output csy: {}".format(csx, csy)
-
             # Compute new shape
             shape = (int(round((bbox.bounds[0] - bbox.bounds[1]) / csy)),
                      int(round((bbox.bounds[3] - bbox.bounds[2]) / csx)))
@@ -1381,13 +1379,13 @@ class raster(object):
                 ds.GetRasterBand(self.band).WriteArray(a, xoff=xoff, yoff=yoff)
             ds = None
         else:
-            try:
-                with self.dataset as ds:
-                    ds[str(self.band)][s] = a
-            except Exception as e:
-                raise RasterError('Error writing raster data. Check that mode'
-                                  ' is "r+" and that the arrays match.\n\nMore'
-                                  ' info:\n%s' % e)
+            # try:
+            with self.dataset as ds:
+                ds[str(self.band)][s] = a
+            # except Exception as e:
+            #     raise RasterError('Error writing raster data. Check that mode'
+            #                       ' is "r+" and that the arrays match.\n\nMore'
+            #                       ' info:\n%s' % e)
 
     def perform_operation(self, r, op):
         """
