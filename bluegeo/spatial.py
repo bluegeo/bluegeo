@@ -1046,17 +1046,15 @@ class raster(object):
             # Recalculate the extent and calculate potential new cell sizes if a coordinate system change is necessary
             if insrs is not None:
                 # Get the corners and transform the extent
-                try:
-                    corners = transform_points(bbox.corners, bbox.geo.projection, projection)
-                    bbox = bbox.transform(outsrs)
-                except AttributeError:
-                    # Can't get transformed corners because of unknown extent coordinate system
-                    bbox = bbox.transform(outsrs)
-                    corners = bbox.corners
+                bbox = bbox.transform(outsrs)
 
-                # Preserve finest resolution and snap to extent
-                ncsx = min([corners[1][0] - corners[0][0], corners[2][0] - corners[3][0]]) / self.shape[1]
-                ncsy = min([corners[0][1] - corners[3][1], corners[1][1] - corners[2][1]]) / self.shape[0]
+                # Calculate the new cell size
+                points = [(self.left + self.csx, self.top), (self.left, self.top)]
+                points = transform_points(points, self.projection, projection)[:2]
+                ncsx = points[0][0] - points[1][0]
+                points = [(self.left, self.top), (self.left, self.top - self.csy)]
+                points = transform_points(points, self.projection, projection)[:2]
+                ncsy = points[0][1] - points[1][1]
             else:
                 ncsx, ncsy = self.csx, self.csy
 
