@@ -154,7 +154,7 @@ class extent(object):
 
         left = optimize_extent(coordTransform, self.bounds[2], self.bounds[1], self.bounds[0], False, 'x')
 
-        right = optimize_extent(coordTransform, self.bounds[3], self.bounds[1], self.bounds[0], 'x')
+        right = optimize_extent(coordTransform, self.bounds[3], self.bounds[1], self.bounds[0], True, 'x')
 
         return extent((top, bottom, left, right))
 
