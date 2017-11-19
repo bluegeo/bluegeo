@@ -1052,9 +1052,15 @@ class raster(object):
                 points = [(self.left + self.csx, self.top), (self.left, self.top)]
                 points = transform_points(points, self.projection, projection)[:2]
                 ncsx = points[0][0] - points[1][0]
+                points = [(self.right, self.bottom), (self.right - self.csx, self.bottom)]
+                points = transform_points(points, self.projection, projection)[:2]
+                ncsx = min([points[0][0] - points[1][0], ncsx])
                 points = [(self.left, self.top), (self.left, self.top - self.csy)]
                 points = transform_points(points, self.projection, projection)[:2]
                 ncsy = points[0][1] - points[1][1]
+                points = [(self.right, self.bottom + self.csy), (self.right, self.bottom)]
+                points = transform_points(points, self.projection, projection)[:2]
+                ncsy = min([points[0][1] - points[1][1], ncsy])
             else:
                 ncsx, ncsy = self.csx, self.csy
 
@@ -1116,7 +1122,7 @@ class raster(object):
                 top += resid
                 bbox = extent((top, bottom, left, right))
 
-            print "Output csx: {} Output csy: {}".format(csx, csy)
+            print "Output csx: {}, Output csy: {}".format(csx, csy)
 
             # Compute new shape
             shape = (int(round((bbox.bounds[0] - bbox.bounds[1]) / csy)),
