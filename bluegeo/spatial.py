@@ -100,7 +100,7 @@ class extent(object):
     def contains(self, other):
         return extent(other).within(self)
 
-    def transform(self, projection):
+    def transform(self, projection, precision=1E-09):
         """
         Transform the current extent to the defined projection.
         Note, the geo attribute will be disconnected for safety.
@@ -108,19 +108,51 @@ class extent(object):
         :return: new extent instance
         """
         if self.geo is None:
+            # Cannot transform, as the coordinate system is unknown
             return extent(self.bounds)
+
+        # Gather the spatial references
         wkt = parse_projection(projection)
         insr = osr.SpatialReference()
         insr.ImportFromWkt(self.geo.projection)
         outsr = osr.SpatialReference()
         outsr.ImportFromWkt(wkt)
         if insr.IsSame(outsr):
+            # Nothing needs to be done
             return extent(self.bounds)
-        points = transform_points(self.corners, self.geo.projection, wkt)
-        top = max([points[0][1], points[1][1]])
-        bottom = min([points[2][1], points[3][1]])
-        left = min([points[0][0], points[3][0]])
-        right = max([points[1][0], points[2][0]])
+
+        def optimize_extent(ct, constant_bound, start, stop, direction='y'):
+            space = numpy.linspace(start, stop, 4)
+            residual = precision + 1.
+            while residual > precision:
+                if direction == 'y':
+                    coords = [ct.TransformPoint(x, constant_bound)[1] for x in space]
+                else:
+                    coords = [ct.TransformPoint(constant_bound, y)[0] for y in space]
+                next_index = numpy.argmax(coords)
+                track = coords[next_index]
+                if next_index == 0 or next_index == 3:
+                    break
+                delta = space[1] - space[0]
+                space = numpy.linspace(space[next_index] - delta, space[next_index] + delta, 4)
+                try:
+                    residual = abs(track - _track)
+                except:
+                    pass
+                _track = track
+            return track
+
+        # Generate coordinate transform instance
+        coordTransform = osr.CoordinateTransformation(insr, outsr)
+
+        top = optimize_extent(coordTransform, self.bounds[0], self.bounds[2], self.bounds[3])
+
+        bottom = optimize_extent(coordTransform, self.bounds[1], self.bounds[2], self.bounds[3])
+
+        left = optimize_extent(coordTransform, self.bounds[2], self.bounds[1], self.bounds[0], 'x')
+
+        right = optimize_extent(coordTransform, self.bounds[3], self.bounds[1], self.bounds[0], 'x')
+
         return extent((top, bottom, left, right))
 
     @property
