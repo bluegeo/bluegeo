@@ -121,7 +121,7 @@ class extent(object):
             # Nothing needs to be done
             return extent(self.bounds)
 
-        def optimize_extent(ct, constant_bound, start, stop, direction='y'):
+        def optimize_extent(ct, constant_bound, start, stop, accum=True, direction='y'):
             space = numpy.linspace(start, stop, 4)
             residual = precision + 1.
             while residual > precision:
@@ -129,7 +129,10 @@ class extent(object):
                     coords = [ct.TransformPoint(x, constant_bound)[1] for x in space]
                 else:
                     coords = [ct.TransformPoint(constant_bound, y)[0] for y in space]
-                next_index = numpy.argmax(coords)
+                if accum:
+                    next_index = numpy.argmax(coords)
+                else:
+                    next_index = numpy.argmin(coords)
                 track = coords[next_index]
                 if next_index == 0 or next_index == 3:
                     break
@@ -147,9 +150,9 @@ class extent(object):
 
         top = optimize_extent(coordTransform, self.bounds[0], self.bounds[2], self.bounds[3])
 
-        bottom = optimize_extent(coordTransform, self.bounds[1], self.bounds[2], self.bounds[3])
+        bottom = optimize_extent(coordTransform, self.bounds[1], self.bounds[2], self.bounds[3], False)
 
-        left = optimize_extent(coordTransform, self.bounds[2], self.bounds[1], self.bounds[0], 'x')
+        left = optimize_extent(coordTransform, self.bounds[2], self.bounds[1], self.bounds[0], False, 'x')
 
         right = optimize_extent(coordTransform, self.bounds[3], self.bounds[1], self.bounds[0], 'x')
 
