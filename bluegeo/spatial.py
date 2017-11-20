@@ -1219,7 +1219,8 @@ class raster(object):
             blockxsize = 'BLOCKXSIZE=%s' % chunks[1]
             blockysize = 'BLOCKYSIZE=%s' % chunks[0]
             tiled = 'TILED=YES'
-        if self.size > 4.:
+        size = (shape[0] * shape[1] * float(numpy.dtype(dtype).itemsize)) / 1E09
+        if size > 4.:
             bigtiff='BIGTIFF=YES'
         else:
             bigtiff = 'BIGTIFF=NO'
