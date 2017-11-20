@@ -216,12 +216,16 @@ def stream_order(dem, minimum_contributing_area, stream_order_path=None, method=
 def water_outlet(coordinates, dem=None, direction=None,  basin_path=None):
     """
     Delineate basins from a list of points
-    :param coordinates: list of coordinate tuples in the form [(x1, y1), (x2, y2),...(xn, yn)]
+    :param coordinates: vector or list of coordinate tuples in the form [(x1, y1), (x2, y2),...(xn, yn)]
     :param dem: digital elevation model raster (if no flow direction surface is available)
     :param direction: flow direction surface (if available)
     :param basin_path: path for output basin raster
     :return: raster instance with enumerated basins
     """
+    # Check coordinates
+    if isinstance(coordinates, basestring) or isinstance(coordinates, vector):
+        coordinates = vector(coordinates).vertices[[0, 1], :]
+
     # Use dem if fd not specified
     if direction is not None:
         fd = external(direction)
