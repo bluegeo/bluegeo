@@ -224,7 +224,7 @@ def water_outlet(coordinates, dem=None, direction=None,  basin_path=None):
     """
     # Check coordinates
     if isinstance(coordinates, basestring) or isinstance(coordinates, vector):
-        coordinates = vector(coordinates).transform(raster(dem).projection).vertices[[0, 1], :]
+        coordinates = vector(coordinates).transform(raster(dem).projection).vertices[:, [0, 1]]
 
     # Use dem if fd not specified
     if direction is not None:
