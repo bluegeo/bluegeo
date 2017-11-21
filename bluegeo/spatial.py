@@ -835,7 +835,7 @@ class raster(object):
         outsrs = osr.SpatialReference()
         outsrs.ImportFromWkt(inrast.projection)
         samesrs = insrs.IsSame(outsrs)
-        inrast_bbox = (inrast.top, inrast.bottom, inrast.left, inrast.right)
+        inrast_bbox = extent(inrast).bounds
 
         # Check if cells align
         if all([isclose(self.csx, [inrast.csx]),
@@ -850,11 +850,11 @@ class raster(object):
             print "Transforming to match rasters..."
             if samesrs:
                 return self.transform(csx=inrast.csx, csy=inrast.csy,
-                                      bbox=inrast_bbox,
+                                      extent=inrast_bbox,
                                       interpolation=self.interpolation)
             else:
                 return self.transform(csx=inrast.csx, csy=inrast.csy,
-                                      projection=inrast.projection, bbox=inrast_bbox,
+                                      projection=inrast.projection, extent=inrast_bbox,
                                       interpolation=self.interpolation)
 
     def slice_from_bbox(self, bbox):
