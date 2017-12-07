@@ -372,3 +372,18 @@ def gwflow(phead, status, hc_x, hc_y, s, top, bottom, **kwargs):
         graster.out_gdal('budget', format='GTiff', output=out_budget)
 
     return raster(out_head), raster(out_budget)
+
+
+def lidar(las_file, las_srs_epsg, output_raster, resolution=1, return_type='min'):
+    if return_type == 'min':
+        return_filter='last'  # DTM
+    else:
+        return_filter='first'  #DSM
+    with GrassSession(las_srs_epsg) as gs:
+        from grass.pygrass.modules.shortcuts import raster as graster
+        from grass.script import core as grass
+        grass.run_command('r.in.lidar', input=las_file, output='outrast',
+                          method=return_type, resolution=resolution, return_filter=return_filter, flags='e')
+        graster.out_gdal('outrast', format="GTiff", output=output_raster)
+
+    return raster(output_raster)
