@@ -209,7 +209,7 @@ class watershed(raster):
         output[:] = a
         return output
 
-    def alluvium(self, slope_thresh=6, stream_slope_thresh=5, **kwargs):
+    def alluvium(self, stream_slope, slope_thresh=6, stream_slope_thresh=5):
         '''
         Use the derivative of stream slope to determine regions of
         aggradation to predict alluvium deposition.  The input slope threshold
@@ -223,18 +223,9 @@ class watershed(raster):
         slope: a slope surface used to control the region delineation
         '''
         # Get or compute necessary datasets
-        streams = kwargs.get('streams', None)
-        min_contrib_area = kwargs.get('min_contrib_area', 1E04)
-        slope = kwargs.get('slope', None)
-        fa = kwargs.get('fa', None)
-        if streams is None:
-            strslo = self.stream_slope(2, min_contrib_area=min_contrib_area,
-                                       fa=fa)
-        else:
-            strslo = self.stream_slope(2, streams)
+        strslo = stream_slope
         seeds = set(zip(*numpy.where(strslo.array != strslo.nodata)))
-        if slope is None:
-            slope = topo(self).slope().array
+        slope = topo(self).slope().array
 
         # Create output tracking array
         track = numpy.zeros(shape=self.shape, dtype='uint8')
