@@ -710,7 +710,13 @@ def channel_density(streams, sample_distance=50):
         j = 1
     shape = map(int, (i, j))
     weights = numpy.ones(shape=shape, dtype='float32') / shape[0] * shape[1]
-    return convolve(streams, weights)
+
+    # Streams must be a mask
+    _streams = streams.empty()
+    _streams[:] = (streams.array != streams.nodata).astype(streams.dtype)
+    _streams.nodata = 0
+
+    return convolve(_streams, weights)
 
 
 def sinuosity(dem, stream_order, sample_distance=100):
