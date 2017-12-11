@@ -714,7 +714,7 @@ def channel_density(streams, sample_distance=50):
     # Streams must be a mask
     _streams = streams.empty()
     _streams[:] = (streams.array != streams.nodata).astype(streams.dtype)
-    _streams.nodata = 0
+    _streams.nodataValues = [0]
 
     return convolve(_streams, weights)
 
