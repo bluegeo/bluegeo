@@ -223,7 +223,7 @@ class watershed(raster):
         slope: a slope surface used to control the region delineation
         '''
         # Get or compute necessary datasets
-        strslo = stream_slope
+        strslo = raster(stream_slope)
         seeds = set(zip(*numpy.where(strslo.array != strslo.nodata)))
         slope = topo(self).slope().array
 
