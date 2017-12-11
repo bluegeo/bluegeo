@@ -700,7 +700,7 @@ def channel_density(streams, sample_distance=50):
     if j < 1:
         j = 1
     shape = map(int, (i, j))
-    weights = numpy.ones(shape=shape, dtype='float32') / shape[0] * shape[1]
+    weights = numpy.ones(shape=shape, dtype='float32') / (shape[0] * shape[1])
 
     # Streams must be a mask
     _streams = streams.empty()
