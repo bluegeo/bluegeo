@@ -248,7 +248,7 @@ def water_outlet(coordinates, dem=None, direction=None,  basin_path=None):
         index = []
         for i, coord in enumerate(coordinates):
             grass.run_command('r.water.outlet', input="fd",
-                              output="b%i" % (i), coordinates=coord)
+                              output="b%i" % (i), coordinates=tuple(coord))
             a = garray.array()
             a.read("b%i" % (i))
             m = numpy.where(a == 1)
