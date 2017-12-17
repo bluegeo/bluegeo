@@ -169,7 +169,6 @@ class watershed(raster):
         contributing area.  If streams are specified, they will not be
         computed.
         '''
-        print "Calculating stream slope"
         with self.match_raster(streams) as dem:
             elev = dem.array
         strms = raster(streams)
@@ -189,8 +188,11 @@ class watershed(raster):
                  slice(max([0, j - 1]),
                        min([j + 2, jsh])))
             base = elev[i, j]
-            rise = numpy.abs(base - elev[s][m[s]])
-            run_ = run[m[s]]
+            loc_ind = m[s]
+            if loc_ind.shape != (3, 3):
+                loc_ind = numpy.zeros(shape=(3, 3), dtype='bool')  # Only occurs on edges
+            rise = numpy.abs(base - elev[s][loc_ind])
+            run_ = run[loc_ind]
             run_ = run_[rise != 0]
             rise = rise[rise != 0]
             if run_.size == 0:
