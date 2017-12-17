@@ -189,10 +189,8 @@ class watershed(raster):
                        min([j + 2, jsh])))
             base = elev[i, j]
             loc_ind = m[s]
-            if loc_ind.shape != (3, 3):
-                loc_ind = numpy.zeros(shape=(3, 3), dtype='bool')  # Only occurs on edges
             rise = numpy.abs(base - elev[s][loc_ind])
-            run_ = run[loc_ind]
+            run_ = run[:loc_ind.shape[0], :loc_ind.shape[1]][loc_ind]
             run_ = run_[rise != 0]
             rise = rise[rise != 0]
             if run_.size == 0:
