@@ -754,7 +754,6 @@ class raster(object):
             'int32': 'Int32',
             'uint16': 'UInt16',
             'uint32': 'UInt32',
-            'int64': 'Int64',
             'uint64': 'UInt64',
             'float32': 'Float32',
             'float64': 'Float64',
@@ -1142,9 +1141,15 @@ class raster(object):
             output_srs = t.projection
             shape, bbox, csx, csy = t.shape, extent(t), t.csx, t.csy
 
+        # Cast to floating point if the interpolation method is not nearest
+        if 'int' in self.dtype.lower() and self.interpolationMethod != 'nearest':
+            dtype = 'float32'
+        else:
+            dtype = self.dtype
+
         path = generate_name(self.path, 'transform', 'tif')
         out_raster = self.new_gdal_raster(path, shape, self.bandCount,
-                                          self.dtype, bbox.bounds[2], bbox.bounds[0], csx,
+                                          dtype, bbox.bounds[2], bbox.bounds[0], csx,
                                           csy, output_srs, (256, 256))
 
         # Set/fill nodata value
@@ -1155,7 +1160,7 @@ class raster(object):
             for a, s in out_raster.iterchunks():
                 shape = self.gdal_args_from_slice(s, self.shape)
                 shape = (shape[3], shape[2])
-                out_raster[s] = numpy.full(shape, self.nodata, self.dtype)
+                out_raster[s] = numpy.full(shape, self.nodata, dtype)
         with out_raster.dataset as outds:
             # The context manager does not work with ogr datasets
             pass
@@ -2406,8 +2411,8 @@ class vector(object):
 
         return [None if obj == 'None' else obj for obj in map(_types[dtype], a)]
 
-    @property
-    def drivers(self):
+    @staticmethod
+    def drivers():
         """
         Dict of drivers
         :return: dict of drivers
@@ -2421,7 +2426,8 @@ class vector(object):
                 'xlsx': 'table'
                 }
 
-    def get_driver_by_path(self, path):
+    @staticmethod
+    def get_driver_by_path(path):
         """
         Return a supported ogr (or internal) driver using a file extension
         :param path: File path
@@ -2432,7 +2438,7 @@ class vector(object):
             raise VectorError('File path does not have an extension')
 
         try:
-            return self.drivers[ext]
+            return vector.drivers()[ext]
         except KeyError:
             raise VectorError('Unsupported file format: "{}"'.format(ext))
 
@@ -2691,3 +2697,50 @@ class vector(object):
                             os.remove(p)
                         except:
                             pass
+
+
+def assert_type(data):
+    """
+    Check and return the type of data
+    :param data: data to parse
+    :return: object to instantiate (raster, vector, or extent)
+    """
+    def raise_type_error():
+        raise TypeError('Unable to provide a means to open {}'.format(data))
+
+    if isinstance(data, vector):
+        return vector
+    if isinstance(data, raster):
+        return raster
+
+    if any([isinstance(data, t) for t in [list, tuple, numpy.ndarray]]) and len(data) == 4:
+        return extent
+
+    if isinstance(data, basestring):
+        # Check if gdal raster
+        ds = gdal.Open(data)
+        if ds is not None:
+            return raster
+
+        # Check if a bluegeo raster
+        if data.split('.')[-1].lower() == 'h5':
+            with h5py.File(data, libver='latest') as ds:
+                # Just check for the format attribute
+                if 'format' in dict(ds.attrs).keys():
+                    return raster
+
+        # Check if a vector
+        try:
+            driver = vector.get_driver_by_path(data)
+        except:
+            raise_type_error()
+        if driver == 'table':
+            return vector
+        else:
+            # Try to open dataset
+            driver = ogr.GetDriverByName(driver)
+            _data = driver.Open(data)
+            if _data is None:
+                raise_type_error()
+            else:
+                return vector

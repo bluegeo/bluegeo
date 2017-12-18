@@ -18,7 +18,7 @@ def collect_nrcan_dem(nts, tmp_dir=None, ftp_address='ftp.geogratis.gc.ca',
     # Create temporary directory
     if tmp_dir is None:
         tmp_dir = tempfile.gettempdir()
-    tmp_dir = os.path.join('tmp_dir', 'nrcan_dem')
+    tmp_dir = os.path.join(tmp_dir, 'nrcan_dem')
     if not os.path.isdir(tmp_dir):
         os.mkdir(tmp_dir)
 

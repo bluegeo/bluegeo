@@ -374,6 +374,29 @@ def gwflow(phead, status, hc_x, hc_y, s, top, bottom, **kwargs):
     return raster(out_head), raster(out_budget)
 
 
+def sun(elevation, day, step=1):
+    """
+    Calculate global total solar radiation for a given dey (1-365)
+    :param dem: Digital elevation model
+    :param day: Day (int, 1-365)
+    :param step: Time step when computing all-day radiation sums (decimal hours)
+    :return: None
+    """
+    out_sun = util.generate_name(elevation, 'sun', 'tif')
+    dem = external(elevation)
+
+    with GrassSession(dem) as gs:
+        from grass.pygrass.modules.shortcuts import raster as graster
+        from grass.script import core as grass
+        graster.external(dem, output='dem')
+        # Calculate slope and aspect first
+        grass.run_command('r.slope.aspect', elevation='dem', aspect='aspect', slope='slope')
+        grass.run_command('r.sun', aspect='aspect', slope='slope', elevation='dem', glob_rad='rad', day=day, step=step)
+        graster.out_gdal('rad', format="GTiff", output=out_sun)
+
+    return raster(out_sun)
+
+
 def lidar(las_file, las_srs_epsg, output_raster, resolution=1, return_type='min'):
     if return_type == 'min':
         return_filter='last'  # DTM

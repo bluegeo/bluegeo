@@ -350,70 +350,140 @@ class watershed(raster):
         return watershed(alluv_out, tempdir=self.tempdir)
 
 
-class hru(raster):
+class hru(object):
     """
     Create a model domain instance that is a child of the raster class
+    Example:
+        >>> # Create an instance of the hru class, and call is "hrus"
+        >>> hrus = hru('path_to_dem.tif', 'path_to_mask.shp')  # Note, the mask may be a raster or a vector
+        >>> # Add elevation as a spatial discretization dataset, and split it using an interval of 250m
+        >>> hrus.add_elevation(250)
+        Successfully added ELEVATION to spatial data
+        >>> # Split HRU's into 4 classes of solar radiation, calling the attribute "SOLRAD"
+        >>> hrus.add_spatial_data('solar_radiation.tif', 'SOLRAD', number=4)
+        Successfully added SOLRAD to spatial data
+        >>> # Add landcover as an attribute using a vector file and the attribute field "COVER_CLASS".  Specify a mode filter to compute zonal stats.
+        >>> hrus.add_zonal_data('landcover.shp', 'COVER', 'mode', vector_attribute='COVER_CLASS')
+        Successfully added COVER to zonal data
+        >>> # Add aspect only as an attribute using zonal stats
+        >>> hrus.add_aspect(only_zonal=True)
+        Successfully added ASPECT to zonal data
+        >>> # Add slope only as an attribute using zonal stats
+        >>> hrus.add_slope(only_zonal=True)
+        Successfully added SLOPE to zonal data
+        >>> # Use a spatial mode filter 4 times to simplify the spatial HRU's
+        >>> hrus.simplify(4)  # Note, the build_spatial_hrus() method must normally be called, but it is done implicitly in most cases
+        Splitting by ELEVATION
+        Splitting by SOLRAD
+        HRU count reduced from 1246 to 424
+        >>> # Write to an output file for raven
+        >>> hrus.write_raven_rvh('template_file.rvh', 'output_file.rvh')  # Note, just as with spatial data, zonal data are also implicity added (compute_zonal_data() is called)
+        Computing LATITUDE and LONGITUDE
+        Computing AREA
+        Computing ELEVATION
+        Computing SOLRAD
+        Computing COVER
+        Computing ASPECT
+        Computing SLOPE
+        Successfully wrote output file output_file.rvh
+        >>>
     """
-    def __init__(self, dem, output_srid=4269):
-        # Open and change to float if not already
-        # TODO: Add outlet argument to turn the input into a watershed
-        if isinstance(dem, raster):
-            self.__dict__.update(dem.__dict__)
+    def __init__(self, dem, basin_mask, output_srid=4269):
+        """
+        HRU instance for dynamic HRU creation tasks
+        :param dem: (str or raster) Digital Elevation Model
+        :param basin_mask: (str, vector or raster) mask to use for the overall basin
+        :param output_srid: spatial reference for the output centroids
+        """
+        # Prepare dem using mask
+        dem = raster(dem)
+        mask = assert_type(basin_mask)(basin_mask)
+        if isinstance(mask, raster):
+            # Reduce the DEM to the necessary data
+            mask = mask.match_raster(dem)
+            m = mask.array
+            d = dem.array
+            d[m == mask.nodata] = dem.nodata
+            dem = dem.empty()
+            dem[:] = d
+            self.dem = dem.clip_to_data()
+            self.array = self.dem.array
         else:
-            super(hru, self).__init__(dem)
-        if 'float' not in self.dtype:
-            selfcopy = self.astype('float32')
-            self.__dict__.update(selfcopy.__dict__)
-            selfcopy.garbage = []
-            del selfcopy
-        self.srid = 4269
-        # Change interpolation method unless otherwise specified
-        self.interpolationMethod = 'bilinear'
-        self.wkdir = os.path.dirname(self.path)
-        self.spatialData = {}
-        self.zonalData = {}
-        # TODO: Use watershed to create mask
+            # Clip the dem using a polygon
+            self.dem = dem.clip(mask)
+
         self.mask = self.array != self.nodata
 
-    def add_spatial_data(self, dataset, name, summary_method='mean', interval=0, number=0, bins=[]):
+        # Change to floating point for calcs
+        if 'float' not in dem.dtype:
+            self.array = self.array.astype('float32')
+
+        self.srid = output_srid
+
+        self.wkdir = os.path.dirname(self.dem.path)
+        self.spatialData = {}
+        self.zonalData = {}
+        self.hrus = self.dem.full(0).astype('uint64')
+        self.hrus.nodataValues = [0]
+
+        self.regen_spatial = True  # Flag to check if regeneration necessary
+        self.regen_zonal = True
+
+    def add_spatial_data(self, dataset, name, summary_method='mean', interval=0, number=0, bins=[],
+                         dataset_interpolation='bilinear', vector_attribute=None, correlation_dict=None):
         """
         Split spatial HRU's using a dataset and zones
         If the bins argument is used, it will override the other interval argumants.
         Similarly, if the number argument is not 0 it will override the interval argument.
-        :param dataset: Instance of the raster class
+        If neither of bins, interval, or number are specified, the discrete values will be used as regions.
+        :param dataset: vector or raster
         :param name: Name to be used for output HRU's
         :param summary_method: Method used to summarize original data within bins
         :param interval: float: Interval in units to divide into HRU's
         :param number: Number of regions to split the dataset into
         :param bins: Manual bin edges used to split the dataset into regions
+        :param dataset_interpolation: Method used to interpolate the dataset
+        :param vector_attribute: Attribute field to use for data values if the dataset is a vector
+        :param correlation_dict: dictionary used to correlate the attributed value with text
         :return: None
         """
         # Check arguments
-        if all([interval <= 0, number <= 0, len(bins) == 0]):
-            raise hruError('One of interval, number, or bins must be specified to create spatial regions')
-        if isinstance(dataset, raster):
-            raise hruError('The input dataset must be a raster class instance'
-                           '(so the correct interpolation method is inherent)')
+        summary_method = str(summary_method).lower()
+        if summary_method not in ['mean', 'mode', 'min', 'max', 'std']:
+            raise hruError("Invalid summary method {}".format(summary_method))
 
-        # HRU's must be reset
-        del self.hrus
+        # Add to spatial datasets and add original to zonal datasets
+        if name in self.spatialData.keys():
+            print "Warning: Existing spatial dataset {} will be overwritten".format(name)
+        if name in self.zonalData.keys():
+            print "Warning: Existing zonal dataset {} will be overwritten".format(name)
 
-        # Align with hru domain and mask over watershed
-        ds = dataset.match_raster(self.path)
-        a = ds.array
-        a[self.mask] = ds.nodata
+        data = assert_type(dataset)(dataset)
+        if isinstance(data, vector) and vector_attribute is None:
+            raise hruError('If a vector is used to add spatial data, an attribute field name must be specified')
 
-        # Create output and gather data
-        bands = numpy.zeros(shape=a.shape, dtype='uint64')
-        m = a != ds.nodata
-        a = a[m]
+        # Rasterize or align the input data
+        if isinstance(data, vector):
+            ds = data.rasterize(self.dem, vector_attribute)
+        else:
+            ds = data.match_raster(self.dem)
+
+        # Ensure the dataset covers the domain
+        spatial_data = ds.array
+        missing = (spatial_data == ds.nodata) & self.mask
+        if numpy.any(missing):
+            raise hruError('Spatial data must cover the domain completely.'
+                           'Dataset {} is missing {0:.4f}% of the domain'.format(
+                dataset, (float(missing.sum()) / self.mask.sum()) * 100.))
+        a = spatial_data[self.mask]
 
         # Digitize
+        digitize = True
         if len(bins) != 0:
             pass
         elif number > 0:
             bins = numpy.linspace(a.min(), a.max(), number + 1)
-        else:
+        elif interval > 0:
             # Snap upper and lower bounds to interval
             lower = a.min()
             lower = lower - (lower % interval)
@@ -425,78 +495,96 @@ class hru(raster):
             upper += _ceil
             upper += interval / 2.
             bins = numpy.linspace(lower, upper, int((upper - lower) / interval) + 1)
-        bands[m] = numpy.digitize(a, bins) + 1
+        else:
+            # Use discrete values
+            digitize = False
+            spatial_data[self.mask] = a
+
+        if digitize:
+            spatial_data = numpy.full(spatial_data.shape, 0, 'uint64')
+            spatial_data[self.mask] = numpy.digitize(a, bins) + 1
 
         # Update spatial HRU datasets with labeled data and original data
-        out = ds.astype('uint64')
-        out.nodataValues = [0]
-        out[:] = self.relabel(bands)
+        out = self.hrus.empty()
+        out[:] = label(spatial_data)
 
-        # Add to spatial datasets and add original to zonal datasets
-        if name in self.spatialData.keys():
-            print "Warning: Existing spatial dataset {} will be overwritten".format(name)
         self.spatialData[name] = out
-        if name in self.zonalData.keys():
-            print "Warning: Existing zonal dataset {} will be overwritten".format(name)
-        self.zonalData[name] = (ds, summary_method)
+        self.zonalData[name] = (ds, summary_method, correlation_dict)
 
-    def add_zonal_data(self, dataset, name, summary_method='mean'):
+        self.regen_spatial = True
+        self.regen_zonal = True
+
+        print "Successfully added {} to spatial data".format(name)
+
+    def add_zonal_data(self, dataset, name, summary_method='mean',
+                       dataset_interpolation='bilinear', vector_attribute=None, correlation_dict=None):
         """
         Prepare a dataset for zonal statistics while creating HRUs
         :param dataset: Instance of the raster class
         :param name: Name of the dataset to be used in the HRU set
         :param summary_method: Statistical method to be applied
+        :param dataset_interpolation: Method used to interpolate the dataset
+        :param vector_attribute: Attribute field to use for data values if the dataset is a vector
+        :param correlation_dict: dictionary used to correlate the attributed value with text
         :return: None
         """
-        if isinstance(dataset, raster):
-            raise hruError('The input dataset must be a raster class instance'
-                           '(so the correct interpolation method is inherent)')
+        summary_method = str(summary_method).lower()
+        if summary_method not in ['mean', 'mode', 'min', 'max', 'std']:
+            raise hruError("Invalid summary method {}".format(summary_method))
 
-        if name in ['Area', 'centroid']:
-            raise hruError("Name cannot be 'Area' or 'centroid'")
+        if name in ['Area', 'Centroid']:
+            raise hruError("Name cannot be 'Area' or 'Centroid', as these are used when writing HRU's.")
 
-        # Align with domain
-        ds = dataset.match_raster(self.path)
-
-        # Add to spatial datasets
         if name in self.zonalData.keys():
             print "Warning: Existing zonal dataset {} will be overwritten".format(name)
-        self.zonalData[name] = (ds,  summary_method)
 
-    def create(self):
+        data = assert_type(dataset)(dataset)
+        if isinstance(data, vector) and vector_attribute is None:
+            raise hruError('If a vector is used to add zonal attributes, an attribute field name must be specified')
+
+        # Rasterize or align the input data
+        if isinstance(data, vector):
+            ds = data.rasterize(self.dem, vector_attribute)
+        else:
+            ds = data.match_raster(self.dem)
+
+        # Add to spatial datasets
+        self.zonalData[name] = (ds, summary_method, correlation_dict)
+
+        self.regen_zonal = True
+
+        print "Successfully added {} to zonal data".format(name)
+
+    def build_spatial_hrus(self):
         """
         Create HRU set using spatial data
         :return: None
         """
         if len(self.spatialData) == 0:
-            raise hruError('No spatial datasets available to create HRUs')
-
-        # Create output raster
-        self.hrus = self.astype('uint64')
-        self.hrus.nodataValues = [0]
+            raise hruError('No spatial datasets have been added yet')
 
         # Iterate spatial datasets and create HRUs
         names = self.spatialData.keys()
         hrua = numpy.zeros(shape=self.hrus.shape, dtype='uint64')
         for name in names[:-1]:
-            ds = self.spatialData[name]
-            print "Adding {}".format(name)
-            hrua = self.relabel(hrua + ds.array + hrua.max())
+            print "Splitting by {}".format(name)
+            hrua = label(hrua + self.spatialData[name].array + hrua.max())
 
         # Add last dataset separately in order to create map
         name = names[-1]
-        ds = self.spatialData[name]
-        print "Adding {}".format(name)
-        self.hrus[:], self.hruMap = self.relabel(hrua + ds.array + hrua.max(), return_map=True)
+        print "Splitting by {}".format(name)
+        self.hrus[:], self.hru_map = label(hrua + self.spatialData[name].array + hrua.max(), return_map=True)
 
-    def compute_zonal_stats(self):
+        self.regen_spatial = False
+
+    def compute_zonal_data(self):
         """
         Use domain.zonalData to produce zonal summary statistics for output.
         Centroids and areas are also added implicitly
         :return: dict of hru id's and the value of each column
         """
-        if not hasattr(self, 'hrus'):
-            self.create()
+        if self.regen_spatial:
+            self.build_spatial_hrus()
 
         methods = {'mean': numpy.mean,
                    'mode': util.mode,
@@ -504,82 +592,92 @@ class hru(raster):
                    'max': numpy.max,
                    'std': numpy.std}  # Add more as needed...
 
-        hrus = {id: {'centroid': self.compute_centroid(id), 'Area': self.compute_area(id)}
-                for id in self.hruMap.keys()}
+        # Rebuild HRU attributes
+        self.hru_attributes = {id: {} for id in self.hru_map.keys()}
+
+        print "Computing LONGITUDE and LATITUDE"
+        self.compute_centroids()
+        print "Computing AREA"
+        self.compute_area()
+
         for name, zoneData in self.zonalData.iteritems():
-            rast, method = zoneData
+            print "Computing {}".format(name)
+            rast, method, corr_dict = zoneData
             a = rast.array
             nd = rast.nodata
             method = methods[method]
-            for id in self.hruMap.keys():
-                data = a[self.hruMap[id]]
+            for id in self.hru_map.keys():
+                data = a[self.hru_map[id]]
                 data = data[data != nd]
                 if data.size == 0:
-                    hrus[id][name] = 'No Data'
-                hrus[id][name] = method(data)
-        return hrus
+                    self.hru_attributes[id][name] = 'No Data'
+                if corr_dict is not None:
+                    try:
+                        data = method(data)
+                        data = corr_dict[data]
+                    except KeyError:
+                        raise KeyError('The value {} does not exist in the correlation '
+                                       'dictionary for {}'.format(data, name))
+                else:
+                    data = method(data)
+                self.hru_attributes[id][name] = data
 
-    def write_raven_rvh(self, template_file):
+        self.regen_zonal = False
+
+    def write_raven_rvh(self, template_file, output_name):
         """
         Write an .rvh file to be used in the Raven Hydrological Modal
         :param template_file: Path to a file to use as a template to write an output .rvh file
+        :param output_name: path to output file
         :return: None
         """
-        # Create HRUs
-        hrus = self.compute_zonal_stats()
+        # Create HRUs and add data if needed
+        if self.regen_spatial:
+            self.build_spatial_hrus()
+        if self.regen_zonal:
+            self.compute_zonal_data()
 
         # Read template
         with open(template_file, 'r') as f:
             lines = f.readlines()
-        self.computeCentroids()
-        self.computeArea()
-        out = open(output_name, 'w')
-        w = False
-        for line in lines:
-            if ':HRUs' in line:
-                out.write(line)
-                w = True
-                continue
-            if w:
-                keys = self.hrus[self.hrus.keys()[0]].keys()
-                write = ['  :Attributes', 'AREA', 'ELEVATION', 'LATITUDE',
-                         'LONGITUDE']
-                for key in keys:
-                    if key not in write:
-                        write.append('%s' % key)
-                out.write(','.join(write) + '\n')
-                out.write('  :Units,km2,m,deg,deg, <----- Check these units,'
-                          ' and manually enter remainder of units\n')
-                spatial = ['AREA', 'ELEVATION', 'LATITUDE', 'LONGITUDE']
-                for i in range(1, len(self.hrus) + 1):
-                    hru, namedict = i, self.hrus[i]
-                    write = ['%i' % (hru)]
-                    for s in spatial:
-                        write.append('%s' % (namedict[s]))
-                    for name in keys:
-                        if name in spatial:
-                            continue
-                        write.append('%s' % (namedict[name]))
+        with open(output_name, 'w') as out:
+            w = False
+            for line in lines:
+                if ':HRUs' in line:
+                    out.write(line)
+                    w = True
+                    continue
+                if w:
+                    keys = self.hru_attributes[self.hru_attributes.keys()[0]].keys()
+                    write = ['  :Attributes'] + map(str, keys)
                     out.write(','.join(write) + '\n')
-                out.write(':EndHRUs')
-                break
-            else:
-                out.write(line)
-        print "Complete."
+                    out.write('  :Units <-- manually enter units -->\n')
+                    for hru in range(1, max(self.hru_attributes.keys()) + 1):
+                        write = ','.join(map(str, [hru] + [self.hru_attributes[hru][key] for key in keys]))
+                        out.write(write + '\n')
+                    out.write(':EndHRUs')
+                    break
+                else:
+                    out.write(line)
 
-    def elevation_band(self, interval=100, number=0, bins=[]):
+        print "Successfully wrote output file {}".format(output_name)
+
+    def add_elevation(self, interval=100, number=0, bins=[], only_zonal=False):
         """
-        Add elevation bands to the spatial HRU set
+        Add elevation bands to the zonal data, or both zonal and spatial data
         :param interval: see add_spatial_data
         :param number: see add_spatial_data
         :param bins: see add_spatial_data
+        :param only_zonal: Only add elevation to the zonal datasets
         :return: None
         """
         # Create elevation bands
-        self.add_spatial_data(raster(self.path), 'Elevation', reclass_method='mean',
-                              interval=interval, number=number, bins=bins)
+        if only_zonal:
+            self.add_zonal_data(self.dem, 'ELEVATION')
+        else:
+            self.add_spatial_data(self.dem, 'ELEVATION', interval=interval, number=number, bins=bins)
 
-    def add_aspect(self, interval=0, number=4, bins=[]):
+    def add_aspect(self, interval=0, number=4, bins=[], only_zonal=False):
         """
         Compute aspect and add to spatial HRU set
         :param interval: see add_spatial_data
@@ -588,11 +686,12 @@ class hru(raster):
         :return: None
         """
         # Compute aspect and add to HRU set
-        with topo(self.data).aspect() as aspect:
-            self.add_spatial_data(raster(aspect.path), 'Aspect', reclass_method='mode',
-                                  interval=interval, number=number, bins=bins)
+        if only_zonal:
+            self.add_zonal_data(topo(self.dem).aspect(), 'ASPECT', 'mode')
+        else:
+            self.add_spatial_data(topo(self.dem).aspect(), 'ASPECT', interval=interval, number=number, bins=bins)
 
-    def add_slope(self, interval=0, number=4, bins=[]):
+    def add_slope(self, interval=0, number=4, bins=[], only_zonal=False):
         """
         Compute slope and add to spatial HRU set
         :param interval: see add_spatial_data
@@ -601,9 +700,10 @@ class hru(raster):
         :return: None
         """
         # Compute aspect and add to HRU set
-        with topo(self.data).slope() as slope:
-            self.add_spatial_data(raster(slope.path), 'Slope', reclass_method='mean',
-                                  interval=interval, number=number, bins=bins)
+        if only_zonal:
+            self.add_zonal_data(topo(self.dem).slope(), 'SLOPE')
+        else:
+            self.add_spatial_data(topo(self.dem).slope(), 'SLOPE', interval=interval, number=number, bins=bins)
 
     def simplify(self, iterations):
         """
@@ -611,51 +711,47 @@ class hru(raster):
         :param iterations: Number of iterations to smooth dataset
         :return: None
         """
-        if not hasattr(self, 'hrus'):
-            self.create()
+        if self.regen_spatial:
+            self.build_spatial_hrus()
+
+        previous = max(self.hru_map.keys())
 
         for i in range(iterations):
             print "Performing filter {} of {}".format(i + 1, iterations)
-            self.hrus = raster(rastfilter(self.hrus.path).most_common().path)
+            self.hrus = most_common(self.hrus)
 
-        self.hrus[:], self.hruMap = self.relabel(self.hrus.array, return_map=True)
+        self.hrus[:], self.hru_map = label(self.hrus.array, return_map=True)
 
-    def compute_centroid(self, id):
+        print "HRU count reduced from {} to {}".format(previous, max(self.hru_map.keys()))
+
+    def compute_centroids(self):
         """
         Compute the centre of mass centroid of a specific HRU
         :param id: hru id
-        :return: centroid as (x, y)
+        :return: None
         """
-        try:
-            inds = self.hruMap[id]
-        except KeyError:
-            raise hruError('Could not compute the cenroid for HRU {}, as it does not exist'.format(id))
-
-        # Centre of mass in spatial reference of dem
-        y = self.top - ((numpy.mean(inds[0]) + 0.5) * self.csy)
-        x = self.left + ((numpy.mean(inds[1]) + 0.5) * self.csx)
-
         # Change to output srid
         insr = osr.SpatialReference()
-        insr.ImportFromWkt(self.projection)
+        insr.ImportFromWkt(self.dem.projection)
         outsr = osr.SpatialReference()
         outsr.ImportFromEPSG(self.srid)
         coordTransform = osr.CoordinateTransformation(insr, outsr)
-        x, y, _ = coordTransform.TransformPoint(x, y)
-        return x, y
+        for id, inds in self.hru_map.iteritems():
+            # Centre of mass in spatial reference of dem
+            y = self.dem.top - ((numpy.mean(inds[0]) + 0.5) * self.dem.csy)
+            x = self.dem.left + ((numpy.mean(inds[1]) + 0.5) * self.dem.csx)
+            x, y, _ = coordTransform.TransformPoint(x, y)
+            self.hru_attributes[id]['LONGITUDE'] = x
+            self.hru_attributes[id]['LATITUDE'] = y
 
-    def compute_area(self, id):
+    def compute_area(self):
         """
         Compute area in the units of the dem spatial reference
         :param id: HRU index
-        :return: float of area
+        :return: None
         """
-        try:
-            inds = self.hruMap[id]
-        except KeyError:
-            raise hruError('Could not compute the cenroid for HRU {}, as it does not exist'.format(id))
-
-        return inds[0].size * self.csx * self.csy
+        for id, inds in self.hru_map.iteritems():
+            self.hru_attributes[id]['AREA'] = inds[0].size * self.dem.csx * self.dem.csy
 
     def save_hru_raster(self, output_name):
         """
@@ -663,24 +759,25 @@ class hru(raster):
         :param output_name: name of the output raster
         :return: None
         """
-        if not hasattr(self, 'hrus'):
-            self.create()
+        # Create HRUs and add data if needed
+        if self.regen_spatial:
+            self.build_spatial_hrus()
 
         if output_name.split('.')[-1].lower() != 'tif':
             output_name += '.tif'
-        self.hrus.save_gdal_raster(output_name)
+        self.hrus.save(output_name)
 
-    def get_specs(self):
-        """
-        Return a dictionary of the specifications of the current HRU set
-        :return: dict
-        """
-        if not hasattr(self, 'hrus'):
-            self.create()
-
-        return {'Number': numpy.max(self.hruMap.keys()),
-                'Spatial Datasets': self.spatialData.keys(),
-                'Zonal Datasets': self.zonalData.keys()}
+    def __repr__(self):
+        if self.regen_spatial:
+            write = 'Uncomputed HRU instance comprised of the following spatial datasets:\n'
+            write += '\n'.join(self.spatialData.keys())
+            write += 'And the following zonal datasets:\n'
+        else:
+            write = "HRU instance with {} spatial HRU's, and the following zonal datasets (which have {}" \
+                    "been computed):\n".format(max(self.hru_map.keys()), 'not ' if self.regen_zonal else '')
+        write += '\n'.join(['{}: (summary method {})'.format(name, method[1])
+                            for name, method in self.zonalData.iteritems()])
+        return write
 
 
 def channel_density(streams, sample_distance=50):
