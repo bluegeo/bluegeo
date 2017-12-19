@@ -669,6 +669,11 @@ class hru(object):
         :param output_name: path to output csv
         :return: None
         """
+        if self.regen_spatial:
+            self.build_spatial_hrus()
+        if self.regen_zonal:
+            self.compute_zonal_data()
+
         keys = self.hru_attributes[self.hru_attributes.keys()[0]].keys()
         with open(output_name, 'w') as f:
             f.write(','.join(['ID'] + keys) + '\n')
