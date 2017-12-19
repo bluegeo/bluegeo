@@ -411,7 +411,7 @@ class hru(object):
             # Clip the dem using a polygon
             self.dem = dem.clip(mask)
 
-        self.mask = dem.array != dem.nodata
+        self.mask = self.dem.array != self.dem.nodata
 
         self.srid = output_srid
 
@@ -570,7 +570,10 @@ class hru(object):
         # Add last dataset separately in order to create map
         name = names[-1]
         print "Splitting by {}".format(name)
-        self.hrus[:], self.hru_map = label(hrua + self.spatialData[name].array + hrua.max(), return_map=True)
+        a = self.spatialData[name].array
+        m = a != 0
+        hrua[m] = hrua[m] + a[m] + hrua.max()
+        self.hrus[:], self.hru_map = label(hrua, return_map=True)
 
         self.regen_spatial = False
 
