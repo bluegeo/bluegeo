@@ -407,16 +407,11 @@ class hru(object):
             dem = dem.empty()
             dem[:] = d
             self.dem = dem.clip_to_data()
-            self.array = self.dem.array
         else:
             # Clip the dem using a polygon
             self.dem = dem.clip(mask)
 
-        self.mask = self.array != self.nodata
-
-        # Change to floating point for calcs
-        if 'float' not in dem.dtype:
-            self.array = self.array.astype('float32')
+        self.mask = dem.array != dem.nodata
 
         self.srid = output_srid
 
@@ -468,14 +463,10 @@ class hru(object):
         else:
             ds = data.match_raster(self.dem)
 
-        # Ensure the dataset covers the domain
+        # Read data and create mask
         spatial_data = ds.array
-        missing = (spatial_data == ds.nodata) & self.mask
-        if numpy.any(missing):
-            raise hruError('Spatial data must cover the domain completely.'
-                           'Dataset {} is missing {0:.4f}% of the domain'.format(
-                dataset, (float(missing.sum()) / self.mask.sum()) * 100.))
-        a = spatial_data[self.mask]
+        data_mask = (spatial_data != ds.nodata) & self.mask
+        a = spatial_data[data_mask]
 
         # Digitize
         digitize = True
@@ -498,11 +489,11 @@ class hru(object):
         else:
             # Use discrete values
             digitize = False
-            spatial_data[self.mask] = a
+            spatial_data[data_mask] = a
 
         if digitize:
             spatial_data = numpy.full(spatial_data.shape, 0, 'uint64')
-            spatial_data[self.mask] = numpy.digitize(a, bins) + 1
+            spatial_data[data_mask] = numpy.digitize(a, bins) + 1
 
         # Update spatial HRU datasets with labeled data and original data
         out = self.hrus.empty()
@@ -547,6 +538,9 @@ class hru(object):
             ds = data.rasterize(self.dem, vector_attribute)
         else:
             ds = data.match_raster(self.dem)
+        a = ds.array
+        a[~self.mask] = ds.nodata
+        ds[:] = a
 
         # Add to spatial datasets
         self.zonalData[name] = (ds, summary_method, correlation_dict)
@@ -568,7 +562,10 @@ class hru(object):
         hrua = numpy.zeros(shape=self.hrus.shape, dtype='uint64')
         for name in names[:-1]:
             print "Splitting by {}".format(name)
-            hrua = label(hrua + self.spatialData[name].array + hrua.max())
+            a = self.spatialData[name].array
+            m = a != 0
+            hrua[m] = hrua[m] + a[m] + hrua.max()
+            hrua = label(hrua)
 
         # Add last dataset separately in order to create map
         name = names[-1]
@@ -611,15 +608,16 @@ class hru(object):
                 data = data[data != nd]
                 if data.size == 0:
                     self.hru_attributes[id][name] = 'No Data'
+                    continue
+                data = method(data)
+                if method == util.mode:
+                    data = data[0]
                 if corr_dict is not None:
                     try:
-                        data = method(data)
                         data = corr_dict[data]
                     except KeyError:
                         raise KeyError('The value {} does not exist in the correlation '
                                        'dictionary for {}'.format(data, name))
-                else:
-                    data = method(data)
                 self.hru_attributes[id][name] = data
 
         self.regen_zonal = False
@@ -770,12 +768,12 @@ class hru(object):
     def __repr__(self):
         if self.regen_spatial:
             write = 'Uncomputed HRU instance comprised of the following spatial datasets:\n'
-            write += '\n'.join(self.spatialData.keys())
+            write += '\n'.join(self.spatialData.keys()) + '\n'
             write += 'And the following zonal datasets:\n'
         else:
             write = "HRU instance with {} spatial HRU's, and the following zonal datasets (which have {}" \
                     "been computed):\n".format(max(self.hru_map.keys()), 'not ' if self.regen_zonal else '')
-        write += '\n'.join(['{}: (summary method {})'.format(name, method[1])
+        write += '\n'.join(['{} of {}'.format(method[1], name)
                             for name, method in self.zonalData.iteritems()])
         return write
 

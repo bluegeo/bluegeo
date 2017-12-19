@@ -22,6 +22,7 @@ except ImportError:
 
 from util import parse_projection, generate_name, coords_to_indices, indices_to_coords, transform_points
 
+gdal.PushErrorHandler('CPLQuietErrorHandler')
 
 """Custom Exceptions"""
 class RasterError(Exception):
@@ -754,10 +755,10 @@ class raster(object):
             'int32': 'Int32',
             'uint16': 'UInt16',
             'uint32': 'UInt32',
-            'uint64': 'UInt64',
+            'uint64': 'UInt32',
             'float32': 'Float32',
             'float64': 'Float64',
-            'int64': 'Long'
+            'int64': 'Int32'
         }
         try:
             return gdal.GetDataTypeByName(datatypes[dtype])
@@ -874,12 +875,20 @@ class raster(object):
         # Snap to the nearest cell boundary
         resid = (self.top - top) / self.csy
         top += (resid - int(round(resid))) * self.csy
+        if top > self.top:
+            top = self.top
         resid = (self.top - bottom) / self.csy
         bottom += (resid - int(round(resid))) * self.csy
+        if bottom < self.bottom:
+            bottom = self.bottom
         resid = (self.left - left) / self.csx
         left += (resid - int(round(resid))) * self.csx
+        if left < self.left:
+            left = self.left
         resid = (self.left - right) / self.csx
         right += (resid - int(round(resid))) * self.csx
+        if right > self.right:
+            right = self.right
 
         # Compute shape and slices
         shape = (int(round((top - bottom) / self.csy)),
@@ -940,7 +949,8 @@ class raster(object):
 
         # Check if no change
         if all([self.top == bbox[0], self.bottom == bbox[1],
-                self.left == bbox[2], self.right == bbox[3]]):
+                self.left == bbox[2], self.right == bbox[3],
+               vector_mask is None]):
             return self.copy('clip')
 
         # Create output dataset with new extent
@@ -2317,7 +2327,11 @@ class vector(object):
         if self.driver == 'ESRI Shapefile':
             prestr = '.'.join(os.path.basename(self.path).split('.')[:-1])
             d = os.path.dirname(self.path)
-            return [os.path.join(d, f) for f in os.listdir(d)
+            if d == '':
+                _d = '.'
+            else:
+                _d = d
+            return [os.path.join(d, f) for f in os.listdir(_d)
                     if '.'.join(f.split('.')[:-1]) == prestr and
                     f.split('.')[-1].lower() in ['shp', 'shx', 'dbf', 'prj']]
         else:
