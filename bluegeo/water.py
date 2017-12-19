@@ -467,6 +467,7 @@ class hru(object):
         spatial_data = ds.array
         data_mask = (spatial_data != ds.nodata) & self.mask
         a = spatial_data[data_mask]
+        spatial_data = numpy.full(spatial_data.shape, 0, 'uint64')
 
         # Digitize
         digitize = True
@@ -492,7 +493,6 @@ class hru(object):
             spatial_data[data_mask] = a
 
         if digitize:
-            spatial_data = numpy.full(spatial_data.shape, 0, 'uint64')
             spatial_data[data_mask] = numpy.digitize(a, bins) + 1
 
         # Update spatial HRU datasets with labeled data and original data
