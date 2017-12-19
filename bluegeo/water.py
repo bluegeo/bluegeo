@@ -650,7 +650,7 @@ class hru(object):
                     continue
                 if w:
                     keys = self.hru_attributes[self.hru_attributes.keys()[0]].keys()
-                    write = ['  :Attributes'] + map(str, keys)
+                    write = ['  :Attributes,ID'] + map(str, keys)
                     out.write(','.join(write) + '\n')
                     out.write('  :Units <-- manually enter units -->\n')
                     for hru in range(1, max(self.hru_attributes.keys()) + 1):
@@ -662,6 +662,21 @@ class hru(object):
                     out.write(line)
 
         print "Successfully wrote output file {}".format(output_name)
+
+    def write_csv(self, output_name):
+        """
+        Write the HRU's to a .csv
+        :param output_name: path to output csv
+        :return: None
+        """
+        keys = self.hru_attributes[self.hru_attributes.keys()[0]].keys()
+        with open(output_name, 'w') as f:
+            f.write(','.join(['ID'] + keys) + '\n')
+            for hru in range(1, max(self.hru_attributes.keys()) + 1):
+                write = ','.join(map(str, [hru] + [self.hru_attributes[hru][key] for key in keys]))
+                f.write(write + '\n')
+
+        print "Successfully wrote output csv {}".format(output_name)
 
     def add_elevation(self, interval=100, number=0, bins=[], only_zonal=False):
         """
