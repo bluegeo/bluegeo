@@ -923,23 +923,12 @@ class raster(object):
         :param bbox_or_dataset: raster, vector, or bbox (top, bottom, left, right)
         """
         # Get input
-        if any([isinstance(bbox_or_dataset, tuple),
-                isinstance(bbox_or_dataset, list),
-                isinstance(bbox_or_dataset, numpy.ndarray)]
-               ):
-            bbox = bbox_or_dataset
-            vector_mask = None
-        elif isinstance(bbox_or_dataset, raster):
-            bbox = raster(bbox_or_dataset)
-            bbox = (bbox.top, bbox.bottom, bbox.left, bbox.right)
-            vector_mask = None
+        clipper = assert_type(bbox_or_dataset)(bbox_or_dataset)
+        bbox = extent(clipper).transform(self.projection).bounds
+        if isinstance(clipper, vector):
+            vector_mask = clipper.transform(self.projection)
         else:
-            try:
-                bbox = vector(bbox_or_dataset)
-                bbox = (bbox.top, bbox.bottom, bbox.left, bbox.right)
-                vector_mask = bbox_or_dataset
-            except:
-                raise RasterError('Unable to parse bbox argument in clip')
+            vector_mask = None
 
         # Check that bbox is not inverted
         if any([bbox[0] <= bbox[1], bbox[2] >= bbox[3]]):
@@ -971,7 +960,7 @@ class raster(object):
         outds = raster(path, mode='w', **kwargs)
         # If a cutline is specified, use it to create a mask
         if vector_mask is not None:
-            cutline = vector(vector_mask).rasterize(outds.path).array.astype('bool')
+            cutline = vector_mask.rasterize(outds.path).array.astype('bool')
 
         # Add output to garbage
         outds.garbage = {'path': path, 'num': 1}
@@ -1956,7 +1945,8 @@ class vector(object):
             with self.layer() as inlyr:
                 # Output layer definition
                 outLyrDefn = outlyr.GetLayerDefn()
-                fields = {newField[0]: self.field_to_pyobj(self[oldField[0]])
+                fields = {newField[0]: self.field_to_pyobj(self[oldField[0]], self.fieldWidth[oldField[0]],
+                                                           self.fieldPrecision[oldField[0]])
                           for oldField, newField in zip(self.fieldTypes, newFields)}
 
                 # Iterate and population geo's
@@ -2061,12 +2051,12 @@ class vector(object):
                 data = numpy.broadcast_to(data, shape)
             except:
                 raise VectorError("Unable to fit the data to the number of fields/features")
-            data = [self.field_to_pyobj(a) for a in data]
+            data = [self.field_to_pyobj(a, 19, 11) for a in data]
 
         # Input null or input data for new fields
         else:
             data = self.field_to_pyobj(numpy.array([[self.guess_nodata(_dtype) for _ in range(self.featureCount)]
-                                                    for _, _dtype in zip(name, dtype)]).astype(dtype))
+                                                    for _, _dtype in zip(name, dtype)]).astype(dtype), 19, 11)
 
         if self.mode in ['r+', 'w']:
             # Iterate features and insert data
@@ -2089,7 +2079,8 @@ class vector(object):
             new_fieldtypes = self.check_fields(self.fieldTypes + zip(name, dtype))
 
             # Gather data to write into fields
-            fields = {field[0]: self.field_to_pyobj(self[field[0]]) for field in self.fieldTypes}
+            fields = {field[0]: self.field_to_pyobj(self[field[0]], self.fieldWidth[field[0]],
+                                                    self.fieldPrecision[field[0]]) for field in self.fieldTypes}
 
             fields.update({name_and_dtype[0]: data[i]
                            for i, name_and_dtype in enumerate(zip(name, dtype))})
@@ -2149,7 +2140,8 @@ class vector(object):
                 outLyrDefn = outlyr.GetLayerDefn()
                 # Gather field values to write to output
                 newFields = self.check_fields(self.fieldTypes)
-                fields = {newField[0]: self.field_to_pyobj(self[oldField[0]])
+                fields = {newField[0]: self.field_to_pyobj(self[oldField[0]], self.fieldWidth[oldField[0]],
+                                                           self.fieldPrecision[oldField[0]])
                           for oldField, newField in zip(self.fieldTypes, newFields)}
 
                 # Iterate geometries and populate output with transformed geo's
@@ -2277,7 +2269,8 @@ class vector(object):
                 # New field required
                 self.add_fields(item, write_data.dtype.name, write_data)
             else:
-                write_data = self.field_to_pyobj(write_data.astype(dtype))
+                write_data = self.field_to_pyobj(write_data.astype(dtype), self.fieldWidth[item],
+                                                 self.fieldPrecision[item])
                 # Iterate features and insert data
                 with self.layer() as inlyr:
                     # Iterate features
@@ -2390,7 +2383,7 @@ class vector(object):
             raise VectorError('Cannot determine default no data values with the data type {}'.format(dtype))
 
     @staticmethod
-    def field_to_pyobj(a):
+    def field_to_pyobj(a, width, prec):
         """
         Convert numpy array to a python object to be used by ogr
         :param a: input numpy array
@@ -2408,8 +2401,14 @@ class vector(object):
         dtype = a.dtype.name
         if dtype[0].lower() == 's':
             dtype = 's'
+            fmt = ''
+        elif 'float' in dtype.lower():
+            fmt = '{' + ':{}.{}f'.format(width, prec) + '}'
+        else:
+            fmt = '{:d}'
 
-        return [None if obj == 'None' else obj for obj in map(_types[dtype], a)]
+        # return [None if obj == 'None' else obj for obj in map(_types[dtype], a)]
+        return map(fmt.format, a)
 
     @staticmethod
     def drivers():
