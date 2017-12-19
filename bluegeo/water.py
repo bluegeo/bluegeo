@@ -412,11 +412,7 @@ class hru(object):
             # Clip the dem using a polygon
             self.dem = dem.clip(mask)
 
-        self.mask = self.array != self.nodata
-
-        # Change to floating point for calcs
-        if 'float' not in dem.dtype:
-            self.array = self.array.astype('float32')
+        self.mask = dem.array != dem.nodata
 
         self.srid = output_srid
 

@@ -234,11 +234,11 @@ def mode(ndarray, axis=0):
     if ndarray.size == 1:
         return ndarray[0], 1
     elif ndarray.size == 0:
-        raise hruError('Cannot compute mode on empty array')
+        raise BlueUtilError('Cannot compute mode on empty array')
     try:
         axis = range(ndarray.ndim)[axis]
     except:
-        raise hruError('Axis "{}" incompatible with the {}-dimension array'.format(axis, ndim))
+        raise BlueUtilError('Axis "{}" incompatible with the {}-dimension array'.format(axis, ndim))
 
     # If array is 1-D and numpy version is > 1.9 numpy.unique will suffice
     if all([ndim == 1,
