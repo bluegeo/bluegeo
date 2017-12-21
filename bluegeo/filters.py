@@ -2,6 +2,7 @@ from spatial import *
 import util
 from scipy.ndimage import binary_dilation, gaussian_filter
 from scipy.interpolate import griddata
+from numba.decorators import jit
 
 
 class FilterError(Exception):
@@ -250,7 +251,6 @@ def interpolate_nodata(input_raster, method='nearest'):
     :param method: interpolation method
     :return: raster instance
     """
-    print "Interpolating no data values"
     inrast = raster(input_raster)
 
     # Check if no data values exist
@@ -285,6 +285,129 @@ def interpolate_nodata(input_raster, method='nearest'):
     outrast = inrast.empty()
     outrast[:] = a
     return outrast
+
+
+def interpolate_mask(input_raster, mask_raster, method='nearest'):
+    """
+    Interpolate data from the raster to the missing values in the mask.
+    Note, if using cubic or linear, values will be limited to the coverage of the convex hull
+    :param input_raster: raster to grid across mask
+    :param mask_raster: mask to grid values
+    :param method: interpolation method ('nearest', 'idw', 'linear')
+    :return: raster instance
+    """
+
+    def inverse_distance(pointGrid, xGrid, values):
+        """TODO: Reduce boilerplate. This method also exists in bluegeo.terrain.align"""
+        @jit(nopython=True, nogil=True)
+        def idw(args):
+            points, xi, grad, output, mask = args
+            i_shape = xi.shape[0]
+            point_shape = points.shape[0]
+            for i in range(i_shape):
+                num = 0.0
+                denom = 0.0
+                for j in range(point_shape):
+                    w = 1 / numpy.sqrt(
+                        ((points[j, 0] - xi[i, 0]) ** 2) + ((points[j, 1] - xi[i, 1]) ** 2)
+                    ) ** 2
+                    denom += w
+                    num += w * grad[j]
+                output[i] = num / denom
+            return output, mask
+
+        # Compute chunk size from memory specification and neighbours
+        from multiprocessing import Pool, cpu_count
+        chunkSize = int(round(xGrid.shape[0] / (cpu_count() * 4)))
+        if chunkSize < 1:
+            chunkSize = 1
+        chunkRange = range(0, xGrid.shape[0] + chunkSize, chunkSize)
+
+        iterator = []
+        totalCalcs = 0
+        for fr, to in zip(chunkRange[:-1], chunkRange[1:-1] + [xGrid.shape[0]]):
+            xChunk = xGrid[fr:to]
+            totalCalcs += pointGrid.shape[0] * xChunk.shape[0]
+            iterator.append(
+                (pointGrid, xChunk, values, numpy.zeros(shape=(to - fr,), dtype='float32'), (fr, to))
+            )
+        print "IDW requires {} calculations".format(totalCalcs)
+
+        import time
+        now = time.time()
+        p = Pool(cpu_count())
+        try:
+            iterator = list(p.imap_unordered(idw, iterator))
+        except Exception as e:
+            import sys
+            p.close()
+            p.join()
+            raise e, None, sys.exc_info()[2]
+        else:
+            p.close()
+            p.join()
+        print "Completed IDW interpolation in %s minutes" % (round((time.time() - now) / 60, 3))
+        return iterator
+
+    inrast = raster(input_raster)
+    a = inrast.array
+
+    # Create a mask from mask raster
+    mask = raster(mask_raster).match_raster(inrast)
+    mask = mask.array != mask.nodata
+
+    # Gather points for interpolation
+    in_nodata = a == inrast.nodata
+    xi = mask & in_nodata
+    if xi.sum == 0:
+        # Nothing to interpolate
+        return inrast
+
+    # Gather data values for interpolation at the edges only
+    points = binary_dilation(in_nodata, numpy.ones((3, 3))) & ~in_nodata
+    values = a[points]
+
+    # Create x-y grids from masks
+    points = numpy.where(points)
+    xi = numpy.where(xi)
+
+    # Interpolate using scipy griddata if method is nearest, cubic, or linear
+    if method != 'idw':
+        points = numpy.vstack([points[0] * inrast.csy, points[1] * inrast.csx]).T
+        a[xi] = griddata(points, values, (xi[0] * inrast.csy, xi[1] * inrast.csx), method)
+    else:
+        # Use internal idw method- note, this is slow because it completes an entire outer product
+        # Points in form ((x, y), (x, y))
+        pointGrid = numpy.fliplr(
+            numpy.array(util.indices_to_coords(points, inrast.top, inrast.left, inrast.csx, inrast.csy)).T
+        )
+        # Interpolation grid in form ((x, y), (x, y))
+        xGrid = numpy.fliplr(
+            numpy.array(util.indices_to_coords(xi, inrast.top, inrast.left, inrast.csx, inrast.csy)).T
+        )
+
+        iterator = inverse_distance(pointGrid, xGrid, values)
+
+        # Add output to a using iterator generated in idw
+        output = numpy.zeros(shape=xi[0].shape, dtype='float32')
+        for i in iterator:
+            output[i[1][0]:i[1][1]] = i[0]
+        a[xi] = output
+
+    # Create output
+    outrast = inrast.empty()
+    outrast[:] = a
+    return outrast
+
+
+def dilate(input_raster, dilate_value=1, iterations=1):
+    """
+    Perform a region dilation
+    :param input_raster: Input raster
+    :param dilate_value: Raster value to dilate
+    :return: Raster instance
+    """
+    pass
 
 
 def normalize(input_raster):
@@ -334,7 +457,7 @@ def convolve(input_raster, kernel):
     local_dict = util.window_local_dict(views)  # Views turned into a pointer dictionary for numexpr
     output = numpy.zeros(shape=inrast.shape, dtype='float32')  # Allocate output
     # ne.evaluate only allows 32 arrays in one expression.  Need to chunk it up.
-    keys = local_dict.keys()
+    keys = ['a{}_{}'.format(i, j) for i in range(len(views)) for j in range(len(views[0]))]  # preserve order
     kernel_len = len(keys)
     keychunks = range(0, len(local_dict) + 31, 31)
     keychunks = zip(keychunks[:-1],
@@ -354,16 +477,6 @@ def convolve(input_raster, kernel):
     outrast[:] = output
 
     return outrast
-
-
-def dilate(input_raster, dilate_value=1, iterations=1):
-    """
-    Perform a region dilation
-    :param input_raster: Input raster
-    :param dilate_value: Raster value to dilate
-    :return: Raster instance
-    """
-    pass
 
 
 def edge_detect(input_Raster, detection_value=1):

@@ -230,7 +230,7 @@ class topo(raster):
 
         return topo(surf_rough)
 
-    def align(self, input_raster, interpolation='nearest', tolerance=1E-06, max_iter=5000):
+    def align(self, input_raster, interpolation='idw', tolerance=1E-06, max_iter=5000):
         """
         Align two grids, and correct the z-value using difference in overlapping areas
         :param input_raster: Raster to align with self

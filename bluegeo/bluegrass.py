@@ -160,6 +160,36 @@ def watershed(dem, flow_direction='SFD', accumulation_path=None, direction_path=
     return raster(dirpath), raster(accupath)
 
 
+def stream_extract(dem, minimum_contributing_area):
+    """
+    Extract streams
+    :param dem:
+    :param minimum_contributing_area:
+    :return:
+    """
+    # Ensure input raster is valid and in a gdal format
+    dem = external(dem)
+
+    # Compute threshold using minimum contributing area
+    r = raster(dem)
+    threshold = minimum_contributing_area / (r.csx * r.csy)
+
+    stream_path = util.generate_name(dem, 'streams', 'tif')
+
+    # Run grass command
+    with GrassSession(dem):
+        from grass.pygrass.modules.shortcuts import raster as graster
+        from grass.script import core as grass
+        graster.external(input=dem, output='dem')
+
+        grass.run_command('r.stream.extract', elevation='dem',
+                          threshold=threshold, stream_raster='streams')
+        graster.out_gdal('streams', format="GTiff", output=stream_path)
+
+    # Return raster instances
+    return raster(stream_path)
+
+
 def stream_order(dem, minimum_contributing_area, stream_order_path=None, method='strahler'):
     """
     Calculated stream order from a DEM using the prescribed method

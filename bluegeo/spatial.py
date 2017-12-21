@@ -2585,10 +2585,10 @@ class vector(object):
             write_data = vector[attribute_field]
             if 's' in dtype.lower():
                 try:
-                    write_data = float(write_data)
+                    write_data = numpy.float32(write_data)
                 except:
                     raise ValueError('Cannot cast the field {} into a numeric type'.format(attribute_field))
-            nodata = r.nodata
+            nodata = numpy.array(r.nodata).astype(dtype)
         else:
             nodata = 0
             dtype = 'bool'
@@ -2596,6 +2596,7 @@ class vector(object):
 
         # Allocate output array and raster for writing raster values
         outarray = numpy.full(r.shape, nodata, dtype)
+
         outrast = r.astype(dtype)
         outrast.nodataValues = [nodata]
 
