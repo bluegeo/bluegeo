@@ -63,7 +63,7 @@ def collect_nrcan_dem(nts, tmp_dir=None, ftp_address='ftp.geogratis.gc.ca',
     # Merge
     print "Merging rasters"
     files = [os.path.join(tmp_dir, f) for f in os.listdir(tmp_dir) if f.split('.')[-1] == 'tif']
-    outpath = os.path.join(tmp_dir, '20m_dem.tif')
+    outpath = os.path.join(tmp_dir, 'nrcan_dem.tif')
 
     # Pre-check files to avoid errors at this stage
     _files = []
@@ -75,7 +75,7 @@ def collect_nrcan_dem(nts, tmp_dir=None, ftp_address='ftp.geogratis.gc.ca',
             print "Warning: cannot read file {}".format(f)
 
     if len(_files) > 0:
-        command = 'gdalwarp -r bilinear -overwrite "{}" "{}"'.format('" "'.join(_files), outpath)
+        command = 'gdalwarp -r cubic -overwrite "{}" "{}"'.format('" "'.join(_files), outpath)
         os.system(command)
     else:
         raise Exception("No files available for DEM merge operation")

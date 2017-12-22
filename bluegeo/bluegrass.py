@@ -105,9 +105,11 @@ def external(input_raster):
     if r.format == 'HDF5':
         path = util.generate_name(r.path, 'copy', 'tif')
         r.save(path)
+        tmp = True
     else:
         path = r.path
-    return path
+        tmp = False
+    return path, tmp
 
 
 # r. functions
@@ -122,7 +124,7 @@ def watershed(dem, flow_direction='SFD', accumulation_path=None, direction_path=
     :return: Raster instances of flow direction, and flow accumulation, respectively
     """
     # Ensure input raster is valid and in a gdal format
-    dem = external(dem)
+    dem, garbage = external(dem)
 
     # Write flags using args
     flags = ''
@@ -156,8 +158,17 @@ def watershed(dem, flow_direction='SFD', accumulation_path=None, direction_path=
         graster.out_gdal('fd', format="GTiff", output=dirpath)
         graster.out_gdal('fa', format="GTiff", output=accupath)
 
+    if garbage:
+        try:
+            os.remove(dem)
+        except:
+            pass
+
     # Return raster instances
-    return raster(dirpath), raster(accupath)
+    fd, fa = raster(dirpath), raster(accupath)
+    fd.garbage = {'path': dirpath, 'num': 1}
+    fa.garbage = {'path': accupath, 'num': 1}
+    return fd, fa
 
 
 def stream_extract(dem, minimum_contributing_area):
@@ -168,7 +179,7 @@ def stream_extract(dem, minimum_contributing_area):
     :return:
     """
     # Ensure input raster is valid and in a gdal format
-    dem = external(dem)
+    dem, garbage = external(dem)
 
     # Compute threshold using minimum contributing area
     r = raster(dem)
@@ -186,8 +197,16 @@ def stream_extract(dem, minimum_contributing_area):
                           threshold=threshold, stream_raster='streams')
         graster.out_gdal('streams', format="GTiff", output=stream_path)
 
+    if garbage:
+        try:
+            os.remove(dem)
+        except:
+            pass
+
     # Return raster instances
-    return raster(stream_path)
+    streams = raster(stream_path)
+    streams.garbage = {'path': stream_path, 'num': 1}
+    return streams
 
 
 def stream_order(dem, minimum_contributing_area, stream_order_path=None, method='strahler'):
@@ -200,7 +219,7 @@ def stream_order(dem, minimum_contributing_area, stream_order_path=None, method=
     :return: Raster instance with output stream order values
     """
     # Ensure input raster is valid and in a gdal format
-    dem = external(dem)
+    dem, garbage = external(dem)
 
     # Compute threshold using minimum contributing area
     r = raster(dem)
@@ -239,8 +258,16 @@ def stream_order(dem, minimum_contributing_area, stream_order_path=None, method=
                               direction='fd', hack="order")
         graster.out_gdal('order', format="GTiff", output=orderpath)
 
+    if garbage:
+        try:
+            os.remove(dem)
+        except:
+            pass
+
     # Return raster instances
-    return raster(orderpath)
+    order = raster(orderpath)
+    order.garbage = {'path': orderpath, 'num': 1}
+    return order
 
 
 def water_outlet(coordinates, dem=None, direction=None,  basin_path=None):
@@ -257,8 +284,9 @@ def water_outlet(coordinates, dem=None, direction=None,  basin_path=None):
         coordinates = vector(coordinates).transform(raster(dem).projection).vertices[:, [0, 1]]
 
     # Use dem if fd not specified
+    garbage = False
     if direction is not None:
-        fd = external(direction)
+        fd, garbage = external(direction)
     else:
         try:
             fd, _ = watershed(dem)
@@ -286,6 +314,12 @@ def water_outlet(coordinates, dem=None, direction=None,  basin_path=None):
             areas.append(area)
             print "Basin {} area: {}".format(i + 1, area)
             index.append(m)
+
+    if garbage:
+        try:
+            os.remove(fd)
+        except:
+            pass
 
     # Allocate output
     outrast = raster(fd).astype('uint32')
@@ -318,7 +352,7 @@ def watershed_basin(dem, basin_area, basin_path=None, flow_direction='SFD', half
     :return: Raster instance of enumerated basins
     """
     # Ensure input raster is valid and in a gdal format
-    dem = external(dem)
+    dem, garbage = external(dem)
 
     # Ensure the minimum basin area makes sense
     try:
@@ -356,7 +390,16 @@ def watershed_basin(dem, basin_area, basin_path=None, flow_direction='SFD', half
                               flags=flags)
         graster.out_gdal('b0', format="GTiff", output=basinpath)
 
-    return raster(basinpath)
+    if garbage:
+        try:
+            os.remove(dem)
+        except:
+            pass
+
+    basins = raster(basinpath)
+    basins.garbage = {'path': basinpath, 'num': 1}
+
+    return basins
 
 
 def gwflow(phead, status, hc_x, hc_y, s, top, bottom, **kwargs):
@@ -413,7 +456,7 @@ def sun(elevation, day, step=1):
     :return: None
     """
     out_sun = util.generate_name(elevation, 'sun', 'tif')
-    dem = external(elevation)
+    dem, garbage = external(elevation)
 
     with GrassSession(dem) as gs:
         from grass.pygrass.modules.shortcuts import raster as graster
@@ -424,7 +467,15 @@ def sun(elevation, day, step=1):
         grass.run_command('r.sun', aspect='aspect', slope='slope', elevation='dem', glob_rad='rad', day=day, step=step)
         graster.out_gdal('rad', format="GTiff", output=out_sun)
 
-    return raster(out_sun)
+    if garbage:
+        try:
+            os.remove(dem)
+        except:
+            pass
+
+    sun = raster(out_sun)
+    sun.garbage = {'path': out_sun, 'num': 1}
+    return sun
 
 
 def lidar(las_file, las_srs_epsg, output_raster, resolution=1, return_type='min'):
@@ -439,4 +490,6 @@ def lidar(las_file, las_srs_epsg, output_raster, resolution=1, return_type='min'
                           method=return_type, resolution=resolution, return_filter=return_filter, flags='e')
         graster.out_gdal('outrast', format="GTiff", output=output_raster)
 
-    return raster(output_raster)
+    elev = raster(output_raster)
+    elev.garbage = {'path': output_raster, 'num': 1}
+    return elev

@@ -935,9 +935,10 @@ class riparian(object):
 
         print "Clipping to region"
         a = self.cost.array
-        p = numpy.percentile(a, reclass_percentile)
+        m = a != self.cost.nodata
+        p = numpy.percentile(a[m], reclass_percentile)
         self.region = self.cost.astype('bool')
-        self.region[:] = a <= p
+        self.region[:] = m & (a <= p)
         self.region.nodataValues = [0]
 
         self.update_region = True
