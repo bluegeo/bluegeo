@@ -967,7 +967,7 @@ class riparian(object):
 
         if not hasattr(self, 'channel_slope') or self.update_region:
             print "Calculating channel slope"
-            self.channel_slope = interpolate_mask(stream_slope(self.streams), self.region, 'idw')
+            self.channel_slope = interpolate_mask(stream_slope(self.dem, self.streams), self.region, 'idw')
 
         if not hasattr(self, 'contributing_area') or self.update_region:
             print "Calculating contributing area"
