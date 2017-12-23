@@ -97,7 +97,7 @@ def convergence(size=(11, 11), fd=None):
     return watershed(conv, tempdir=self.tempdir)
 
 
-def stream_slope(streams, units='degrees'):
+def stream_slope(dem, streams, units='degrees'):
     """
     Compute the slope from cell to cell in streams with a minimum
     contributing area.  If streams are specified, they will not be
@@ -106,18 +106,21 @@ def stream_slope(streams, units='degrees'):
     :param units:
     :return:
     """
-    with self.match_raster(streams) as dem:
+    dem = raster(dem)
+    dem.interpolationMethod = 'bilinear'
+
+    with dem.match_raster(streams) as dem:
         elev = dem.array
     strms = raster(streams)
     m = strms.array != strms.nodata
 
     # Compute stream slope
     inds = numpy.where(m)
-    diag = math.sqrt(self.csx**2 + self.csy**2)
-    run = numpy.array([[diag, self.csy, diag],
-                       [self.csx, 1, self.csx],
-                       [diag, self.csy, diag]])
-    ish, jsh = self.shape
+    diag = math.sqrt(dem.csx**2 + dem.csy**2)
+    run = numpy.array([[diag, dem.csy, diag],
+                       [dem.csx, 1, dem.csx],
+                       [diag, dem.csy, diag]])
+    ish, jsh = dem.shape
 
     def compute(i, j):
         s = (slice(max([0, i - 1]),
@@ -138,7 +141,7 @@ def stream_slope(streams, units='degrees'):
             else:
                 return numpy.mean(rise / run_) * 100
 
-    output = self.empty()
+    output = dem.empty()
     a = numpy.full(output.shape, output.nodata, output.dtype)
     slopefill = [compute(inds[0][i], inds[1][i])
                  for i in range(inds[0].shape[0])]
@@ -896,6 +899,7 @@ class riparian(object):
             self.delineate_using_topo()
 
         # Calculate distance to streams
+        print "Creating distance transform"
         d = distance(self.streams)
 
         # Update to include only values on outer edges
@@ -968,8 +972,11 @@ class riparian(object):
         if not hasattr(self, 'contributing_area') or self.update_region:
             print "Calculating contributing area"
             _, fa = bluegrass.watershed(self.dem)
-            fa = raster(fa.path, mode='r+')
             a = fa.array
+            # Sometimes the no data values is nan for flow accumulation
+            a[numpy.isnan(a) | (a == fa.nodata)] = numpy.finfo('float32').min
+            fa = fa.empty()
+            fa.nodataValues = [numpy.finfo('float32').min]
             a[self.streams.array == self.streams.nodata] = fa.nodata
             fa[:] = a
             self.contributing_area = interpolate_mask(fa, self.region, 'idw')
