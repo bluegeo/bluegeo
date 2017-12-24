@@ -1837,7 +1837,7 @@ class vector(object):
             else:
                 # Try to open as wkt
                 # TODO: Implement wkt reader
-                pass
+                raise Exception('Unable to load data {}'.format(data))
 
         elif isinstance(data, ogr.DataSource):
             # Instantiate as ogr instance

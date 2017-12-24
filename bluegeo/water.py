@@ -993,7 +993,6 @@ class riparian(object):
         modals = region.astype('uint8')  # Start with 1 to represent cost
 
         # Normalize and invert stream slope
-        sensitivity = numpy.zeros(shape=self.dem.shape, dtype='float32')
         a = (self.channel_slope / 90).array
         m = (a != self.channel_slope.nodata) & region
         a = a[m]
@@ -1071,8 +1070,17 @@ class riparian(object):
 
         return root, litter, shade, coarse
 
-    def save(self, path):
-        pass
+    def save(self, dir_path):
+        if os.path.isdir(dir_path):
+            raise Exception("The directory {} already exists".format(dir_path))
+        os.mkdir(dir_path)
+        for key, attr in self.__dict__.iteritems():
+            if isinstance(attr, raster):
+                attr.save(os.path.join(dir_path), '{}.h5'.format(key))
+
+    def load(self, dir_path):
+        files = [os.path.join(dir_path, f) for f in os.listdir(dir_path)]
+        self.__dict__.update({os.path.basename(f).split('.')[0]: raster(f) for f in files})
 
     def __repr__(self):
         return "Riparian delineation and sensitivity instance with:\n" + '\n'.join(self.__dict__.keys())
