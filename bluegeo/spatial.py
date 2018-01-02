@@ -19,6 +19,11 @@ try:
     NUMEXPR = True
 except ImportError:
     NUMEXPR = False
+try:
+    from shapely import wkb as shpwkb
+    from shapely import geometry, ops
+except ImportError:
+    print "Warning: Shapely is not installed and some operations will not be possible."
 
 from util import parse_projection, generate_name, coords_to_indices, indices_to_coords, transform_points
 
@@ -1241,6 +1246,79 @@ class raster(object):
         outraster = raster(output_path, mode='r+')
         return outraster
 
+    def polygonize(self):
+        """
+        Factory for raster.vectorize to wrap the gdal.Polygonize method
+        :return: vector instance
+        """
+        # Create a .tif if necessary
+        raster_path, garbage = force_gdal(self)
+        input_raster = raster(raster_path)
+
+        # Allocate an output vector
+        vector_path = generate_name(self.path, 'polygonize', 'shp')
+        outvect = vector(vector_path, mode='w', geotype='Polygon', projection=self.projection)
+        outvect.add_fields('raster_val', self.dtype)
+
+        with input_raster.dataset as ds:
+            band = ds.GetRasterBand(self.band)
+            maskband = band.GetMaskBand()
+            with outvect.layer() as out_layer:
+                gdal.Polygonize(band, maskband, out_layer, 0, ['8CONNECTED=8'])
+
+        # Clean up
+        ds = None
+        band = None
+
+        if garbage:
+            try:
+                os.remove(raster_path)
+            except:
+                pass
+
+        outvect.__dict__.update(vector(vector_path).__dict__)
+        return outvect
+
+    def vectorize(self, geotype='Polygon'):
+        """
+        Create a polygon, line, or point vector from the raster
+        :param geotype: The geometry type of the output vector.  Choose from 'Polygon', 'LineString', and 'Point'
+        :return: vector instance
+        """
+        if geotype == 'Polygon':
+            # Apply gdal.Polygonize method
+            return self.polygonize()
+
+        elif geotype == 'LineString':
+            raise NotImplementedError('This is still in development')
+
+        elif geotype == 'Point':
+            # Grab the coordinates and make a vector using shapely wkb string dumps
+            a = self.array
+            m = a != self.nodata
+            y, x = indices_to_coords(numpy.where(m), self.top, self.left, self.csx, self.csy)
+
+            return vector([shpwkb.dumps(pnt) for pnt in geometry.MultiPoint(zip(x, y)).geoms],
+                          fields=numpy.array(a[m], dtype=[('raster_val', self.dtype)]),
+                          projection=self.projection)
+
+    def extent_to_vector(self, as_mask=False):
+        """
+        Write the current raster extent to a shapfile
+        :param as_mask: Return a vector of values with data in the raster.  Otherwise the image bounds are used.
+        :return: vector instance
+        """
+        if as_mask:
+            # Polygonize mask
+            raise NotImplemented("Sorry, not available yet")
+        else:
+            # Create a wkb from the boundary of the raster
+            geo = geometry.Polygon(extent(self).corners)
+            _wkb = shpwkb.dumps(geo)
+
+            # Create an output shapefile from geometry
+            return vector([_wkb], projection=self.projection)
+
     @staticmethod
     def gdal_args_from_slice(s, shape):
         """Factory for __getitem__ and __setitem__"""
@@ -1780,10 +1858,19 @@ def rastmin(input_raster):
     if r.useChunks:
         stack = []
         for a, s in r.iterchunks():
-            stack.append(numpy.min(a[a != r.nodata]))
-        return min(stack)
+            try:
+                stack.append(numpy.min(a[a != r.nodata]))
+            except ValueError:
+                pass
+        if len(stack) > 0:
+            return min(stack)
+        else:
+            raise ValueError('Cannot collect minimum: No data in raster')
     else:
-        return numpy.min(r.array[r.array != r.nodata])
+        try:
+            return numpy.min(r.array[r.array != r.nodata])
+        except ValueError:
+            raise ValueError('Cannot collect minimum: No data in raster')
 
 def rastmax(input_raster):
     """
@@ -1795,16 +1882,25 @@ def rastmax(input_raster):
     if r.useChunks:
         stack = []
         for a, s in r.iterchunks():
-            stack.append(numpy.max(a[a != r.nodata]))
-        return max(stack)
+            try:
+                stack.append(numpy.max(a[a != r.nodata]))
+            except ValueError:
+                pass
+        if len(stack) > 0:
+            return max(stack)
+        else:
+            raise ValueError('Cannot collect maximum: No data in raster')
     else:
-        return numpy.max(r.array[r.array != r.nodata])
+        try:
+            return numpy.max(r.array[r.array != r.nodata])
+        except ValueError:
+            raise ValueError('Cannot collect maximum: No data in raster')
 
 
 
 class vector(object):
 
-    def __init__(self, data, mode='r', fields=[]):
+    def __init__(self, data=None, mode='r', fields=None, projection=None, geotype=None):
         """
         Vector interfacing class
         :param data: Input data- may be one of:
@@ -1820,7 +1916,7 @@ class vector(object):
             raise VectorError('Unsupported file mode {}'.format(mode))
         populate_from_ogr = False
         if isinstance(data, basestring):
-            if os.path.isfile(data):
+            if os.path.isfile(data) and mode != 'w':
                 # Open a vector file or a table
                 self.driver = self.get_driver_by_path(data)
                 if self.driver == 'table':
@@ -1834,10 +1930,28 @@ class vector(object):
                         raise VectorError('Unable to open the dataset {} as a vector'.format(data))
                     populate_from_ogr = True
                     self.path = data
+            elif mode == 'w':
+                # Create an empty data source using an input geometry
+                geotypes = ['Polygon', 'LineString', 'Point']
+                # Check input geometry type to make sure it works
+                if geotype not in ['Polygon', 'LineString', 'Point']:
+                    raise VectorError(
+                        'Geometry type {} not understood while creating new vector data source.  '
+                        'Use one of: {}'.format(geotype, ', '.join(geotypes))
+                    )
+
+                # Create some attributes so vector.empty can be called
+                self.geometryType = geotype
+                self.projection = parse_projection(projection)
+                if fields is not None:
+                    self.featureCount = len(fields)
+                self.fieldWidth, self.fieldPrecision = {}, {}
+
+                outVect = self.empty(spatial_reference=projection, out_path=data)
+
+                self.__dict__.update(outVect.__dict__)
             else:
-                # Try to open as wkt
-                # TODO: Implement wkt reader
-                raise Exception('Unable to load data {}'.format(data))
+                raise Exception('Check that {} is a valid file'.format(data))
 
         elif isinstance(data, ogr.DataSource):
             # Instantiate as ogr instance
@@ -1856,6 +1970,63 @@ class vector(object):
             driver = ogr.GetDriverByName(data.driver)
             _data = driver.Open(data.path)
 
+        elif any([isinstance(data, t) for t in [tuple, list, numpy.ndarray]]):
+            # Try for an iterable of wkt's or wkb's
+            geos_and_types = [self.geo_from_wellknown(d) for d in data]
+
+            # Ensure the geometry types are all the same
+            if not all([geos_and_types[0][1] == g[1] for g in geos_and_types]):
+                raise VectorError('Input well-known geometries have multiple geometry types.')
+
+            # Make sure the same number of fields were specified
+            if fields is not None and len(fields) != len(geos_and_types):
+                raise VectorError('The number of input fields and well-known geometries do not match')
+
+            # Create some attributes so vector.empty can be called
+            self.geometryType = geos_and_types[0][1]
+            self.path = generate_name(None, '', 'shp')
+            self.projection = parse_projection(projection)
+            self.featureCount = len(geos_and_types)
+            self.fieldWidth, self.fieldPrecision = {}, {}
+
+            if fields is None:
+                field_def = []
+            else:
+                self.fieldTypes = zip(fields.dtype.names, (fields.dtype[i].name for i in range(len(fields.dtype))))
+                field_def = self.fieldTypes
+            outVect = self.empty(spatial_reference=projection, fields=field_def)
+            outVect.garbage['num'] += 1  # Delay garbage by one delete
+
+            # Insert geometries into features
+            with outVect.layer() as outlyr:
+                # Output layer definition
+                outLyrDefn = outlyr.GetLayerDefn()
+                # Write fields to output
+                if len(field_def) > 0:
+                    newFields = self.check_fields(self.fieldTypes)
+                    fields = {newField[0]: self.field_to_pyobj(fields[oldField[0]], None, None)
+                              for oldField, newField in zip(self.fieldTypes, newFields)}
+                    self.fieldTypes = newFields
+
+                # Iterate geometries and populate output with transformed geo's
+                for i in range(self.featureCount):
+                    # Write geometries as features
+                    outFeat = ogr.Feature(outLyrDefn)
+                    if len(field_def) > 0:
+                        for name, dtype in newFields:
+                            outFeat.SetField(name, fields[name][i])
+                    geo = ogr.CreateGeometryFromWkb(geos_and_types[i][0])
+                    outFeat.SetGeometry(geo)
+
+                    # Add to output layer and clean up
+                    outlyr.CreateFeature(outFeat)
+                    outFeat.Destroy()
+
+            self.__dict__.update(vector(outVect.path).__dict__)
+
+        else:
+            raise VectorError('Cannot read the input data of type {}'.format(type(data).__name__))
+
         if populate_from_ogr:
             # Collect meta
             try:
@@ -1870,9 +2041,6 @@ class vector(object):
                 self.projection = str(insr.ExportToWkt())
             else:
                 self.projection = ''
-
-            # Extent
-            self.left, self.right, self.bottom, self.top = layer.GetExtent()
 
             # Geometry type
             self.geometryType = str(self.geom_wkb_to_name(layer.GetGeomType()))
@@ -1893,6 +2061,39 @@ class vector(object):
                 self.fieldWidth[name] = fieldDefn.GetWidth()
                 self.fieldPrecision[name] = fieldDefn.GetPrecision()
             self.fieldNames = [meta[0] for meta in self.fieldTypes]
+
+    @property
+    def top(self):
+        with self.layer() as inlyr:
+            return inlyr.GetExtent()[3]
+
+    @property
+    def bottom(self):
+        with self.layer() as inlyr:
+            return inlyr.GetExtent()[2]
+
+    @property
+    def left(self):
+        with self.layer() as inlyr:
+            return inlyr.GetExtent()[0]
+
+    @property
+    def right(self):
+        with self.layer() as inlyr:
+            return inlyr.GetExtent()[1]
+
+    def geo_from_wellknown(self, wk_):
+        """Try and load strings as either a wkb or wkt"""
+        try:
+            geo = ogr.CreateGeometryFromWkb(wk_)
+            if geo is None:
+                geo = ogr.CreateGeometryFromWkt(wk_)
+                if geo is None:
+                    assert False
+        except:
+            raise VectorError('Unable to load the geometry {}'.format(wk_))
+        type = self.geom_wkb_to_name(geo.GetGeometryType())
+        return geo.ExportToWkb(), type
 
     @contextmanager
     def layer(self, i=0):
@@ -2000,13 +2201,19 @@ class vector(object):
             # TODO: this
             raise VectorError('Not implemented yet')
 
-    def empty(self, spatial_reference=None, fields=[], prestr='copy'):
+    def empty(self, spatial_reference=None, fields=[], prestr='copy', out_path=None):
         """
         Create a copy of self as an output shp without features
         :return: Fresh vector instance
         """
-        # Create an output file path
-        outPath = generate_name(self.path, prestr, 'shp')
+        add_to_garbage = False
+        if out_path is None:
+            # Create an output file path
+            add_to_garbage = True
+            out_path = generate_name(self.path, prestr, 'shp')
+        elif out_path.split('.')[-1].lower() != 'shp':
+            out_path += '.shp'
+
         # Check that fields are less than 10 chars
         fields = self.check_fields(fields)
 
@@ -2018,8 +2225,8 @@ class vector(object):
             outsr.ImportFromWkt(self.projection)
 
         # Generate file and layer
-        driver = ogr.GetDriverByName(self.get_driver_by_path(outPath))
-        ds = driver.CreateDataSource(outPath)
+        driver = ogr.GetDriverByName(self.get_driver_by_path(out_path))
+        ds = driver.CreateDataSource(out_path)
         layer = ds.CreateLayer('bluegeo vector', outsr, self.geometry_type)
 
         # Add fields
@@ -2038,8 +2245,9 @@ class vector(object):
         del layer
         ds.Destroy()
 
-        return_vect = vector(outPath, mode='r+')
-        return_vect.garbage = {'path': outPath, 'num': 1}
+        return_vect = vector(out_path, mode='r+')
+        if add_to_garbage:
+            return_vect.garbage = {'path': out_path, 'num': 1}
         return return_vect
 
     def add_fields(self, name, dtype, data=None):
@@ -2053,36 +2261,44 @@ class vector(object):
         if isinstance(name, basestring):
             name, dtype = [name], [dtype]  # Need to be iterable (and not strings)
 
-        if data is not None:
-            # Broadcast data to the necessary shape
-            shape = 1 if isinstance(name, basestring) else len(name)
-            shape = (shape, self.featureCount)
-            try:
-                data = numpy.broadcast_to(data, shape)
-            except:
-                raise VectorError("Unable to fit the data to the number of fields/features")
-            data = [self.field_to_pyobj(a, 19, 11) for a in data]
-
-        # Input null or input data for new fields
-        else:
-            data = self.field_to_pyobj(numpy.array([[self.guess_nodata(_dtype) for _ in range(self.featureCount)]
-                                                    for _, _dtype in zip(name, dtype)]).astype(dtype), 19, 11)
-
         if self.mode in ['r+', 'w']:
             # Iterate features and insert data
             with self.layer() as inlyr:
+                outLyrDefn = inlyr.GetLayerDefn()
                 for _name, _dtype in zip(name, dtype):
                     # Modify the current vector with the field
                     fieldDefn = ogr.FieldDefn(_name, self.numpy_dtype_to_ogr(_dtype))
                     # Create field
                     inlyr.CreateField(fieldDefn)
-                # Iterate features
-                for _name, _data in zip(name, data):
-                    for i in range(self.featureCount):
-                        inFeat = inlyr.GetFeature(i)
-                        # Write output field
-                        inFeat.SetField(_name, _data[i])
-                        inlyr.SetFeature(inFeat)
+                    self.fieldTypes.append((_name, _dtype))
+                    self.fieldPrecision[_name] = fieldDefn.GetPrecision()
+                    self.fieldWidth[_name] = fieldDefn.GetWidth()
+                    self.fieldCount += 1
+                if data is not None:
+                    # Broadcast data to the necessary shape
+                    shape = 1 if isinstance(name, basestring) else len(name)
+                    shape = (shape, self.featureCount)
+                    try:
+                        data = numpy.broadcast_to(data, shape)
+                    except:
+                        raise VectorError("Unable to fit the data to the number of fields/features")
+                    data = [self.field_to_pyobj(a, 19, 11) for a in data]
+                    # Iterate features
+                    for _name, _data in zip(name, data):
+                        for i in range(self.featureCount):
+                            inFeat = inlyr.GetFeature(i)
+                            if inFeat is None:
+                                inFeat = ogr.Feature(outLyrDefn)
+                                # Write output field
+                                inFeat.SetField(_name, _data[i])
+                                inlyr.SetFeature(inFeat)
+                                # Add to output layer and clean up
+                                inlyr.CreateFeature(inFeat)
+                                inFeat.Destroy()
+                            else:
+                                # Write output field
+                                inFeat.SetField(_name, _data[i])
+                                inlyr.SetFeature(inFeat)
 
         else:
             # Create a new data source
@@ -2106,13 +2322,15 @@ class vector(object):
                     # Iterate features
                     for i in range(self.featureCount):
                         inFeat = inlyr.GetFeature(i)
-                        geo = inFeat.GetGeometryRef()
+                        if inFeat is not None:
+                            geo = inFeat.GetGeometryRef()
 
                         # Write output fields and geometries
                         outFeat = ogr.Feature(outLyrDefn)
                         for _name, _dtype in new_fieldtypes:
                             outFeat.SetField(_name, fields[_name][i])
-                        outFeat.SetGeometry(geo)
+                        if inFeat is not None:
+                            outFeat.SetGeometry(geo)
 
                         # Add to output layer and clean up
                         outlyr.CreateFeature(outFeat)
@@ -2271,8 +2489,19 @@ class vector(object):
 
         # Check the type of input
         if isinstance(item, basestring):
+            # If the instance has no features, make them
+            if self.featureCount == 0:
+                if hasattr(val, '__iter__'):
+                    self.featureCount = len(val)
+                else:
+                    self.featureCount = 1
+
             # Need to overwrite field data or create a new field
-            write_data = numpy.broadcast_to(val, self.featureCount).copy()
+            try:
+                write_data = numpy.broadcast_to(val, self.featureCount).copy()
+            except ValueError:
+                raise VectorError('Input array cannot be broadcast '
+                                  'into the number of features ({})'.format(self.featureCount))
             try:
                 dtype = [dt for name, dt in self.fieldTypes if name == item][0]
             except IndexError:
@@ -2292,14 +2521,31 @@ class vector(object):
             return
         elif isinstance(item, slice):
             start, stop = slice.start, slice.stop
+            # Make sure start and stop are not slice member descriptors
+            if not isinstance(start, int):
+                start = 0
+            if not isinstance(stop, int):
+                stop = self.featureCount
         elif isinstance(item, int):
             start, stop = item, item + 1
 
         # Make input iterable
         val = val if hasattr(val, '__iter__') else [val]
 
+        # Create new features if the count is 0
+        if self.featureCount == 0:
+            with self.layer() as inlyr:
+                LyrDefn = inlyr.GetLayerDefn()
+                for i in range(stop):
+                    Feat = ogr.Feature(LyrDefn)
+
+                    # Add to output layer and clean up
+                    inlyr.CreateFeature(Feat)
+                    Feat.Destroy()
+            self.featureCount = stop
+
         # Check for bounds
-        if start > self.featureCount or (stop - 1) > self.featureCount:
+        if start > self.featureCount or stop > self.featureCount:
             raise VectorError('Input feature slice outside of current feature bounds')
         # Check for wkbs
         if not isinstance(val[0], basestring):
@@ -2413,9 +2659,9 @@ class vector(object):
         }
 
         dtype = a.dtype.name
-        if dtype[0].lower() == 's':
+        if dtype[0].lower() == 's' or width is None or prec is None:
             dtype = 's'
-            fmt = ''
+            fmt = '{}'
         elif 'float' in dtype.lower():
             fmt = '{' + ':{}.{}f'.format(width, prec) + '}'
         else:
@@ -2711,6 +2957,18 @@ class vector(object):
                             os.remove(p)
                         except:
                             pass
+
+
+def force_gdal(input_raster):
+    r = raster(input_raster)
+    if r.format == 'HDF5':
+        path = generate_name(r.path, 'copy', 'tif')
+        r.save(path)
+        tmp = True
+    else:
+        path = r.path
+        tmp = False
+    return path, tmp
 
 
 def assert_type(data):

@@ -100,18 +100,6 @@ class GrassSession(object):
         self.cleanup()
 
 
-def external(input_raster):
-    r = raster(input_raster)
-    if r.format == 'HDF5':
-        path = util.generate_name(r.path, 'copy', 'tif')
-        r.save(path)
-        tmp = True
-    else:
-        path = r.path
-        tmp = False
-    return path, tmp
-
-
 # r. functions
 def watershed(dem, flow_direction='SFD', accumulation_path=None, direction_path=None, positive_fd=True):
     """
@@ -124,7 +112,7 @@ def watershed(dem, flow_direction='SFD', accumulation_path=None, direction_path=
     :return: Raster instances of flow direction, and flow accumulation, respectively
     """
     # Ensure input raster is valid and in a gdal format
-    dem, garbage = external(dem)
+    dem, garbage = force_gdal(dem)
 
     # Write flags using args
     flags = ''
@@ -153,7 +141,7 @@ def watershed(dem, flow_direction='SFD', accumulation_path=None, direction_path=
     with GrassSession(dem):
         from grass.pygrass.modules.shortcuts import raster as graster
         from grass.script import core as grass
-        graster.external(input=dem, output='surface')
+        graster.force_gdal(input=dem, output='surface')
         grass.run_command('r.watershed', elevation='surface', drainage='fd', accumulation='fa', flags=flags)
         graster.out_gdal('fd', format="GTiff", output=dirpath)
         graster.out_gdal('fa', format="GTiff", output=accupath)
@@ -179,7 +167,7 @@ def stream_extract(dem, minimum_contributing_area):
     :return:
     """
     # Ensure input raster is valid and in a gdal format
-    dem, garbage = external(dem)
+    dem, garbage = force_gdal(dem)
 
     # Compute threshold using minimum contributing area
     r = raster(dem)
@@ -219,7 +207,7 @@ def stream_order(dem, minimum_contributing_area, stream_order_path=None, method=
     :return: Raster instance with output stream order values
     """
     # Ensure input raster is valid and in a gdal format
-    dem, garbage = external(dem)
+    dem, garbage = force_gdal(dem)
 
     # Compute threshold using minimum contributing area
     r = raster(dem)
@@ -286,7 +274,7 @@ def water_outlet(coordinates, dem=None, direction=None,  basin_path=None):
     # Use dem if fd not specified
     garbage = False
     if direction is not None:
-        fd, garbage = external(direction)
+        fd, garbage = force_gdal(direction)
     else:
         try:
             fd, _ = watershed(dem)
@@ -352,7 +340,7 @@ def watershed_basin(dem, basin_area, basin_path=None, flow_direction='SFD', half
     :return: Raster instance of enumerated basins
     """
     # Ensure input raster is valid and in a gdal format
-    dem, garbage = external(dem)
+    dem, garbage = force_gdal(dem)
 
     # Ensure the minimum basin area makes sense
     try:
@@ -412,9 +400,9 @@ def gwflow(phead, status, hc_x, hc_y, s, top, bottom, **kwargs):
 
     # Ensure all input rasters match
     phead = raster(phead)
-    status, hc_x, hc_y, s, top, bottom = [external(rast.match_raster(phead)) for rast in
+    status, hc_x, hc_y, s, top, bottom = [force_gdal(rast.match_raster(phead)) for rast in
                                           map(raster, [status, hc_x, hc_y, s, top, bottom])]
-    phead = external(phead)
+    phead = force_gdal(phead)
 
     # Parse output paths
     if output_head is None:
@@ -456,7 +444,7 @@ def sun(elevation, day, step=1):
     :return: None
     """
     out_sun = util.generate_name(elevation, 'sun', 'tif')
-    dem, garbage = external(elevation)
+    dem, garbage = force_gdal(elevation)
 
     with GrassSession(dem) as gs:
         from grass.pygrass.modules.shortcuts import raster as graster

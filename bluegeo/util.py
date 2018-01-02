@@ -3,7 +3,7 @@
 import math
 import numpy
 import os
-from tempfile import _get_candidate_names
+from tempfile import _get_candidate_names, gettempdir
 from scipy import ndimage
 from osgeo import osr
 
@@ -14,8 +14,13 @@ class BlueUtilError(Exception):
 
 def generate_name(parent_path, suffix, extension):
     """Generate a unique file name"""
-    path_str = os.path.basename(parent_path)
-    path_dir = os.path.dirname(parent_path)
+    if parent_path is None:
+        path_dir = gettempdir()
+        path_str = next(_get_candidate_names())
+    else:
+        path_dir = os.path.dirname(parent_path)
+        path_str = os.path.basename(parent_path)
+
 
     path = ('%s_%s_%s.%s' %
             (''.join(path_str.split('.')[:-1])[:20], suffix,
