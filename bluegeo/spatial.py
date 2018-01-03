@@ -8,6 +8,7 @@ from contextlib import contextmanager
 import numpy
 from osgeo import gdal, ogr, osr, gdalconst
 import h5py
+from skimage.measure import label, regionprops
 try:
     import Image
     import ImageDraw
@@ -1279,10 +1280,12 @@ class raster(object):
         outvect.__dict__.update(vector(vector_path).__dict__)
         return outvect
 
-    def vectorize(self, geotype='Polygon'):
+    def vectorize(self, geotype='Polygon', **kwargs):
         """
         Create a polygon, line, or point vector from the raster
         :param geotype: The geometry type of the output vector.  Choose from 'Polygon', 'LineString', and 'Point'
+        :param kwargs:
+            centroid=False Use the centroid of the raster regions when creating points
         :return: vector instance
         """
         if geotype == 'Polygon':
@@ -1293,8 +1296,21 @@ class raster(object):
             raise NotImplementedError('This is still in development')
 
         elif geotype == 'Point':
-            # Grab the coordinates and make a vector using shapely wkb string dumps
             a = self.array
+
+            # If centroid is specified, label the raster and grab the respective points
+            if kwargs.get('centroid', False):
+                labels, number = label(a, return_num=True, background=self.nodata)
+                properties = regionprops(labels)
+                values = [a[tuple(properties[i].coords[0])] for i in range(number)]
+                coords = numpy.array([properties[i].centroid for i in range(number)])
+                coords[:, 0] = (self.top - (self.csy / 2)) - (coords[:, 0] * self.csy)
+                coords[:, 1] = (self.left + (self.csx / 2)) + (coords[:, 1] * self.csx)
+                return vector([shpwkb.dumps(pnt) for pnt in geometry.MultiPoint(numpy.fliplr(coords))],
+                              fields=numpy.array(values, dtype=[('raster_val', self.dtype)]),
+                              projection=self.projection)
+
+            # Grab the coordinates and make a vector using shapely wkb string dumps
             m = a != self.nodata
             y, x = indices_to_coords(numpy.where(m), self.top, self.left, self.csx, self.csy)
 
@@ -1304,13 +1320,13 @@ class raster(object):
 
     def extent_to_vector(self, as_mask=False):
         """
-        Write the current raster extent to a shapfile
+        Write the current raster extent to a shapefile
         :param as_mask: Return a vector of values with data in the raster.  Otherwise the image bounds are used.
         :return: vector instance
         """
         if as_mask:
             # Polygonize mask
-            raise NotImplemented("Sorry, not available yet")
+            return self.mask().vectorize('Polygon')
         else:
             # Create a wkb from the boundary of the raster
             geo = geometry.Polygon(extent(self).corners)
@@ -1318,6 +1334,17 @@ class raster(object):
 
             # Create an output shapefile from geometry
             return vector([_wkb], projection=self.projection)
+
+    def mask(self):
+        """Return a raster instance of the data mask (boolean)"""
+        ret_rast = self.astype('bool')
+        if self.useChunks:
+            # Get over chunks
+            for a, s in self.iterchunks():
+                ret_rast[s] = a != self.nodata
+        else:
+            ret_rast[:] = self.array != self.nodata
+        return ret_rast
 
     @staticmethod
     def gdal_args_from_slice(s, shape):

@@ -20,15 +20,21 @@ def is_installed(name):
         return False
 
 
-requires = ['numpy', 'scipy', 'scikit-image', 'h5py', 'numexpr']
+requires = ['numpy', 'scipy', 'scikit-image', 'h5py', 'numexpr', 'shapely']
 
 setup(name='bluegeo',
       version=version,
-      description='Bluegeo python library for data manipulation',
+      description='bluegeo is a geospatial analysis library that strives for canonical pythonic '
+                  '(particularly numpy-like) syntax',
       url='https://bitbucket.org/bluegeo/bluegeo.git',
-      author='Bluegeo',
+      author='Blue Geosimulation',
       install_requires=requires,
       author_email='info@bluegeo.ca',
       license='',
       packages=['bluegeo'],
       zip_safe=False)
+
+print "Installation Complete.  Additional dependencies are required to use certain functionality.  These include:\n" \
+      "numba: https://numba.pydata.org/\n" \
+      "GDAL (including python-gdal): http://www.gdal.org/\n" \
+      "GRASS (including grass-dev): https://grass.osgeo.org/\n"
