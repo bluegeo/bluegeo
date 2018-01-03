@@ -6,6 +6,18 @@ import util
 from spatial import *
 
 
+GRASSBIN = 'grass'
+
+
+# Assert GRASS is available
+p = subprocess.Popen(GRASSBIN, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+out, err = p.communicate()
+if p.returncode != 0:
+    raise ImportError('Cannot find the path to the system grass executable. Bluegrass is currently trying to use {}\n'
+                      'Update the grass executable path by changing the global constant '
+                      'bluegrass.GRASSBIN'.format(GRASSBIN))
+
+
 # Global temporary directory
 TEMP_DIR = None
 
@@ -15,8 +27,7 @@ class BlueGrassError(Exception):
 
 
 class GrassSession(object):
-    def __init__(self, src=None, grassbin='grass',
-                 persist=False):
+    def __init__(self, src=None, persist=False):
 
         # If temp is specified, use a different temporary directory
         if TEMP_DIR is not None:
@@ -33,10 +44,9 @@ class GrassSession(object):
             # Assume georeferenced vector or raster
             self.location_seed = src
 
-        self.grassbin = grassbin
-        # TODO assert grassbin is executable and supports what we need
+        self.grassbin = GRASSBIN
 
-        startcmd = "{} --config path".format(grassbin)
+        startcmd = "{} --config path".format(GRASSBIN)
 
         # Adapted from
         # http://grasswiki.osgeo.org/wiki/Working_with_GRASS_without_starting_it_explicitly#Python:_GRASS_GIS_7_without_existing_location_using_metadata_only
