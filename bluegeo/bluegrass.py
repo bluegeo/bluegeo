@@ -9,15 +9,6 @@ from spatial import *
 GRASSBIN = 'grass'
 
 
-# Assert GRASS is available
-p = subprocess.Popen(GRASSBIN, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-out, err = p.communicate()
-if p.returncode != 0:
-    raise ImportError('Cannot find the path to the system grass executable. Bluegrass is currently trying to use {}\n'
-                      'Update the grass executable path by changing the global constant '
-                      'bluegrass.GRASSBIN'.format(GRASSBIN))
-
-
 # Global temporary directory
 TEMP_DIR = None
 

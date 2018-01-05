@@ -950,7 +950,7 @@ class riparian(object):
     def delineate_using_sensitivity(self):
         pass
 
-    def create_sensitivity_zones(self, breaks='jenks', percentiles=(33.3, 66.7)):
+    def create_sensitivity_zones(self, breaks='percentile', percentiles=(33.3, 66.7)):
         if not hasattr(self, 'sensitivity'):
             self.update_sensitivity()
 
