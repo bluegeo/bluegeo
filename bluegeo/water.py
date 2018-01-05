@@ -11,7 +11,7 @@ from skimage.measure import label as sklabel
 from scipy.ndimage import binary_erosion
 
 
-class WatershedError(Exception):
+class WaterError(Exception):
     pass
 
 
@@ -272,7 +272,7 @@ def sinuosity(dem, stream_order, sample_distance=100):
     distance = sample_distance
     radius = distance / 2.
     if distance <= 0:
-        raise Exception('Sinuosity sampling distance must be greater than 0')
+        raise WaterError('Sinuosity sampling distance must be greater than 0')
 
     # Remove connecting regions to avoid over-counting
     m = min_filter(stream_order).array != max_filter(stream_order).array
@@ -950,10 +950,38 @@ class riparian(object):
     def delineate_using_sensitivity(self):
         pass
 
-    def create_sensitivity_zones(self, p1, p2, p3):
-        pass
+    def create_sensitivity_zones(self, breaks='jenks', percentiles=(33.3, 66.7)):
+        if not hasattr(self, 'sensitivity'):
+            self.update_sensitivity()
 
-    def update_sensitivity(self):
+        a = self.sensitivity.array
+        m = a != self.sensitivity.nodata
+
+        # Collect breakpoints
+        if breaks.lower() == 'percentile':
+            p1 = numpy.percentile(a[m], percentiles[0])
+            p2 = numpy.percentile(a[m], percentiles[1])
+
+        elif breaks.lower() == 'jenks':
+            import jenkspy
+            breaks = jenkspy.jenks_breaks(a[m], nb_class=3)
+            p1, p2 = breaks[1], breaks[2]
+
+        elif breaks.lower() == 'equal':
+            breaks = numpy.linspace(a[m].min(), a[m].max(), 4)
+            p1, p2 = breaks[1], breaks[2]
+
+        zones = numpy.full(a.shape, 0, 'uint8')
+
+        zones[m & (a <= p1)] = 1
+        zones[m & (a > p1) & (a <= p2)] = 2
+        zones[m & (a > p2)] = 3
+
+        self.sensitivity_zones = self.sensitivity.astype('uint8')
+        self.sensitivity_zones.nodataValues = [0]
+        self.sensitivity_zones[:] = zones
+
+    def update_sensitivity(self, cost_weight=2):
         """
         Update the sensitivity surface within the buffer
         :return:
@@ -985,36 +1013,45 @@ class riparian(object):
         # i.e. cumulative_effectiveness(canopy, landcover)
 
         print "Aggregating sensitivity parameters"
-        # Create sensitivity from region and cost
-        sensitivity = inverse(self.cost).array
         region = self.region.array
+
+        # Create sensitivity from region and cost
+        cost = self.cost.empty()
+        sensitivity = self.cost.array
+        sensitivity[~region] = cost.nodata
+        cost[:] = sensitivity
+
+        sensitivity = inverse(normalize(cost)).array * cost_weight
         sensitivity[~region] = -9999
 
-        modals = region.astype('uint8')  # Start with 1 to represent cost
+        modals = region.astype('uint8') * cost_weight
 
         # Normalize and invert stream slope
-        a = (self.channel_slope / 90).array
-        m = (a != self.channel_slope.nodata) & region
-        a = a[m]
-        a[a > 1] = 1
-        sensitivity[m] += 1 - a
+        # a = (self.channel_slope / 90).array
+        ch_sl = normalize(inverse(self.channel_slope))
+        a = ch_sl.array
+        m = (a != ch_sl.nodata) & region
+        sensitivity[m] += a[m]
         modals += m
 
         # Use sinuosity directly
-        a = self.sinuosity.array
-        m = (a != self.sinuosity.nodata) & region
-        sensitivity[m] += self.sinuosity.array[m]
+        sinu = normalize(self.sinuosity)
+        a = sinu.array
+        m = (a != sinu.nodata) & region
+        sensitivity[m] += a[m]
         modals += m
 
         # Normalize contributing area using y = 5.7E-05x, where y is the width and x is the contributing area
         if not hasattr(self, 'width'):
             self.calculate_width()
-        width_ratio = (self.contributing_area * 5.7E-05) / self.width
+        width_ratio = normalize((self.contributing_area * 5.7E-05) / self.width)
         a = width_ratio.array
         m = (a != width_ratio.nodata) & region
         a = a[m]
         a[a > 1] = 1
+        print "Min width ratio: {}\nMax width ratio: {}\nMean width ratio: {}".format(a.min(), a.max(), a.mean())
         sensitivity[m] += a
+        modals += m
 
         # Divide by modals and fill in nodata values
         m = modals != 0
@@ -1084,3 +1121,61 @@ class riparian(object):
 
     def __repr__(self):
         return "Riparian delineation and sensitivity instance with:\n" + '\n'.join(self.__dict__.keys())
+
+
+def segment_water(dem, slope_threshold=0.1, delta_filter=0.1, filter=True):
+    """
+    Segment lakes from a dem using slope
+    :param dem:
+    :param filter:
+    :return:
+    """
+    slope = topo(dem).slope()
+
+
+
+    labels = slope.array < slope_threshold
+
+
+def valley_confinement(dem, max_width, min_basin_area, streams=None, waterbodies=None):
+    """
+    Valley Confinement algorithm based on https://www.fs.fed.us/rm/pubs/rmrs_gtr321.pdf
+    :param dem:
+    :param max_width:
+    :param min_basin_area:
+    :return:
+    """
+    # Create a raster instance from the DEM
+    dem = raster(dem)
+
+    # Calculate slope
+    slope = topo(dem).slope()
+
+    # Calculate flow accumulation
+    fa = bluegrass.watershed(dem)[1]
+
+    # Calculate streams if they are not provided
+    if streams is not None:
+        streams = assert_type(streams)(streams)
+        if isinstance(streams, vector):
+            streams = streams.rasterize(dem)
+        elif isinstance(streams, raster):
+            streams = streams.match_raster(dem)
+    else:
+        streams = bluegrass.stream_extract(dem, min_basin_area)
+
+    # Segment water bodies from the DEM if they are not specified in the input
+    if waterbodies is not None:
+        streams = assert_type(waterbodies)(waterbodies)
+        if isinstance(waterbodies, vector):
+            waterbodies = waterbodies.rasterize(dem)
+        elif isinstance(waterbodies, raster):
+            waterbodies = waterbodies.match_raster(dem)
+    else:
+        waterbodies = segment_water(dem)
+
+
+    # Calculate width
+    width = distance(streams)
+
+    #

@@ -1633,30 +1633,37 @@ class raster(object):
         return self.perform_operation(r, '%')
 
     def __eq__(self, r):
-        if not isinstance(r, raster):
-            raise RasterError('Expected a raster instance while using the "=="'
-                              ' operator')
-        # Compare spatial reference
-        insrs = osr.SpatialReference()
-        insrs.ImportFromWkt(self.projection)
-        outsrs = osr.SpatialReference()
-        outsrs.ImportFromWkt(r.projection)
-        samesrs = insrs.IsSame(outsrs)
+        is_array = False
+        if any([isinstance(r, t) for t in [numpy.ndarray, int, float]]):
+            is_array = True
+        else:
+            r = assert_type(r)(r)
+            if isinstance(r, vector):
+                r = r.rasterize(self)
+            elif isinstance(r, raster):
+                r = r.match_raster(self)
 
-        # Compare spatial dimensions and data
-        if all([self.csx == r.csx, self.csy == r.csy,
-               self.top == r.top, self.bottom == r.bottom,
-               self.left == r.left, self.right == r.right,
-               self.dtype == r.dtype, self.bandCount == r.bandCount, samesrs]):
-            # Compare data
+        # Create a mask raster where rasters match
+        mask = self.astype('bool').full(0)
+        mask.nodataValues = [0 for i in range(self.bandCount)]
+
+        if self.useChunks:
             for band in self.bands:
+                mask.activeBand = band
                 r.activeBand = band
                 for a, s in self.iterchunks():
-                    if not numpy.all(a == r[s]):
-                        return False
-            return True
+                    self_data, comp_data = self[s], r[s]
+                    m = (self_data != self.nodata) & (comp_data != r.nodata) * (comp_data == self_data)
+                    mask[s] = m
         else:
-            return False
+            for band in self.bands:
+                mask.activeBand = band
+                r.activeBand = band
+                self_data, comp_data = self.array, r.array
+                m = (self_data != self.nodata) & (comp_data != r.nodata) * (comp_data == self_data)
+                mask[:] = m
+
+        return mask
 
     def __ne__(self, r):
         if not isinstance(r, raster):
