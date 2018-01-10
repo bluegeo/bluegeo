@@ -45,7 +45,10 @@ class GrassSession(object):
             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         out, err = p.communicate()
         if p.returncode != 0:
-            raise Exception("ERROR: Cannot find GRASS GIS 7 start script ({})".format(startcmd))
+            raise BlueGrassError("It appears that GRASS is not installed, or bluegrass cannot execute"
+                                 " the start script ({})\nCheck the system path to the GRASS installation,"
+                                 " or install grass and grass-dev.  Note, bluegrass is not supported on "
+                                 "Windows".format(startcmd))
         self.gisbase = out.strip('\n')
 
         self.gisdb = os.path.join(self.tempdir, 'mowerdb')
@@ -142,7 +145,7 @@ def watershed(dem, flow_direction='SFD', accumulation_path=None, direction_path=
     with GrassSession(dem):
         from grass.pygrass.modules.shortcuts import raster as graster
         from grass.script import core as grass
-        graster.force_gdal(input=dem, output='surface')
+        graster.external(input=dem, output='surface')
         grass.run_command('r.watershed', elevation='surface', drainage='fd', accumulation='fa', flags=flags)
         graster.out_gdal('fd', format="GTiff", output=dirpath)
         graster.out_gdal('fa', format="GTiff", output=accupath)
