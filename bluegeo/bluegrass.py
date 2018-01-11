@@ -33,6 +33,7 @@ class GrassSession(object):
             self.location_seed = "EPSG:{}".format(src)
         else:
             # Assume georeferenced vector or raster
+            self.spatial_data = assert_type(src)(src)
             self.location_seed = src
 
         self.grassbin = GRASSBIN
@@ -95,9 +96,24 @@ class GrassSession(object):
         if 'GISRC' in os.environ:
             del os.environ['GISRC']
 
+    def set_region(self):
+        if hasattr(self, 'spatial_data'):
+            from grass.script import core as grass
+            if isinstance(self.spatial_data, raster):
+                grass.run_command('g.region', n=self.spatial_data.top, s=self.spatial_data.bottom,
+                                  e=self.spatial_data.right, w=self.spatial_data.left,
+                                  rows=self.spatial_data.shape[0], cols=self.spatial_data.shape[1])
+            else:
+                grass.run_command('g.region', n=self.spatial_data.top, s=self.spatial_data.bottom,
+                                  e=self.spatial_data.right, w=self.spatial_data.left)
+
     def __enter__(self):
         self.create_location()
         self.gsetup()
+
+        # If a spatial dataset is the input source, run g.region to make sure the region is correct
+        self.set_region()
+
         return self
 
     def __exit__(self, type, value, traceback):
