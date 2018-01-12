@@ -40,7 +40,7 @@ def label(data, return_map=False, raster_template=None):
     if array_only:
         outrast = a
     else:
-        outrast = rast.astype(a.dtype.name)
+        outrast = rast.astype('uint32')
         outrast.nodataValues = [0]
         outrast[:] = a
 

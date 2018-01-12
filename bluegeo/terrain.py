@@ -513,19 +513,6 @@ def correct_surface(surface, points, field):
     return out
 
 
-def raster_label(a):
-    """
-    Label an array and return the index
-    :param a: ndarray
-    :return: index of ravelled labels
-    """
-    labels, _ = ndimage.measurements.label(a, numpy.ones(shape=(3, 3), dtype='bool'))
-    labels = labels.ravel()
-    indices = numpy.argsort(labels)
-    bins = numpy.bincount(labels)
-    return dict(zip(numpy.unique(labels), numpy.split(indices, numpy.cumsum(bins[bins > 0][:-1]))))
-
-
 def bare_earth(surface, max_area=65., slope_threshold=50.):
     """
     Create a bare-earth representation of a surface model by removing objects

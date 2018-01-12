@@ -7,8 +7,7 @@ from terrain import *
 from filters import *
 from measurement import *
 import bluegrass
-from skimage.measure import label as sklabel
-from scipy.ndimage import binary_erosion
+from scipy.ndimage import binary_dilation
 
 
 class WaterError(Exception):
@@ -1123,36 +1122,145 @@ class riparian(object):
         return "Riparian delineation and sensitivity instance with:\n" + '\n'.join(self.__dict__.keys())
 
 
-def segment_water(dem, slope_threshold=0.1, delta_filter=0.1, filter=True):
+def segment_water(dem, slope_threshold=0.5, variance_threshold=1E-04, slope=None):
     """
     Segment lakes from a dem using slope
     :param dem:
     :param filter:
     :return:
     """
-    slope = topo(dem).slope()
+    if slope is None:
+        slope = topo(dem).slope()
+    else:
+        slope = raster(slope)
+
+    labels = label(slope < slope_threshold, True)[1]
+
+    # Create an output dataset
+    dem = raster(dem)
+    water = dem.astype('bool').full(0)
+    water.nodataValues = [0]
+    outa = numpy.zeros(shape=water.shape, dtype='bool')
+
+    nd = dem.nodata
+    dem = dem.array
+
+    # Iterate labels and isolate sinks
+    print "Identified {} potential waterbodies".format(len(labels))
+    cnt = 0
+    for id, inds in labels.iteritems():
+        elev_set = dem[inds]
+        if numpy.var(elev_set) < variance_threshold:
+            cnt += 1
+            outa[inds] = 1
+
+    print "Filtered to {} waterbodies".format(cnt)
+    water[:] = outa
+
+    return water
 
 
-
-    labels = slope.array < slope_threshold
-
-
-def valley_confinement(dem, max_width, min_basin_area, streams=None, waterbodies=None):
+def bankfull(dem, average_annual_precip=250, contributing_area=None, flood_factor=3,
+             streams=None, min_stream_area=None):
     """
-    Valley Confinement algorithm based on https://www.fs.fed.us/rm/pubs/rmrs_gtr321.pdf
+    Calculate a bankfull depth using the given precipitation and flood factor
+    :param dem: Input elevation raster
+    :param average_annual_precip: Average annaul precipitation (cm) as a scalar, vector, or raster
+    :param contributing_area: A contributing area (km**2) raster. It will be calculated using the DEM if not provided.
+    :param flood_factor: Coefficient to amplify the bankfull depth
+    :param streams: Input stream vector or raster.  They will be calculated using the min_stream_area if not provided
+    :param min_stream_area: If no streams are provided, this is used to derived streams.  Units are m**2
+    :return: raster instance of the bankful depth
+    """
+    # Grab the streams
+    if streams is not None:
+        streams = assert_type(streams)(streams)
+        if isinstance(streams, vector):
+            streams = streams.rasterize(dem)
+        elif isinstance(streams, raster):
+            streams = streams.match_raster(dem)
+    else:
+        if min_stream_area is None:
+            raise WaterError('Either one of streams or minimum stream contributing area must be specified')
+        streams = bluegrass.stream_extract(dem, min_stream_area)
+
+    streams = streams.array != streams.nodata
+
+    # Check if contributing area needs to be calculated
+    if contributing_area is None:
+        contrib = bluegrass.watershed(dem)[1] * (dem.csx * dem.csy / 1E6)  # in km**2
+    else:
+        contrib = raster(contributing_area)
+
+    # Parse the precip input and create the precip variable
+    if any([isinstance(average_annual_precip, t) for t in [int, float, numpy.ndarray]]):
+        # Scalar or array
+        precip = dem.full(average_annual_precip) ** 0.355
+    else:
+        precip = assert_type(average_annual_precip)(average_annual_precip) ** 0.355
+
+    # Calculate bankful depth
+    bankfull = ((((contrib * 0.196) ** 0.280) * precip) ** (0.607 * 0.145)) * flood_factor
+
+    # Add the dem to the bankfull depth where streams exists, and extrapolate outwards
+    bnkfl = bankfull.array
+    bnkfl[~streams] = bankfull.nodata
+    bnkfl[streams] += dem.array[streams]
+    bankfull[:] = bnkfl
+    bankfull = interpolate_nodata(bankfull)
+
+    # Smooth using a mean filter 3 times
+    for i in range(3):
+        bankfull = mean_filter(bankfull)
+
+    # Create a flood depth by subtracting the dem
+    bankfull -= dem
+    bnkfl = bankfull.array
+    bnkfl[bnkfl < 0] = bankfull.nodata
+    bankfull[:] = bnkfl
+
+    return bankfull
+
+
+def valley_confinement(dem, min_stream_area, cost_threshold_percentile=4, streams=None, waterbodies=None,
+                       average_annual_precip=250, use_ground_slope=True, slope_threshold=5.14,
+                       use_flood_option=True, flood_factor=3, max_width=False, minimum_drainage_area=0,
+                       min_stream_length=100, min_valley_bottom_area=10000):
+    """
+     Valley Confinement algorithm based on https://www.fs.fed.us/rm/pubs/rmrs_gtr321.pdf
     :param dem:
-    :param max_width:
+    :param min_stream_area:
+    :param cost_threshold_percentile:
+    :param streams:
+    :param waterbodies:
     :param min_basin_area:
+    :param average_annual_precip: cm
+    :param use_ground_slope:
+    :param slope_threshold:
+    :param use_flood_option:
+    :param flood_factor:
+    :param max_width:
+    :param minimum_drainage_area: km**2
+    :param min_stream_length:
+    :param min_valley_bottom_area:
     :return:
     """
     # Create a raster instance from the DEM
     dem = raster(dem)
 
+    # The moving mask is a mask of input datasets as they are calculated
+    moving_mask = numpy.zeros(shape=dem.shape, dtype='bool')
+
     # Calculate slope
     slope = topo(dem).slope()
 
-    # Calculate flow accumulation
+    # Add slope to the mask
+    if use_ground_slope:
+        moving_mask[(slope <= slope_threshold).array] = 1
+
+    # Calculate cumulative drainage (flow accumulation)
     fa = bluegrass.watershed(dem)[1]
+    fa *= fa.csx * fa.csy / 1E6
 
     # Calculate streams if they are not provided
     if streams is not None:
@@ -1162,20 +1270,59 @@ def valley_confinement(dem, max_width, min_basin_area, streams=None, waterbodies
         elif isinstance(streams, raster):
             streams = streams.match_raster(dem)
     else:
-        streams = bluegrass.stream_extract(dem, min_basin_area)
+        streams = bluegrass.stream_extract(dem, min_stream_area)
 
-    # Segment water bodies from the DEM if they are not specified in the input
-    if waterbodies is not None:
-        streams = assert_type(waterbodies)(waterbodies)
-        if isinstance(waterbodies, vector):
-            waterbodies = waterbodies.rasterize(dem)
-        elif isinstance(waterbodies, raster):
-            waterbodies = waterbodies.match_raster(dem)
-    else:
-        waterbodies = segment_water(dem)
+    # Remove streams below the minimum_drainage_area
+    if minimum_drainage_area > 0:
+        a = streams.array
+        a[fa < minimum_drainage_area] = streams.nodata
+        streams[:] = a
 
+    #========== Need to finish waterbody segmentation function first =======================
 
-    # Calculate width
-    width = distance(streams)
+    # # Segment water bodies from the DEM if they are not specified in the input
+    # if waterbodies is not None:
+    #     streams = assert_type(waterbodies)(waterbodies)
+    #     if isinstance(waterbodies, vector):
+    #         waterbodies = waterbodies.rasterize(dem)
+    #     elif isinstance(waterbodies, raster):
+    #         waterbodies = waterbodies.match_raster(dem)
+    # else:
+    #     waterbodies = segment_water(dem, slope=slope)
 
-    #
+    #======================================================================================
+
+    # Calculate a cost surface using slope and streams, and create a mask using specified percentile
+    cost = cost_surface(streams, slope)
+    p = percentile_filter(cost, cost_threshold_percentile)
+    moving_mask = moving_mask & (cost < cost_threshold_percentile).array
+
+    # Incorporate max valley width arg
+    if max_width is not False:  # Use the distance from the streams to constrain the width
+        # Calculate width if necessary
+        moving_mask = moving_mask & (distance(streams) < (max_width / 2)).array
+
+    # Flood calculation
+    if use_flood_option:
+        flood = bankfull(dem, average_annual_precip=average_annual_precip,
+                         contributing_area=fa, flood_factor=flood_factor).mask
+        moving_mask = moving_mask & flood.array
+
+    # Create a raster from the moving mask and run a mode filter
+    valleys = dem.astype('bool')
+    valleys[:] = moving_mask
+    valleys.nodataValues = [0]
+    valleys = most_common(valleys)
+
+    # Label the valleys and remove those below the specified area
+    valley_map = label(valleys, True)[1]
+    a = numpy.zeros(shape=valleys.shape, dtype='bool')
+    for _, inds in valley_map:
+        if inds[0].size * dem.csx * dem.csy >= min_valley_bottom_area:
+            a[inds] = 1
+    valleys[:] = a
+
+    # TODO implement a cumulative stream length function and use this to remove polygons below a minimum length
+
+    # Returns a polygon vector instance
+    return valleys

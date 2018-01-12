@@ -8,7 +8,8 @@ from contextlib import contextmanager
 import numpy
 from osgeo import gdal, ogr, osr, gdalconst
 import h5py
-from skimage.measure import label, regionprops
+from skimage.measure import label as sklabel
+from skimage.measure import regionprops
 try:
     import Image
     import ImageDraw
@@ -1300,7 +1301,7 @@ class raster(object):
 
             # If centroid is specified, label the raster and grab the respective points
             if kwargs.get('centroid', False):
-                labels, number = label(a, return_num=True, background=self.nodata)
+                labels, number = sklabel(a, return_num=True, background=self.nodata)
                 properties = regionprops(labels)
                 values = [a[tuple(properties[i].coords[0])] for i in range(number)]
                 coords = numpy.array([properties[i].centroid for i in range(number)])
@@ -1326,7 +1327,7 @@ class raster(object):
         """
         if as_mask:
             # Polygonize mask
-            return self.mask().vectorize('Polygon')
+            return self.mask.vectorize('Polygon')
         else:
             # Create a wkb from the boundary of the raster
             geo = geometry.Polygon(extent(self).corners)
@@ -1335,16 +1336,10 @@ class raster(object):
             # Create an output shapefile from geometry
             return vector([_wkb], projection=self.projection)
 
+    @property
     def mask(self):
         """Return a raster instance of the data mask (boolean)"""
-        ret_rast = self.astype('bool')
-        if self.useChunks:
-            # Get over chunks
-            for a, s in self.iterchunks():
-                ret_rast[s] = a != self.nodata
-        else:
-            ret_rast[:] = self.array != self.nodata
-        return ret_rast
+        return self != self.nodata
 
     @staticmethod
     def gdal_args_from_slice(s, shape):
@@ -1594,6 +1589,57 @@ class raster(object):
                 a[m] = eval('c%sb' % op)
                 self[:] = a
 
+    def perform_cond_operation(self, r, op):
+        """
+        Wrap the numpy conditional operators using underlying raster data
+        :param r:
+        :param op:
+        :return:
+        """
+        is_array = False
+        if any([isinstance(r, t) for t in [numpy.ndarray, int, float]]):
+            is_array = True
+            r = numpy.broadcast_to(r, self.shape)
+        else:
+            r = assert_type(r)(r)
+            if isinstance(r, vector):
+                r = r.rasterize(self)
+            elif isinstance(r, raster):
+                r = r.match_raster(self)
+
+        # Create a mask raster where rasters match
+        mask = self.astype('bool').full(0)
+        mask.nodataValues = [0 for i in range(self.bandCount)]
+
+        if self.useChunks:
+            for band in self.bands:
+                mask.activeBand = band
+                if not is_array:
+                    r.activeBand = band
+                for a, s in self.iterchunks():
+                    self_data, comp_data = self[s], r[s]
+                    if is_array:
+                        m = (self_data != self.nodata) & (getattr(self_data, op)(comp_data))
+                    else:
+                        m = (self_data != self.nodata) & (comp_data != r.nodata) & (getattr(self_data, op)(comp_data))
+                    mask[s] = m
+        else:
+            for band in self.bands:
+                mask.activeBand = band
+                if not is_array:
+                    r.activeBand = band
+                    comp_data = r.array
+                else:
+                    comp_data = r
+                self_data = self.array
+                if is_array:
+                    m = (self_data != self.nodata) & (getattr(self_data, op)(comp_data))
+                else:
+                    m = (self_data != self.nodata) & (comp_data != r.nodata) & (getattr(self_data, op)(comp_data))
+                mask[:] = m
+
+        return mask
+
     def __add__(self, r):
         return self.perform_operation(r, '+')
 
@@ -1633,46 +1679,22 @@ class raster(object):
         return self.perform_operation(r, '%')
 
     def __eq__(self, r):
-        is_array = False
-        if any([isinstance(r, t) for t in [numpy.ndarray, int, float]]):
-            is_array = True
-        else:
-            r = assert_type(r)(r)
-            if isinstance(r, vector):
-                r = r.rasterize(self)
-            elif isinstance(r, raster):
-                r = r.match_raster(self)
-
-        # Create a mask raster where rasters match
-        mask = self.astype('bool').full(0)
-        mask.nodataValues = [0 for i in range(self.bandCount)]
-
-        if self.useChunks:
-            for band in self.bands:
-                mask.activeBand = band
-                r.activeBand = band
-                for a, s in self.iterchunks():
-                    self_data, comp_data = self[s], r[s]
-                    m = (self_data != self.nodata) & (comp_data != r.nodata) * (comp_data == self_data)
-                    mask[s] = m
-        else:
-            for band in self.bands:
-                mask.activeBand = band
-                r.activeBand = band
-                self_data, comp_data = self.array, r.array
-                m = (self_data != self.nodata) & (comp_data != r.nodata) * (comp_data == self_data)
-                mask[:] = m
-
-        return mask
+        return self.perform_cond_operation(r, '__eq__')
 
     def __ne__(self, r):
-        if not isinstance(r, raster):
-            raise RasterError('Expected a raster instance while using the "!="'
-                              ' operator')
-        if self == r:
-            return False
-        else:
-            return True
+        return self.perform_cond_operation(r, '__ne__')
+
+    def __lt__(self, r):
+        return self.perform_cond_operation(r, '__lt__')
+
+    def __gt__(self, r):
+        return self.perform_cond_operation(r, '__gt__')
+
+    def __le__(self, r):
+        return self.perform_cond_operation(r, '__le__')
+
+    def __ge__(self, r):
+        return self.perform_cond_operation(r, '__ge__')
 
     def __repr__(self):
         insr = osr.SpatialReference(wkt=self.projection)
