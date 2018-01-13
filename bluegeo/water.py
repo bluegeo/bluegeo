@@ -1261,6 +1261,11 @@ def valley_confinement(dem, min_stream_area, cost_threshold_percentile=4, stream
     if slope_threshold is not False:
         moving_mask[(slope <= slope_threshold).array] = 1
 
+    valleys = dem.astype('bool')
+    valleys.nodataValues = [0]
+    valleys[:] = moving_mask
+    valleys.save('slope_mask.tif')
+
     # Calculate cumulative drainage (flow accumulation)
     fa = bluegrass.watershed(dem)[1]
     fa.mode = 'r+'
@@ -1273,8 +1278,9 @@ def valley_confinement(dem, min_stream_area, cost_threshold_percentile=4, stream
             streams = streams.rasterize(dem)
         elif isinstance(streams, raster):
             streams = streams.match_raster(dem)
+        # TODO: Implement stream length function and remove streams below the threshold here
     else:
-        streams = bluegrass.stream_extract(dem, min_stream_area)
+        streams = bluegrass.stream_extract(dem, min_stream_area, stream_length=min_stream_length)
 
     # Remove streams below the minimum_drainage_area
     if minimum_drainage_area > 0:
@@ -1282,7 +1288,53 @@ def valley_confinement(dem, min_stream_area, cost_threshold_percentile=4, stream
         a[fa < minimum_drainage_area] = streams.nodata
         streams[:] = a
 
-    #========== Need to finish waterbody segmentation function first =======================
+    # Calculate a cost surface using slope and streams, and create a mask using specified percentile
+    cost = cost_surface(streams, slope)
+    p = numpy.percentile(cost.array, cost_threshold_percentile)
+    moving_mask = moving_mask & (cost < cost_threshold_percentile).array
+
+    valleys = dem.astype('bool')
+    valleys.nodataValues = [0]
+    valleys[:] = (cost < cost_threshold_percentile).array
+    valleys.save('cost_mask.tif')
+
+    # Incorporate max valley width arg
+    if max_width is not False:  # Use the distance from the streams to constrain the width
+        # Calculate width if necessary
+        moving_mask = moving_mask & (distance(streams) < (max_width / 2)).array
+
+        valleys = dem.astype('bool')
+        valleys.nodataValues = [0]
+        valleys[:] = (distance(streams) < (max_width / 2)).array
+        valleys.save('distance_mask.tif')
+
+    # Flood calculation
+    if use_flood_option:
+        flood = bankfull(dem, streams=streams, average_annual_precip=average_annual_precip,
+                         contributing_area=fa, flood_factor=flood_factor).mask
+        moving_mask = moving_mask & flood.array
+
+        valleys = dem.astype('bool')
+        valleys.nodataValues = [0]
+        valleys[:] = flood.array
+        valleys.save('flood_mask.tif')
+
+    # Create a raster from the moving mask and run a mode filter
+    valleys = dem.astype('bool')
+    valleys[:] = moving_mask
+    valleys.nodataValues = [0]
+    valleys = most_common(valleys)
+
+    # Label the valleys and remove those below the specified area
+    valley_map = label(valleys, True)[1]
+    a = numpy.zeros(shape=valleys.shape, dtype='bool')
+    for _, inds in valley_map.iteritems():
+        if inds[0].size * dem.csx * dem.csy >= min_valley_bottom_area:
+            a[inds] = 1
+    valleys[:] = a
+
+    # Remove waterbodies
+    # ========== Need to finish waterbody segmentation function first =======================
 
     # # Segment water bodies from the DEM if they are not specified in the input
     # if waterbodies is not None:
@@ -1294,42 +1346,7 @@ def valley_confinement(dem, min_stream_area, cost_threshold_percentile=4, stream
     # else:
     #     waterbodies = segment_water(dem, slope=slope)
 
-    #======================================================================================
-
-    # Calculate a cost surface using slope and streams, and create a mask using specified percentile
-    cost = cost_surface(streams, slope)
-    p = numpy.percentile(cost.array, cost_threshold_percentile)
-    moving_mask = moving_mask & (cost < cost_threshold_percentile).array
-
-    # Incorporate max valley width arg
-    if max_width is not False:  # Use the distance from the streams to constrain the width
-        # Calculate width if necessary
-        moving_mask = moving_mask & (distance(streams) < (max_width / 2)).array
-
-    # Flood calculation
-    if use_flood_option:
-        flood = bankfull(dem, average_annual_precip=average_annual_precip,
-                         contributing_area=fa, flood_factor=flood_factor).mask
-        moving_mask = moving_mask & flood.array
-
-    # Create a raster from the moving mask and run a mode filter
-    valleys = dem.astype('bool')
-    valleys[:] = moving_mask
-    valleys.nodataValues = [0]
-    valleys = most_common(valleys)
-
-    # Label the valleys and remove those below the specified area
-    valley_map = label(valleys, True)[1]
-    a = numpy.zeros(shape=valleys.shape, dtype='bool')
-    for _, inds in valley_map:
-        if inds[0].size * dem.csx * dem.csy >= min_valley_bottom_area:
-            a[inds] = 1
-    valleys[:] = a
-
-    # TODO: Implement a cumulative stream length function and use this to remove polygons
-    # TODO:  containing streams with lengths below the minimum threshold
-
-    # Remove waterbodies
+    # ======================================================================================
 
     # Returns a polygon vector instance
     return valleys.polygonize()

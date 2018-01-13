@@ -179,7 +179,7 @@ def watershed(dem, flow_direction='SFD', accumulation_path=None, direction_path=
     return fd, fa
 
 
-def stream_extract(dem, minimum_contributing_area):
+def stream_extract(dem, minimum_contributing_area, stream_length=0):
     """
     Extract streams
     :param dem:
@@ -202,7 +202,7 @@ def stream_extract(dem, minimum_contributing_area):
         graster.external(input=dem, output='dem')
 
         grass.run_command('r.stream.extract', elevation='dem',
-                          threshold=threshold, stream_raster='streams')
+                          threshold=threshold, stream_raster='streams', stream_length=stream_length)
         graster.out_gdal('streams', format="GTiff", output=stream_path)
 
     if garbage:
