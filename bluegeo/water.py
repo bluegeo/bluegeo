@@ -1172,6 +1172,8 @@ def bankfull(dem, average_annual_precip=250, contributing_area=None, flood_facto
     :param min_stream_area: If no streams are provided, this is used to derived streams.  Units are m**2
     :return: raster instance of the bankful depth
     """
+    dem = raster(dem)
+
     # Grab the streams
     if streams is not None:
         streams = assert_type(streams)(streams)
@@ -1199,8 +1201,8 @@ def bankfull(dem, average_annual_precip=250, contributing_area=None, flood_facto
     else:
         precip = assert_type(average_annual_precip)(average_annual_precip) ** 0.355
 
-    # Calculate bankful depth
-    bankfull = ((((contrib * 0.196) ** 0.280) * precip) ** (0.607 * 0.145)) * flood_factor
+    # Calculate bankfull depth
+    bankfull = (((0.196 * contrib ** 0.280) * precip) ** 0.607 * 0.145) * flood_factor
 
     # Add the dem to the bankfull depth where streams exists, and extrapolate outwards
     bnkfl = bankfull.array
@@ -1223,27 +1225,24 @@ def bankfull(dem, average_annual_precip=250, contributing_area=None, flood_facto
 
 
 def valley_confinement(dem, min_stream_area, cost_threshold_percentile=4, streams=None, waterbodies=None,
-                       average_annual_precip=250, use_ground_slope=True, slope_threshold=5.14,
-                       use_flood_option=True, flood_factor=3, max_width=False, minimum_drainage_area=0,
-                       min_stream_length=100, min_valley_bottom_area=10000):
+                       average_annual_precip=250, slope_threshold=5.14, use_flood_option=True, flood_factor=3,
+                       max_width=False, minimum_drainage_area=0, min_stream_length=100, min_valley_bottom_area=10000):
     """
      Valley Confinement algorithm based on https://www.fs.fed.us/rm/pubs/rmrs_gtr321.pdf
-    :param dem:
-    :param min_stream_area:
-    :param cost_threshold_percentile:
-    :param streams:
-    :param waterbodies:
-    :param min_basin_area:
-    :param average_annual_precip: cm
-    :param use_ground_slope:
-    :param slope_threshold:
-    :param use_flood_option:
-    :param flood_factor:
-    :param max_width:
-    :param minimum_drainage_area: km**2
-    :param min_stream_length:
-    :param min_valley_bottom_area:
-    :return:
+    :param dem: (raster) Elevation raster
+    :param min_stream_area: (float) Minimum contributing area to delineate streams if they are not provided.
+    :param cost_threshold_percentile: (float) The percentile used to constrain the cumulative cost of slope from streams
+    :param streams: (vector or raster) A stream vector or raster.
+    :param waterbodies: (vector or raster) A vector or raster of waterbodies. If this is not provided, they will be segmented from the DEM.
+    :param average_annual_precip: (float, ndarray, raster) Average annual precipitation (in cm)
+    :param slope_threshold: (float) A threshold (in degrees) to clip the topographic slope to.  If False, it will not be used.
+    :param use_flood_option: (boolean) Determines whether a bankfull flood extent will be used or not.
+    :param flood_factor: (float) A coefficient determining the amplification of the bankfull
+    :param max_width: (float) The maximum valley width of the bottoms.
+    :param minimum_drainage_area: (float) The minimum drainage area used to filter streams (km**2).
+    :param min_stream_length: (float) The minimum stream length (m) used to filter valley bottom polygons.
+    :param min_valley_bottom_area: (float) The minimum area for valey bottom polygons.
+    :return: vector instance (polygons of the valley bottom)
     """
     # Create a raster instance from the DEM
     dem = raster(dem)
@@ -1255,7 +1254,7 @@ def valley_confinement(dem, min_stream_area, cost_threshold_percentile=4, stream
     slope = topo(dem).slope()
 
     # Add slope to the mask
-    if use_ground_slope:
+    if slope_threshold is not False:
         moving_mask[(slope <= slope_threshold).array] = 1
 
     # Calculate cumulative drainage (flow accumulation)
@@ -1322,7 +1321,10 @@ def valley_confinement(dem, min_stream_area, cost_threshold_percentile=4, stream
             a[inds] = 1
     valleys[:] = a
 
-    # TODO implement a cumulative stream length function and use this to remove polygons below a minimum length
+    # TODO: Implement a cumulative stream length function and use this to remove polygons
+    # TODO:  containing streams with lengths below the minimum threshold
+
+    # Remove waterbodies
 
     # Returns a polygon vector instance
-    return valleys
+    return valleys.polygonize()

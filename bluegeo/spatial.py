@@ -823,7 +823,7 @@ class raster(object):
             with self.dataset as ds:
                 ds.attrs['projection'] = projection
 
-    def match_raster(self, input_raster, tolerance=1E-06):
+    def match_raster(self, input_raster, tolerance=1E-05):
         """
         Align extent and cells with another raster
         """
@@ -1189,6 +1189,7 @@ class raster(object):
         outrast = raster(path)
         # This is temporary as an output
         outrast.garbage = {'path': path, 'num': 1}
+        outrast.mode = 'r+'
         return outrast
 
     def fix_nodata(self):
