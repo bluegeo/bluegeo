@@ -1,7 +1,7 @@
 '''
 Hydrologic analysis library
 
-Blue Geosimulation, 2017
+Blue Geosimulation, 2018
 '''
 from terrain import *
 from filters import *
@@ -33,7 +33,7 @@ def convergence(size=(11, 11), fd=None):
     Compute the relative convergence of flow vectors (uses directions 1 to
     8, which are derived from flow direction)
 
-    TODO: needs to be fixed becaues moved out of class method
+    TODO: needs to be fixed because moved out of class method
     :param size:
     :param fd:
     :return:
@@ -1263,6 +1263,7 @@ def valley_confinement(dem, min_stream_area, cost_threshold_percentile=4, stream
 
     # Calculate cumulative drainage (flow accumulation)
     fa = bluegrass.watershed(dem)[1]
+    fa.mode = 'r+'
     fa *= fa.csx * fa.csy / 1E6
 
     # Calculate streams if they are not provided
@@ -1297,7 +1298,7 @@ def valley_confinement(dem, min_stream_area, cost_threshold_percentile=4, stream
 
     # Calculate a cost surface using slope and streams, and create a mask using specified percentile
     cost = cost_surface(streams, slope)
-    p = percentile_filter(cost, cost_threshold_percentile)
+    p = numpy.percentile(cost.array, cost_threshold_percentile)
     moving_mask = moving_mask & (cost < cost_threshold_percentile).array
 
     # Incorporate max valley width arg

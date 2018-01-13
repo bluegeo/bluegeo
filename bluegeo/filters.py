@@ -22,7 +22,7 @@ def eval_op(a, nd, size, func, **kwargs):
     ndMask = binary_dilation(a == nd, structure=numpy.ones(shape=size, dtype='bool'))[1:-1, 1:-1]
     percentile = kwargs.get('percentile', None)
     if percentile is not None:
-        A = func(util.stride_hood(a, size), percentile=percentile, axis=(3, 2))
+        A = func(util.stride_hood(a, size), percentile, axis=(3, 2))
     else:
         A = func(util.stride_hood(a, size), axis=(3, 2))
     A[ndMask] = a[1:-1, 1:-1][ndMask]
