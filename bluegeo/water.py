@@ -1228,7 +1228,7 @@ def bankfull(dem, average_annual_precip=250, contributing_area=None, flood_facto
     return bankfull
 
 
-def valley_confinement(dem, min_stream_area, cost_threshold_percentile=4, streams=None, waterbodies=None,
+def valley_confinement(dem, min_stream_area, cost_threshold_percentile=7, streams=None, waterbodies=None,
                        average_annual_precip=250, slope_threshold=5.14, use_flood_option=True, flood_factor=3,
                        max_width=False, minimum_drainage_area=0, min_stream_length=100, min_valley_bottom_area=10000):
     """
