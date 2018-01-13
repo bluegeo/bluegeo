@@ -1202,13 +1202,17 @@ def bankfull(dem, average_annual_precip=250, contributing_area=None, flood_facto
         precip = assert_type(average_annual_precip)(average_annual_precip) ** 0.355
 
     # Calculate bankfull depth
-    bankfull = (((0.196 * contrib ** 0.280) * precip) ** 0.607 * 0.145) * flood_factor
+    bankfull = (contrib ** 0.280) * 0.196
+    bankfull = bankfull * precip
+    bankfull = bankfull ** 0.607 * 0.145
+    bankfull *= flood_factor
 
     # Add the dem to the bankfull depth where streams exists, and extrapolate outwards
     bnkfl = bankfull.array
     bnkfl[~streams] = bankfull.nodata
-    bnkfl[streams] += dem.array[streams]
     bankfull[:] = bnkfl
+    del bnkfl
+    bankfull += dem
     bankfull = interpolate_nodata(bankfull)
 
     # Smooth using a mean filter 3 times
