@@ -1228,18 +1228,18 @@ def bankfull(dem, average_annual_precip=250, contributing_area=None, flood_facto
     return bankfull
 
 
-def valley_confinement(dem, min_stream_area, cost_threshold_percentile=7, streams=None, waterbodies=None,
-                       average_annual_precip=250, slope_threshold=5.14, use_flood_option=True, flood_factor=3,
+def valley_confinement(dem, min_stream_area, cost_threshold=2500, streams=None, waterbodies=None,
+                       average_annual_precip=250, slope_threshold=9, use_flood_option=True, flood_factor=3,
                        max_width=False, minimum_drainage_area=0, min_stream_length=100, min_valley_bottom_area=10000):
     """
      Valley Confinement algorithm based on https://www.fs.fed.us/rm/pubs/rmrs_gtr321.pdf
     :param dem: (raster) Elevation raster
     :param min_stream_area: (float) Minimum contributing area to delineate streams if they are not provided.
-    :param cost_threshold_percentile: (float) The percentile used to constrain the cumulative cost of slope from streams
+    :param cost_threshold: (float) The threshold used to constrain the cumulative cost of slope from streams
     :param streams: (vector or raster) A stream vector or raster.
     :param waterbodies: (vector or raster) A vector or raster of waterbodies. If this is not provided, they will be segmented from the DEM.
     :param average_annual_precip: (float, ndarray, raster) Average annual precipitation (in cm)
-    :param slope_threshold: (float) A threshold (in degrees) to clip the topographic slope to.  If False, it will not be used.
+    :param slope_threshold: (float) A threshold (in percent) to clip the topographic slope to.  If False, it will not be used.
     :param use_flood_option: (boolean) Determines whether a bankfull flood extent will be used or not.
     :param flood_factor: (float) A coefficient determining the amplification of the bankfull
     :param max_width: (float) The maximum valley width of the bottoms.
@@ -1255,7 +1255,7 @@ def valley_confinement(dem, min_stream_area, cost_threshold_percentile=7, stream
     moving_mask = numpy.zeros(shape=dem.shape, dtype='bool')
 
     # Calculate slope
-    slope = topo(dem).slope()
+    slope = topo(dem).slope('percent_rise')
 
     # Add slope to the mask
     if slope_threshold is not False:
@@ -1290,12 +1290,11 @@ def valley_confinement(dem, min_stream_area, cost_threshold_percentile=7, stream
 
     # Calculate a cost surface using slope and streams, and create a mask using specified percentile
     cost = cost_surface(streams, slope)
-    p = numpy.percentile(cost.array, cost_threshold_percentile)
-    moving_mask = moving_mask & (cost < cost_threshold_percentile).array
+    moving_mask = moving_mask & (cost < cost_threshold).array
 
     valleys = dem.astype('bool')
     valleys.nodataValues = [0]
-    valleys[:] = (cost < cost_threshold_percentile).array
+    valleys[:] = (cost < cost_threshold).array
     valleys.save('cost_mask.tif')
 
     # Incorporate max valley width arg
