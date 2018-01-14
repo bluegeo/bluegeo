@@ -1267,9 +1267,8 @@ def valley_confinement(dem, min_stream_area, cost_threshold=2500, streams=None, 
             streams = streams.rasterize(dem)
         elif isinstance(streams, raster):
             streams = streams.match_raster(dem)
-        # TODO: Implement stream length function and remove streams below the threshold here
     else:
-        streams = bluegrass.stream_extract(dem, min_stream_area, stream_length=min_stream_length)
+        streams = bluegrass.stream_extract(dem, min_stream_area)
 
     # Remove streams below the minimum_drainage_area
     if minimum_drainage_area > 0:
@@ -1310,11 +1309,14 @@ def valley_confinement(dem, min_stream_area, cost_threshold=2500, streams=None, 
     valleys.nodataValues = [0]
     valleys = most_common(valleys)
 
-    # Label the valleys and remove those below the specified area
+    # Label the valleys and remove those below the specified area or where stream lenght is too small
+    stream_segment = numpy.mean([dem.csx, dem.csy, numpy.sqrt(dem.csx**2 + dem.csy**2)])
     valley_map = label(valleys, True)[1]
     a = numpy.zeros(shape=valleys.shape, dtype='bool')
+    sa = streams.array
     for _, inds in valley_map.iteritems():
-        if inds[0].size * dem.csx * dem.csy >= min_valley_bottom_area:
+        length = (sa[inds] != streams.nodata).sum() * stream_segment
+        if inds[0].size * dem.csx * dem.csy >= min_valley_bottom_area and length >= min_stream_area:
             a[inds] = 1
 
     # Write to output and return a raster instance
