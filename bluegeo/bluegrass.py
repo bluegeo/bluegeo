@@ -303,7 +303,7 @@ def water_outlet(coordinates, dem=None, direction=None,  basin_path=None):
 
     csx, csy = fd.csx, fd.csy
 
-    with GrassSession(fd):
+    with GrassSession(fd.path):
         from grass.pygrass.modules.shortcuts import raster as graster
         from grass.script import core as grass
         import grass.script.array as garray
@@ -323,7 +323,7 @@ def water_outlet(coordinates, dem=None, direction=None,  basin_path=None):
             index.append(m)
 
     # Allocate output
-    outrast = raster(fd).astype('uint32')
+    outrast = fd.astype('uint32')
     outrast.nodataValues = [0]
 
     # Write rasters to single dataset
