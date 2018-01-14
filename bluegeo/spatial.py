@@ -1280,6 +1280,7 @@ class raster(object):
                 pass
 
         outvect.__dict__.update(vector(vector_path).__dict__)
+        outvect.garbage = {'path': vector_path, 'num': 1}
         return outvect
 
     def vectorize(self, geotype='Polygon', **kwargs):

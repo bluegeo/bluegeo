@@ -1316,7 +1316,7 @@ def valley_confinement(dem, min_stream_area, cost_threshold=2500, streams=None, 
     sa = streams.array
     for _, inds in valley_map.iteritems():
         length = (sa[inds] != streams.nodata).sum() * stream_segment
-        if inds[0].size * dem.csx * dem.csy >= min_valley_bottom_area and length >= min_stream_area:
+        if inds[0].size * dem.csx * dem.csy >= min_valley_bottom_area and length >= min_stream_length:
             a[inds] = 1
 
     # Write to output and return a raster instance
