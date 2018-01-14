@@ -1240,7 +1240,7 @@ def valley_confinement(dem, min_stream_area, cost_threshold=2500, streams=None, 
     :param minimum_drainage_area: (float) The minimum drainage area used to filter streams (km**2).
     :param min_stream_length: (float) The minimum stream length (m) used to filter valley bottom polygons.
     :param min_valley_bottom_area: (float) The minimum area for valey bottom polygons.
-    :return: vector instance (polygons of the valley bottom)
+    :return: raster instance (of the valley bottom)
     """
     # Create a raster instance from the DEM
     dem = raster(dem)
@@ -1317,6 +1317,6 @@ def valley_confinement(dem, min_stream_area, cost_threshold=2500, streams=None, 
         if inds[0].size * dem.csx * dem.csy >= min_valley_bottom_area:
             a[inds] = 1
 
-    # Write to output and return a polygon vector instance
+    # Write to output and return a raster instance
     valleys[:] = a
-    return valleys.polygonize()
+    return valleys
