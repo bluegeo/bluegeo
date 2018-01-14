@@ -1292,6 +1292,18 @@ def valley_confinement(dem, min_stream_area, cost_threshold=2500, streams=None, 
                          contributing_area=fa, flood_factor=flood_factor).mask
         moving_mask = moving_mask & flood.array
 
+    # Remove waterbodies
+    # Segment water bodies from the DEM if they are not specified in the input
+    if waterbodies is not None:
+        waterbodies = assert_type(waterbodies)(waterbodies)
+        if isinstance(waterbodies, vector):
+            waterbodies = waterbodies.rasterize(dem)
+        elif isinstance(waterbodies, raster):
+            waterbodies = waterbodies.match_raster(dem)
+    else:
+        waterbodies = segment_water(dem, slope=slope)
+    moving_mask[waterbodies.array] = 0
+
     # Create a raster from the moving mask and run a mode filter
     valleys = dem.astype('bool')
     valleys[:] = moving_mask
@@ -1304,18 +1316,6 @@ def valley_confinement(dem, min_stream_area, cost_threshold=2500, streams=None, 
     for _, inds in valley_map.iteritems():
         if inds[0].size * dem.csx * dem.csy >= min_valley_bottom_area:
             a[inds] = 1
-
-    # Remove waterbodies
-    # Segment water bodies from the DEM if they are not specified in the input
-    if waterbodies is not None:
-        waterbodies = assert_type(waterbodies)(waterbodies)
-        if isinstance(waterbodies, vector):
-            waterbodies = waterbodies.rasterize(dem)
-        elif isinstance(waterbodies, raster):
-            waterbodies = waterbodies.match_raster(dem)
-    else:
-        waterbodies = segment_water(dem, slope=slope)
-    a[waterbodies.array] = 0
 
     # Write to output and return a polygon vector instance
     valleys[:] = a
