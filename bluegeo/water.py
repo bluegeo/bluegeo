@@ -1122,7 +1122,7 @@ class riparian(object):
         return "Riparian delineation and sensitivity instance with:\n" + '\n'.join(self.__dict__.keys())
 
 
-def segment_water(dem, slope_threshold=0.5, variance_threshold=1E-04, slope=None):
+def segment_water(dem, slope_threshold=0, slope=None):
     """
     Segment lakes from a dem using slope
     :param dem:
@@ -1134,25 +1134,19 @@ def segment_water(dem, slope_threshold=0.5, variance_threshold=1E-04, slope=None
     else:
         slope = raster(slope)
 
-    labels = label(slope < slope_threshold, True)[1]
+    labels = label(slope <= slope_threshold, True)[1]
 
     # Create an output dataset
-    dem = raster(dem)
-    water = dem.astype('bool').full(0)
+    water = slope.astype('bool').full(0)
     water.nodataValues = [0]
     outa = numpy.zeros(shape=water.shape, dtype='bool')
-
-    nd = dem.nodata
-    dem = dem.array
 
     # Iterate labels and isolate sinks
     print "Identified {} potential waterbodies".format(len(labels))
     cnt = 0
     for id, inds in labels.iteritems():
-        elev_set = dem[inds]
-        if numpy.var(elev_set) < variance_threshold:
-            cnt += 1
-            outa[inds] = 1
+        cnt += 1
+        outa[inds] = 1
 
     print "Filtered to {} waterbodies".format(cnt)
     water[:] = outa
@@ -1261,11 +1255,6 @@ def valley_confinement(dem, min_stream_area, cost_threshold=2500, streams=None, 
     if slope_threshold is not False:
         moving_mask[(slope <= slope_threshold).array] = 1
 
-    valleys = dem.astype('bool')
-    valleys.nodataValues = [0]
-    valleys[:] = moving_mask
-    valleys.save('slope_mask.tif')
-
     # Calculate cumulative drainage (flow accumulation)
     fa = bluegrass.watershed(dem)[1]
     fa.mode = 'r+'
@@ -1292,31 +1281,16 @@ def valley_confinement(dem, min_stream_area, cost_threshold=2500, streams=None, 
     cost = cost_surface(streams, slope)
     moving_mask = moving_mask & (cost < cost_threshold).array
 
-    valleys = dem.astype('bool')
-    valleys.nodataValues = [0]
-    valleys[:] = (cost < cost_threshold).array
-    valleys.save('cost_mask.tif')
-
     # Incorporate max valley width arg
     if max_width is not False:  # Use the distance from the streams to constrain the width
         # Calculate width if necessary
         moving_mask = moving_mask & (distance(streams) < (max_width / 2)).array
-
-        valleys = dem.astype('bool')
-        valleys.nodataValues = [0]
-        valleys[:] = (distance(streams) < (max_width / 2)).array
-        valleys.save('distance_mask.tif')
 
     # Flood calculation
     if use_flood_option:
         flood = bankfull(dem, streams=streams, average_annual_precip=average_annual_precip,
                          contributing_area=fa, flood_factor=flood_factor).mask
         moving_mask = moving_mask & flood.array
-
-        valleys = dem.astype('bool')
-        valleys.nodataValues = [0]
-        valleys[:] = flood.array
-        valleys.save('flood_mask.tif')
 
     # Create a raster from the moving mask and run a mode filter
     valleys = dem.astype('bool')
@@ -1330,22 +1304,19 @@ def valley_confinement(dem, min_stream_area, cost_threshold=2500, streams=None, 
     for _, inds in valley_map.iteritems():
         if inds[0].size * dem.csx * dem.csy >= min_valley_bottom_area:
             a[inds] = 1
-    valleys[:] = a
 
     # Remove waterbodies
-    # ========== Need to finish waterbody segmentation function first =======================
+    # Segment water bodies from the DEM if they are not specified in the input
+    if waterbodies is not None:
+        waterbodies = assert_type(waterbodies)(waterbodies)
+        if isinstance(waterbodies, vector):
+            waterbodies = waterbodies.rasterize(dem)
+        elif isinstance(waterbodies, raster):
+            waterbodies = waterbodies.match_raster(dem)
+    else:
+        waterbodies = segment_water(dem, slope=slope)
+    a[waterbodies.array] = 0
 
-    # # Segment water bodies from the DEM if they are not specified in the input
-    # if waterbodies is not None:
-    #     streams = assert_type(waterbodies)(waterbodies)
-    #     if isinstance(waterbodies, vector):
-    #         waterbodies = waterbodies.rasterize(dem)
-    #     elif isinstance(waterbodies, raster):
-    #         waterbodies = waterbodies.match_raster(dem)
-    # else:
-    #     waterbodies = segment_water(dem, slope=slope)
-
-    # ======================================================================================
-
-    # Returns a polygon vector instance
+    # Write to output and return a polygon vector instance
+    valleys[:] = a
     return valleys.polygonize()
