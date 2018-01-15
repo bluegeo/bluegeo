@@ -1249,6 +1249,7 @@ def valley_confinement(dem, min_stream_area, cost_threshold=2500, streams=None, 
     moving_mask = numpy.zeros(shape=dem.shape, dtype='bool')
 
     # Calculate slope
+    print "Calculating topographic slope"
     slope = topo(dem).slope('percent_rise')
 
     # Add slope to the mask
@@ -1277,6 +1278,7 @@ def valley_confinement(dem, min_stream_area, cost_threshold=2500, streams=None, 
         streams[:] = a
 
     # Calculate a cost surface using slope and streams, and create a mask using specified percentile
+    print "Calculating cost"
     cost = cost_surface(streams, slope)
     moving_mask = moving_mask & (cost < cost_threshold).array
 
@@ -1287,12 +1289,14 @@ def valley_confinement(dem, min_stream_area, cost_threshold=2500, streams=None, 
 
     # Flood calculation
     if use_flood_option:
+        print "Calculating bankfull"
         flood = bankfull(dem, streams=streams, average_annual_precip=average_annual_precip,
                          contributing_area=fa, flood_factor=flood_factor).mask
         moving_mask = moving_mask & flood.array
 
     # Remove waterbodies
     # Segment water bodies from the DEM if they are not specified in the input
+    print "Removing waterbodies"
     if waterbodies is not None:
         waterbodies = assert_type(waterbodies)(waterbodies)
         if isinstance(waterbodies, vector):
@@ -1304,12 +1308,14 @@ def valley_confinement(dem, min_stream_area, cost_threshold=2500, streams=None, 
     moving_mask[waterbodies.array] = 0
 
     # Create a raster from the moving mask and run a mode filter
+    print "Applying a mode filter"
     valleys = dem.astype('bool')
     valleys[:] = moving_mask
     valleys.nodataValues = [0]
     valleys = most_common(valleys)
 
     # Label the valleys and remove those below the specified area or where stream lenght is too small
+    print "Filtering by area and stream length"
     stream_segment = numpy.mean([dem.csx, dem.csy, numpy.sqrt(dem.csx**2 + dem.csy**2)])
     valley_map = label(valleys, True)[1]
     a = numpy.zeros(shape=valleys.shape, dtype='bool')
@@ -1321,4 +1327,5 @@ def valley_confinement(dem, min_stream_area, cost_threshold=2500, streams=None, 
 
     # Write to output and return a raster instance
     valleys[:] = a
+    print "Completed successfully"
     return valleys

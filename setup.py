@@ -34,6 +34,14 @@ setup(name='bluegeo',
       packages=['bluegeo'],
       zip_safe=False)
 
+try:
+    import bluegeo as bg
+    with bg.bluegrass.GrassSession(26911) as gs:
+        from grass.script import core as grass
+        grass.run_command('g.extension', extension='r.stream.order', flags='s')
+except:
+    print "Warning: GRASS is not functioning- ensure GRASS is installed to use certain functionality"
+
 print "Installation Complete.  Additional dependencies are required to use certain functionality.  These include:\n" \
       "numba: https://numba.pydata.org/\n" \
       "GDAL (including python-gdal): http://www.gdal.org/\n" \

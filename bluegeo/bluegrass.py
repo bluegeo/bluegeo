@@ -295,6 +295,7 @@ def water_outlet(coordinates, dem=None, direction=None,  basin_path=None):
     garbage = False
     if direction is not None:
         fd, garbage = force_gdal(direction)
+        fd = raster(fd)
     else:
         try:
             fd = watershed(dem)[0]
@@ -325,6 +326,12 @@ def water_outlet(coordinates, dem=None, direction=None,  basin_path=None):
     # Allocate output
     outrast = fd.astype('uint32')
     outrast.nodataValues = [0]
+
+    if garbage:
+        try:
+            os.remove(fd.path)
+        except:
+            pass
 
     # Write rasters to single dataset
     output = numpy.zeros(shape=outrast.shape, dtype='uint32')
