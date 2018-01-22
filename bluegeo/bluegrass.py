@@ -172,8 +172,14 @@ def watershed(dem, flow_direction='SFD', accumulation_path=None, direction_path=
         except:
             pass
 
+    # Fix no data values in fa
+    fa = raster(accupath, mode='r+')
+    for a, s in fa.iterchunks():
+        a[numpy.isnan(a) | numpy.isinf(a) | (a == fa.nodata)] = numpy.finfo('float32').min
+        fa[s] = a
+
     # Return raster instances
-    fd, fa = raster(dirpath), raster(accupath)
+    fd = raster(dirpath)
     fd.garbage = {'path': dirpath, 'num': 1}
     fa.garbage = {'path': accupath, 'num': 1}
     return fd, fa
