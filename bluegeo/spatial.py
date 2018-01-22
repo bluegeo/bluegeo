@@ -932,19 +932,15 @@ class raster(object):
 
     def clip(self, bbox_or_dataset):
         """
-        Slice self using bounding box coordinates.
+        Slice self using bounding box coordinates or, using vector or raster data coverage.
 
-        Note: the bounding box may not be honoured exactly.  To accomplish this
-        use a transform.
-        :param bbox_or_dataset: raster, vector, or bbox (top, bottom, left, right)
+        Note: the bounding box may not be honoured exactly, as the extent needs to be snapped to the cell size.
+        To yield an extact bounding box extent use transform.
+        :param bbox_or_dataset: raster, vector, extent, or bbox (top, bottom, left, right)
         """
         # Get input
         clipper = assert_type(bbox_or_dataset)(bbox_or_dataset)
         bbox = extent(clipper).transform(self.projection).bounds
-        if isinstance(clipper, vector):
-            vector_mask = clipper.transform(self.projection)
-        else:
-            vector_mask = None
 
         # Check that bbox is not inverted
         if any([bbox[0] <= bbox[1], bbox[2] >= bbox[3]]):
@@ -957,7 +953,7 @@ class raster(object):
         # Check if no change
         if all([self.top == bbox[0], self.bottom == bbox[1],
                 self.left == bbox[2], self.right == bbox[3],
-               vector_mask is None]):
+                isinstance(clipper, extent)]):
             return self.copy('clip')
 
         # Create output dataset with new extent
@@ -975,16 +971,20 @@ class raster(object):
             'useChunks': self.useChunks
         }
         outds = raster(path, mode='w', **kwargs)
-        # If a cutline is specified, use it to create a mask
-        if vector_mask is not None:
-            cutline = vector_mask.rasterize(outds.path).array.astype('bool')
+        # If a vector or raster is specified, use it to create a mask
+        if isinstance(clipper, vector):
+            spatial_mask = clipper.transform(self.projection).rasterize(outds.path).array
+        elif isinstance(clipper, raster):
+            spatial_mask = clipper.match_raster(self).mask.array
+        else:
+            spatial_mask = None
 
         # Add output to garbage
         outds.garbage = {'path': path, 'num': 1}
         for _ in outds.bands:
             insert_array = self[self_slice]
-            if vector_mask is not None:
-                insert_array[~cutline] = outds.nodata
+            if spatial_mask is not None:
+                insert_array[~spatial_mask] = outds.nodata
             outds[insert_slice] = insert_array
         return outds
 
@@ -3042,8 +3042,10 @@ def assert_type(data):
         return vector
     if isinstance(data, raster):
         return raster
-
+    if isinstance(data, extent):
+        return extent
     if any([isinstance(data, t) for t in [list, tuple, numpy.ndarray]]) and len(data) == 4:
+        # An iterable that is expected to be a bounding box
         return extent
 
     if isinstance(data, basestring):

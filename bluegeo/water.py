@@ -884,10 +884,22 @@ class riparian(object):
 
         self.update_region = False  # Used to track changes in the riparian delineation
 
+    def smooth_dem(self, sigma=2):
+        """Use a gaussian filter with the specified sigma to smooth the DEM if it is coarse"""
+        self.dem = gaussian(self.dem, sigma=sigma)
+        self.dem.interpolationMethod = 'bilinear'
+
     def generate_streams(self, minimum_contributing_area):
         if minimum_contributing_area is None:
             minimum_contributing_area = 1E6  # Default is 1km2
-        self.streams = bluegrass.stream_extract(self.dem, minimum_contributing_area=minimum_contributing_area)
+        if not hasattr(self, 'fa'):
+            print "Calculating flow accumulation"
+            self.fa = bluegrass.watershed(self.dem)[1]
+
+        self.streams = self.fa.astype('bool').full(0)
+        a = self.fa.array
+        self.streams[:] = (a >= (minimum_contributing_area / (self.fa.csx * self.fa.csy))) & (a != self.fa.nodata)
+        self.streams.nodataValues = [0]
 
     def calculate_width(self):
         """
@@ -912,12 +924,14 @@ class riparian(object):
         # Interpolate throughout region
         self.width = interpolate_mask(d, self.region, 'idw')
 
-    def delineate_using_topo(self, reclass_percentile=6, minimum_contributing_area=None, streams=None):
+    def delineate_using_topo(self, reclass_percentile=6, minimum_contributing_area=None,
+                             streams=None, scale_by_area=0):
         """
         Delineate the riparian using only terrain
         :param minimum_contributing_area:
         :param reclass_percentile:
-        :param streams:
+        :param streams: stream data source
+        :param scale_by_area: (float) Scale the cost using contributing area as a proportion
         :return: None
         """
         if streams is not None:
@@ -936,11 +950,24 @@ class riparian(object):
             print "Calculating cost surface"
             self.cost = normalize(cost_surface(self.streams, topo(self.dem).slope()))
 
+        if scale_by_area:
+            if not hasattr(self, 'fa'):
+                print "Calculating flow accumulation"
+                self.fa = bluegrass.watershed(self.dem)[1]
+
+            # Dilate contributing area and scale
+            cont_area = normalize(inverse((self.fa * (self.fa.csx * self.fa.csy)).clip(self.streams)))
+            m, b = numpy.linalg.solve([[0, 1], [1, 1]], [1 - scale_by_area, 1.])
+            cost = self.cost * (cont_area * m + b)
+
+        else:
+            cost = self.cost
+
         print "Clipping to region"
-        a = self.cost.array
-        m = a != self.cost.nodata
+        a = cost.array
+        m = a != cost.nodata
         p = numpy.percentile(a[m], reclass_percentile)
-        self.region = self.cost.astype('bool')
+        self.region = cost.astype('bool')
         self.region[:] = m & (a <= p)
         self.region.nodataValues = [0]
 
@@ -998,11 +1025,12 @@ class riparian(object):
 
         if not hasattr(self, 'contributing_area') or self.update_region:
             print "Calculating contributing area"
-            _, fa = bluegrass.watershed(self.dem)
-            a = fa.array
+            if not hasattr(self, 'fa'):
+                self.fa = bluegrass.watershed(self.dem)[1]
+            a = self.fa.array
             # Sometimes the no data values is nan for flow accumulation
-            a[numpy.isnan(a) | (a == fa.nodata)] = numpy.finfo('float32').min
-            fa = fa.empty()
+            a[numpy.isnan(a) | (a == self.fa.nodata)] = numpy.finfo('float32').min
+            fa = self.fa.empty()
             fa.nodataValues = [numpy.finfo('float32').min]
             a[self.streams.array == self.streams.nodata] = fa.nodata
             fa[:] = a
