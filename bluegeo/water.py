@@ -898,7 +898,7 @@ class riparian(object):
 
         self.streams = self.fa.astype('bool').full(0)
         a = self.fa.array
-        self.streams[:] = (a >= (minimum_contributing_area / (self.fa.csx * self.fa.csy))) & (a != self.fa.nodata) & ~numpy.isnan(a) & ~numpy.isinf(a)
+        self.streams[:] = (a >= (minimum_contributing_area / (self.fa.csx * self.fa.csy))) & (a != self.fa.nodata)
         self.streams.nodataValues = [0]
 
     def calculate_width(self):

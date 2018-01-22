@@ -177,6 +177,7 @@ def watershed(dem, flow_direction='SFD', accumulation_path=None, direction_path=
     for a, s in fa.iterchunks():
         a[numpy.isnan(a) | numpy.isinf(a) | (a == fa.nodata)] = numpy.finfo('float32').min
         fa[s] = a
+    fa.nodataValues = [numpy.finfo('float32').min]
 
     # Return raster instances
     fd = raster(dirpath)
