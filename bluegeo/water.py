@@ -897,7 +897,7 @@ class riparian(object):
             self.fa = bluegrass.watershed(self.dem, flow_direction='MFD', positive_fd=False)[1]
 
         self.streams = bluegrass.stream_extract(self.dem, minimum_contributing_area=minimum_contributing_area,
-                                                accumulation=self.fa)
+                                                accumulation=self.fa.path)
 
     def calculate_width(self):
         """
