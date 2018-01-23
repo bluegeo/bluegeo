@@ -186,7 +186,7 @@ def watershed(dem, flow_direction='SFD', accumulation_path=None, direction_path=
     return fd, fa
 
 
-def stream_extract(dem, minimum_contributing_area, stream_length=0):
+def stream_extract(dem, minimum_contributing_area, stream_length=0, accumulation=None):
     """
     Extract streams
     :param dem:
@@ -194,7 +194,9 @@ def stream_extract(dem, minimum_contributing_area, stream_length=0):
     :return:
     """
     # Ensure input raster is valid and in a gdal format
-    dem, garbage = force_gdal(dem)
+    dem, dem_garbage = force_gdal(dem)
+    if accumulation is not None:
+        accumulation, accu_garbage = force_gdal(accumulation)
 
     # Compute threshold using minimum contributing area
     r = raster(dem)
@@ -208,13 +210,24 @@ def stream_extract(dem, minimum_contributing_area, stream_length=0):
         from grass.script import core as grass
         graster.external(input=dem, output='dem')
 
-        grass.run_command('r.stream.extract', elevation='dem',
-                          threshold=threshold, stream_raster='streams', stream_length=stream_length)
+        if accumulation is not None:
+            grass.run_command('r.stream.extract', elevation='dem',
+                              threshold=threshold, stream_raster='streams', stream_length=stream_length,
+                              accumulation=accumulation)
+        else:
+            grass.run_command('r.stream.extract', elevation='dem',
+                              threshold=threshold, stream_raster='streams', stream_length=stream_length)
         graster.out_gdal('streams', format="GTiff", output=stream_path)
 
-    if garbage:
+    if dem_garbage:
         try:
             os.remove(dem)
+        except:
+            pass
+
+    if accu_garbage:
+        try:
+            os.remove(accumulation)
         except:
             pass
 

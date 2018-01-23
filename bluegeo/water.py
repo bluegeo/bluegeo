@@ -894,12 +894,10 @@ class riparian(object):
             minimum_contributing_area = 1E6  # Default is 1km2
         if not hasattr(self, 'fa'):
             print "Calculating flow accumulation"
-            self.fa = bluegrass.watershed(self.dem)[1]
+            self.fa = bluegrass.watershed(self.dem, flow_direction='MFD', positive_fd=False)[1]
 
-        self.streams = self.fa.astype('bool').full(0)
-        a = self.fa.array
-        self.streams[:] = (a >= (minimum_contributing_area / (self.fa.csx * self.fa.csy))) & (a != self.fa.nodata)
-        self.streams.nodataValues = [0]
+        self.streams = bluegrass.stream_extract(self.dem, minimum_contributing_area=minimum_contributing_area,
+                                                accumulation=self.fa)
 
     def calculate_width(self):
         """
@@ -953,7 +951,7 @@ class riparian(object):
         if scale_by_area:
             if not hasattr(self, 'fa'):
                 print "Calculating flow accumulation"
-                self.fa = bluegrass.watershed(self.dem)[1]
+                self.fa = bluegrass.watershed(self.dem, flow_direction='MFD', positive_fd=False)[1]
 
             # Dilate contributing area and scale
             cont_area = normalize(inverse((self.fa * (self.fa.csx * self.fa.csy)).clip(self.streams)))
