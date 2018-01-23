@@ -961,7 +961,7 @@ class riparian(object):
             fa.nodataValues = [numpy.finfo('float32').min]
 
             # Dilate contributing area and scale
-            cont_area = normalize(inverse((fa * (fa.csx * fa.csy)).clip(self.streams)))
+            cont_area = interpolate_nodata(normalize(inverse((fa * (fa.csx * fa.csy)).clip(self.streams))))
             m, b = numpy.linalg.solve([[0, 1], [1, 1]], [1 - scale_by_area, 1.])
             cost = self.cost * (cont_area * m + b)
 
