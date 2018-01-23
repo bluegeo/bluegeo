@@ -197,6 +197,8 @@ def stream_extract(dem, minimum_contributing_area, stream_length=0, accumulation
     dem, dem_garbage = force_gdal(dem)
     if accumulation is not None:
         accumulation, accu_garbage = force_gdal(accumulation)
+    else:
+        accu_garbage = False
 
     # Compute threshold using minimum contributing area
     r = raster(dem)
@@ -211,9 +213,10 @@ def stream_extract(dem, minimum_contributing_area, stream_length=0, accumulation
         graster.external(input=dem, output='dem')
 
         if accumulation is not None:
+            graster.external(input=accumulation, output='accumulation')
             grass.run_command('r.stream.extract', elevation='dem',
                               threshold=threshold, stream_raster='streams', stream_length=stream_length,
-                              accumulation=accumulation)
+                              accumulation='accumulation')
         else:
             grass.run_command('r.stream.extract', elevation='dem',
                               threshold=threshold, stream_raster='streams', stream_length=stream_length)
