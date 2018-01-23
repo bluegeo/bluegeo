@@ -953,8 +953,15 @@ class riparian(object):
                 print "Calculating flow accumulation"
                 self.fa = bluegrass.watershed(self.dem, flow_direction='MFD', positive_fd=False)[1]
 
+            # Get rid of nans
+            fa = self.fa.copy()
+            for a, s in fa.iterchunks():
+                a[numpy.isnan(a) | numpy.isinf(a) | (a == fa.nodata)] = numpy.finfo('float32').min
+                fa[s] = a
+            fa.nodataValues = [numpy.finfo('float32').min]
+
             # Dilate contributing area and scale
-            cont_area = normalize(inverse((self.fa * (self.fa.csx * self.fa.csy)).clip(self.streams)))
+            cont_area = normalize(inverse((fa * (fa.csx * fa.csy)).clip(self.streams)))
             m, b = numpy.linalg.solve([[0, 1], [1, 1]], [1 - scale_by_area, 1.])
             cost = self.cost * (cont_area * m + b)
 
