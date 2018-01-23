@@ -121,7 +121,8 @@ class GrassSession(object):
 
 
 # r. functions
-def watershed(dem, flow_direction='SFD', accumulation_path=None, direction_path=None, positive_fd=True):
+def watershed(dem, flow_direction='SFD', accumulation_path=None, direction_path=None, positive_fd=True,
+              change_nodata=True):
     """
     Calculate hydrologic routing networks
     :param dem: Digital Elevation Model raster
@@ -173,11 +174,14 @@ def watershed(dem, flow_direction='SFD', accumulation_path=None, direction_path=
             pass
 
     # Fix no data values in fa
-    fa = raster(accupath, mode='r+')
-    for a, s in fa.iterchunks():
-        a[numpy.isnan(a) | numpy.isinf(a) | (a == fa.nodata)] = numpy.finfo('float32').min
-        fa[s] = a
-    fa.nodataValues = [numpy.finfo('float32').min]
+    if change_nodata:
+        fa = raster(accupath, mode='r+')
+        for a, s in fa.iterchunks():
+            a[numpy.isnan(a) | numpy.isinf(a) | (a == fa.nodata)] = numpy.finfo('float32').min
+            fa[s] = a
+        fa.nodataValues = [numpy.finfo('float32').min]
+    else:
+        fa = raster(accupath)
 
     # Return raster instances
     fd = raster(dirpath)

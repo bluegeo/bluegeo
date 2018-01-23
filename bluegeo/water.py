@@ -894,7 +894,7 @@ class riparian(object):
             minimum_contributing_area = 1E6  # Default is 1km2
         if not hasattr(self, 'fa'):
             print "Calculating flow accumulation"
-            self.fa = bluegrass.watershed(self.dem, flow_direction='MFD', positive_fd=False)[1]
+            self.fa = bluegrass.watershed(self.dem, flow_direction='MFD', positive_fd=False, change_nodata=False)[1]
 
         self.streams = bluegrass.stream_extract(self.dem, minimum_contributing_area=minimum_contributing_area,
                                                 accumulation=self.fa.path)
