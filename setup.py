@@ -20,7 +20,7 @@ def is_installed(name):
         return False
 
 
-requires = ['numpy', 'scipy', 'scikit-image', 'h5py', 'numexpr', 'shapely']
+requires = ['numpy', 'scipy', 'scikit-image', 'h5py', 'numexpr', 'shapely', 'pandas']
 
 setup(name='bluegeo',
       version=version,

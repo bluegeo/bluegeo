@@ -35,7 +35,7 @@ def min_filter(input_raster, size=(3, 3)):
     :param size: Window size
     :return: Raster with local minima
     """
-    input_raster = raster(input_raster)
+    input_raster = Raster(input_raster)
     out_raster = input_raster.full(input_raster.nodata)
     if input_raster.useChunks:
         for a, s in input_raster.iterchunks(expand=size):
@@ -54,7 +54,7 @@ def max_filter(input_raster, size=(3, 3)):
     :param size: Window size
     :return: Raster with local maxima values
     """
-    input_raster = raster(input_raster)
+    input_raster = Raster(input_raster)
     out_raster = input_raster.full(input_raster.nodata)
     if input_raster.useChunks:
         for a, s in input_raster.iterchunks(expand=size):
@@ -74,7 +74,7 @@ def mean_filter(input_raster, size=(3, 3)):
     :return: Raster with local mean values
     """
     # Allocate output
-    input_raster = raster(input_raster)
+    input_raster = Raster(input_raster)
     out_raster = input_raster.full(input_raster.nodata)
     if input_raster.useChunks:
         for a, s in input_raster.iterchunks(expand=size):
@@ -93,7 +93,7 @@ def std_filter(input_raster, size=(3, 3)):
     :param size: Window size
     :return: Raster with local standard deviation values
     """
-    input_raster = raster(input_raster)
+    input_raster = Raster(input_raster)
     out_raster = input_raster.full(input_raster.nodata)
     if input_raster.useChunks:
         for a, s in input_raster.iterchunks(expand=size):
@@ -112,7 +112,7 @@ def var_filter(input_raster, size=(3, 3)):
     :param size: Window size
     :return: Raster with local variance values
     """
-    input_raster = raster(input_raster)
+    input_raster = Raster(input_raster)
     out_raster = input_raster.full(input_raster.nodata)
     if input_raster.useChunks:
         for a, s in input_raster.iterchunks(expand=size):
@@ -131,7 +131,7 @@ def median_filter(input_raster, size=(3, 3)):
     :param size: Window size
     :return: Raster with local median values
     """
-    input_raster = raster(input_raster)
+    input_raster = Raster(input_raster)
     out_raster = input_raster.full(input_raster.nodata)
     if input_raster.useChunks:
         for a, s in input_raster.iterchunks(expand=size):
@@ -151,7 +151,7 @@ def percentile_filter(input_raster, percentile=25, size=(3, 3)):
     :return: Raster with local median values
     """
 
-    input_raster = raster(input_raster)
+    input_raster = Raster(input_raster)
     out_raster = input_raster.full(input_raster.nodata)
     if input_raster.useChunks:
         for a, s in input_raster.iterchunks(expand=size):
@@ -172,7 +172,7 @@ def most_common(input_raster, size=(3, 3)):
     :return: Raster with most frequent local value
     """
     # Allocate output
-    input_raster = raster(input_raster)
+    input_raster = Raster(input_raster)
     mode_raster = input_raster.empty()
     if input_raster.useChunks:
         # Iterate chunks and calculate mode (memory-intensive, so don't fill cache)
@@ -189,12 +189,12 @@ def most_common(input_raster, size=(3, 3)):
 def gaussian(input_raster, sigma):
     """
     Perform a gaussian filter with a specific standard deviation
-    :param input_raster: Input raster
+    :param input_raster: Input Raster
     :param sigma: Standard deviation
-    :return: raster instance
+    :return: Raster instance
     """
     # Allocate output
-    input_raster = raster(input_raster)
+    input_raster = Raster(input_raster)
     gauss = input_raster.astype('float32')
 
     # Create mask from nodata values
@@ -215,13 +215,13 @@ def gaussian(input_raster, sigma):
 def extrapolate_buffer(input_raster, distance, method='nearest'):
     """
     Extrapolate outside of data regions over a specified distance
-    :param input_raster: Input raster to be extrapolated
+    :param input_raster: Input Raster to be extrapolated
     :param distance: (double) Distance of buffer (will be snapped to a fixed number of grid cells)
     :param method: (str) interpolation method (nearest, bilinear, cubic).  Only the nearest method will ensure values are added outside the convex hull
-    :return: raster instance
+    :return: Raster instance
     """
     # Read input and find the number of cells to dilate
-    input_raster = raster(input_raster)
+    input_raster = Raster(input_raster)
     iterations = int(numpy.ceil(distance / min([input_raster.csx, input_raster.csy])))
     a = input_raster.array
 
@@ -247,11 +247,11 @@ def extrapolate_buffer(input_raster, distance, method='nearest'):
 def interpolate_nodata(input_raster, method='nearest'):
     """
     Fill no data values with interpolated values from the edge of valid data
-    :param input_raster: input raster
+    :param input_raster: input Raster
     :param method: interpolation method
-    :return: raster instance
+    :return: Raster instance
     """
-    inrast = raster(input_raster)
+    inrast = Raster(input_raster)
 
     # Check if no data values exist
     a = inrast.array
@@ -266,7 +266,7 @@ def interpolate_nodata(input_raster, method='nearest'):
     points = numpy.vstack([points[0] * inrast.csy, points[1] * inrast.csx]).T
     xi = numpy.where(xi)
     if method != 'nearest':
-        # Corners of raster must have data to ensure convex hull encompasses entire raster
+        # Corners of Raster must have data to ensure convex hull encompasses entire Raster
         index = map(numpy.array, ([0, 0, a.shape[0] - 1, a.shape[0] - 1], [0, a.shape[1] - 1, 0, a.shape[1] - 1]))
         corner_nodata = a[index] == inrast.nodata
         if corner_nodata.sum() != 0:
@@ -289,12 +289,12 @@ def interpolate_nodata(input_raster, method='nearest'):
 
 def interpolate_mask(input_raster, mask_raster, method='nearest'):
     """
-    Interpolate data from the raster to the missing values in the mask.
+    Interpolate data from the Raster to the missing values in the mask.
     Note, if using cubic or linear, values will be limited to the coverage of the convex hull
-    :param input_raster: raster to grid across mask
+    :param input_raster: Raster to grid across mask
     :param mask_raster: mask to grid values
     :param method: interpolation method ('nearest', 'idw', 'linear')
-    :return: raster instance
+    :return: Raster instance
     """
 
     def inverse_distance(pointGrid, xGrid, values):
@@ -349,11 +349,11 @@ def interpolate_mask(input_raster, mask_raster, method='nearest'):
         print "Completed IDW interpolation in %s minutes" % (round((time.time() - now) / 60, 3))
         return iterator
 
-    inrast = raster(input_raster)
+    inrast = Raster(input_raster)
     a = inrast.array
 
-    # Create a mask from mask raster
-    mask = raster(mask_raster).match_raster(inrast)
+    # Create a mask from mask Raster
+    mask = Raster(mask_raster).match_raster(inrast)
     mask = mask.array != mask.nodata
 
     # Gather points for interpolation
@@ -403,7 +403,7 @@ def interpolate_mask(input_raster, mask_raster, method='nearest'):
 def dilate(input_raster, dilate_value=1, iterations=1):
     """
     Perform a region dilation
-    :param input_raster: Input raster
+    :param input_raster: Input Raster
     :param dilate_value: Raster value to dilate
     :return: Raster instance
     """
@@ -412,17 +412,17 @@ def dilate(input_raster, dilate_value=1, iterations=1):
 
 def normalize(input_raster):
     """
-    Normalize the range of raster data values (make range from 0 to 1)
+    Normalize the range of Raster data values (make range from 0 to 1)
     :param input_raster:
     :return:
     """
     min_val = rastmin(input_raster)
-    return (raster(input_raster) - min_val) / (rastmax(input_raster) - min_val)
+    return (Raster(input_raster) - min_val) / (rastmax(input_raster) - min_val)
 
 
 def inverse(input_raster):
     """Return the inverse of data values"""
-    inrast = raster(input_raster)
+    inrast = Raster(input_raster)
     outrast = inrast.empty()
     a = inrast.array
     mask = a != inrast.nodata
@@ -436,15 +436,15 @@ def inverse(input_raster):
 def convolve(input_raster, kernel):
     """
     Perform convolution using the specified kernel of weights
-    :param input_raster: raster to perform convolution
+    :param input_raster: Raster to perform convolution
     :param kernel: numpy 2-d array of floats
-    :return: raster instance
+    :return: Raster instance
     """
     if kernel.size == 1:
         return input_raster * numpy.squeeze(kernel)
 
     # Create a padded array
-    inrast = raster(input_raster)
+    inrast = Raster(input_raster)
     padding = (map(int, ((kernel.shape[0] - 1.) / 2, numpy.ceil((kernel.shape[0] - 1.) / 2))),
                map(int, ((kernel.shape[1] - 1.) / 2, numpy.ceil((kernel.shape[1] - 1.) / 2))))
     a = inrast.array
@@ -484,6 +484,6 @@ def edge_detect(input_Raster, detection_value=1):
     Edge detection
     :param input_Raster:
     :param detection_value:
-    :return: raster instance
+    :return: Raster instance
     """
     dilate()

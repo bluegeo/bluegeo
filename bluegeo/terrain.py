@@ -20,14 +20,14 @@ class TopoError(Exception):
     pass
 
 
-class topo(raster):
+class topo(Raster):
     '''
-    Topographic analysis using a continuous surface (child of raster)
+    Topographic analysis using a continuous surface (child of Raster)
     '''
     def __init__(self, surface):
         # Open and change to float if not already
-        if 'float' not in raster(surface).dtype:
-            surface = raster(surface).astype('float32')
+        if 'float' not in Raster(surface).dtype:
+            surface = Raster(surface).astype('float32')
             super(topo, self).__init__(surface)
         else:
             super(topo, self).__init__(surface)
@@ -237,10 +237,10 @@ class topo(raster):
         :return: Aligned dataset with coverage from self, and input_raster
         """
         print "Matching rasters"
-        # Get extent of both rasters
-        inrast = raster(input_raster)
+        # Get Extent of both rasters
+        inrast = Raster(input_raster)
 
-        # Grab extent from input_rast in coordinate system of self
+        # Grab Extent from input_rast in coordinate system of self
         inrastBbox = util.transform_points([(inrast.left, inrast.top), (inrast.right, inrast.top),
                                             (inrast.left, inrast.bottom), (inrast.right, inrast.bottom)],
                                            inrast.projection, self.projection)
@@ -248,7 +248,7 @@ class topo(raster):
                 min(self.bottom, inrastBbox[2][1], inrastBbox[3][1]),
                 min(self.left, inrastBbox[0][0], inrastBbox[2][0]),
                 max(self.right, inrastBbox[1][0], inrastBbox[3][0]))
-        selfChangeExtent = self.clip(bbox)  # Need extent of both rasters
+        selfChangeExtent = self.clip(bbox)  # Need Extent of both rasters
 
         # Allocate output
         outrast = selfChangeExtent.empty()
@@ -476,11 +476,11 @@ def correct_surface(surface, points, field):
     :param surface: input surface to correct
     :param points: points used to correct surface
     :param field: field with the z-information
-    :return: raster instance
+    :return: Raster instance
     """
     # Load datasets
-    points = vector(points)
-    surface = raster(surface)
+    points = Vector(points)
+    surface = Raster(surface)
     # Project points to same spatial reference as the surface
     points = points.transform(surface.projection)
     z = points[field]
@@ -489,7 +489,7 @@ def correct_surface(surface, points, field):
     # Get indices of aligned cells
     alignCells = util.coords_to_indices((vertices[:, 0], vertices[:, 1]),
                                    surface.top, surface.left, surface.csx, surface.csy, surface.shape)
-    # Remove points that are not within the surface extent
+    # Remove points that are not within the surface Extent
     m = util.intersect_mask((vertices[:, 0], vertices[:, 1]),
                        surface.top, surface.left, surface.csx, surface.csy, surface.shape)
     z = z[m]
@@ -501,7 +501,7 @@ def correct_surface(surface, points, field):
     grid = numpy.vstack([grid[1].ravel(), grid[0].ravel()]).T
     iterator = inverse_distance(vertices[:, :2], grid, dif)
 
-    # Create an output raster and correct with interpolated difference
+    # Create an output Raster and correct with interpolated difference
     out = surface.copy()
     grid = surface.array.ravel()
     for i in iterator:
@@ -619,11 +619,11 @@ def bare_earth(surface, max_area=65., slope_threshold=50.):
         p.close()
         p.join()
 
-    print "Applying changes to output raster"
+    print "Applying changes to output Raster"
     for values, inds in ret:
         new_surface[inds[0]:inds[1], inds[2]:inds[3]][reinsert[inds[4]]] = values
 
-    # Return new raster
+    # Return new Raster
     out = surface.copy()
     out[:] = new_surface[1:-1, 1:-1]
     return out

@@ -4,10 +4,10 @@ from raster import *
 
 def bilinear(input_raster, template_raster):
     """
-    Transform a raster to match the template raster using bilinear interpolation
+    Transform a Raster to match the template Raster using bilinear interpolation
     :param input_raster: Raster to be transformed
-    :param template_raster: Template raster
-    :return: raster instance
+    :param template_raster: Template Raster
+    :return: Raster instance
     """
     # Read rasters
     inrast, template = raster(input_raster), raster(template_raster)
@@ -18,7 +18,7 @@ def bilinear(input_raster, template_raster):
     insr.ImportFromWkt(inrast.projection)
     outsr.ImportFromWkt(template.projection)
     if not insr.IsSame(outsr):
-        # Transform the grid coordinates of the template raster
+        # Transform the grid coordinates of the template Raster
         inpyproj = pj.Proj(insr.ExportToProj4())
         outpyproj = pj.Proj(outsr.ExportToProj4())
         grid = template.mgrid
@@ -32,7 +32,7 @@ def bilinear(input_raster, template_raster):
             (inrast.top - grid[1]) / inrast.csy)
     del grid
 
-    # Load data values from input raster
+    # Load data values from input Raster
     im = inrast.array
 
     # Allocate output

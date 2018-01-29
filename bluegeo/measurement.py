@@ -15,24 +15,24 @@ class MeasurementError(Exception):
 
 def label(data, return_map=False, raster_template=None):
     """
-    Label contiguous regions in a raster or an array
-    :param data: raster or numpy array
+    Label contiguous regions in a Raster or an array
+    :param data: Raster or numpy array
     :param return_map: Return a dictionary of cell indices associated with each label
-    :param raster_template: Template raster to use if using an array
-    :return: output labelled raster or array (if no template), and map of labels if return_map is True
+    :param raster_template: Template Raster to use if using an array
+    :return: output labelled Raster or array (if no template), and map of labels if return_map is True
     """
     array_only = False
     if isinstance(data, numpy.ndarray):
         a = data
         background = 0
         if raster_template is not None:
-            rast = raster(raster_template)
+            rast = Raster(raster_template)
             if any([rast.shape[0] != data.shape[0], rast.shape[1] != data.shape[1]]):
-                raise MeasurementError("Input raster template does not match array")
+                raise MeasurementError("Input Raster template does not match array")
         else:
             array_only = True
     else:
-        rast = raster(data)
+        rast = Raster(data)
         a = rast.array
         background = rast.nodata
 
@@ -70,10 +70,10 @@ def zonal():
 def distance(sources):
     """
     Calculate distance to sources everywhere in the dataset
-    :param sources: raster with sources as legitimate data
+    :param sources: Raster with sources as legitimate data
     :return: distance array
     """
-    r = raster(sources)
+    r = Raster(sources)
     out = r.astype('float32')
     out[:] = distance_transform_edt(r.array == r.nodata, [r.csx, r.csy])
     return out
@@ -81,12 +81,12 @@ def distance(sources):
 
 def cost_surface(sources, cost, reverse=False):
     """
-    Generate a cost surface using a source raster and a cost raster
+    Generate a cost surface using a source Raster and a cost Raster
     :return:
     """
     # Generate cost surface
-    cost = raster(cost).astype('float32')
-    sources = raster(sources).match_raster(cost)
+    cost = Raster(cost).astype('float32')
+    sources = Raster(sources).match_raster(cost)
     sources = sources.array != sources.nodata
     _cost = cost.array
     m = _cost != cost.nodata

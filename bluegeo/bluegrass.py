@@ -32,7 +32,7 @@ class GrassSession(object):
             # Assume epsg code
             self.location_seed = "EPSG:{}".format(src)
         else:
-            # Assume georeferenced vector or raster
+            # Assume georeferenced Vector or Raster
             self.spatial_data = assert_type(src)(src)
             self.location_seed = src
 
@@ -99,7 +99,7 @@ class GrassSession(object):
     def set_region(self):
         if hasattr(self, 'spatial_data'):
             from grass.script import core as grass
-            if isinstance(self.spatial_data, raster):
+            if isinstance(self.spatial_data, Raster):
                 grass.run_command('g.region', n=self.spatial_data.top, s=self.spatial_data.bottom,
                                   e=self.spatial_data.right, w=self.spatial_data.left,
                                   rows=self.spatial_data.shape[0], cols=self.spatial_data.shape[1])
@@ -125,14 +125,14 @@ def watershed(dem, flow_direction='SFD', accumulation_path=None, direction_path=
               change_nodata=True):
     """
     Calculate hydrologic routing networks
-    :param dem: Digital Elevation Model raster
+    :param dem: Digital Elevation Model Raster
     :param flow_direction: Specify one of 'SFD' for single flow direction (D8) or 'MFD' for multiple flow direction (D-inf)
     :param accumulation_path: Path of output flow accumulation dataset if desired
     :param direction_path: Path of output flow direction dataset if desired
     :param positive_fd: Return positive flow direction values only
     :return: Raster instances of flow direction, and flow accumulation, respectively
     """
-    # Ensure input raster is valid and in a gdal format
+    # Ensure input Raster is valid and in a gdal format
     dem, garbage = force_gdal(dem)
 
     # Write flags using args
@@ -175,16 +175,16 @@ def watershed(dem, flow_direction='SFD', accumulation_path=None, direction_path=
 
     # Fix no data values in fa
     if change_nodata:
-        fa = raster(accupath, mode='r+')
+        fa = Raster(accupath, mode='r+')
         for a, s in fa.iterchunks():
             a[numpy.isnan(a) | numpy.isinf(a) | (a == fa.nodata)] = numpy.finfo('float32').min
             fa[s] = a
         fa.nodataValues = [numpy.finfo('float32').min]
     else:
-        fa = raster(accupath)
+        fa = Raster(accupath)
 
-    # Return raster instances
-    fd = raster(dirpath)
+    # Return Raster instances
+    fd = Raster(dirpath)
     fd.garbage = {'path': dirpath, 'num': 1}
     fa.garbage = {'path': accupath, 'num': 1}
     return fd, fa
@@ -197,7 +197,7 @@ def stream_extract(dem, minimum_contributing_area, stream_length=0, accumulation
     :param minimum_contributing_area:
     :return:
     """
-    # Ensure input raster is valid and in a gdal format
+    # Ensure input Raster is valid and in a gdal format
     dem, dem_garbage = force_gdal(dem)
     if accumulation is not None:
         accumulation, accu_garbage = force_gdal(accumulation)
@@ -205,7 +205,7 @@ def stream_extract(dem, minimum_contributing_area, stream_length=0, accumulation
         accu_garbage = False
 
     # Compute threshold using minimum contributing area
-    r = raster(dem)
+    r = Raster(dem)
     threshold = minimum_contributing_area / (r.csx * r.csy)
 
     stream_path = util.generate_name(dem, 'streams', 'tif')
@@ -238,8 +238,8 @@ def stream_extract(dem, minimum_contributing_area, stream_length=0, accumulation
         except:
             pass
 
-    # Return raster instances
-    streams = raster(stream_path)
+    # Return Raster instances
+    streams = Raster(stream_path)
     streams.garbage = {'path': stream_path, 'num': 1}
     return streams
 
@@ -247,17 +247,17 @@ def stream_extract(dem, minimum_contributing_area, stream_length=0, accumulation
 def stream_order(dem, minimum_contributing_area, stream_order_path=None, method='strahler'):
     """
     Calculated stream order from a DEM using the prescribed method
-    :param dem: Digital Elevation Model raster
+    :param dem: Digital Elevation Model Raster
     :param minimum_contributing_area: Minimum contributing area to constitute a stream
-    :param stream_order_path: Path to output stream order raster dataset if desired
+    :param stream_order_path: Path to output stream order Raster dataset if desired
     :param method: Output stream order type.  Use one of 'strahler', 'horton', 'hack', or 'shreve'
     :return: Raster instance with output stream order values
     """
-    # Ensure input raster is valid and in a gdal format
+    # Ensure input Raster is valid and in a gdal format
     dem, garbage = force_gdal(dem)
 
     # Compute threshold using minimum contributing area
-    r = raster(dem)
+    r = Raster(dem)
     threshold = minimum_contributing_area / (r.csx * r.csy)
 
     # Parse output path
@@ -299,8 +299,8 @@ def stream_order(dem, minimum_contributing_area, stream_order_path=None, method=
         except:
             pass
 
-    # Return raster instances
-    order = raster(orderpath)
+    # Return Raster instances
+    order = Raster(orderpath)
     order.garbage = {'path': orderpath, 'num': 1}
     return order
 
@@ -308,26 +308,26 @@ def stream_order(dem, minimum_contributing_area, stream_order_path=None, method=
 def water_outlet(coordinates, dem=None, direction=None,  basin_path=None):
     """
     Delineate basins from a list of points
-    :param coordinates: vector or list of coordinate tuples in the form [(x1, y1), (x2, y2),...(xn, yn)]
-    :param dem: digital elevation model raster (if no flow direction surface is available)
+    :param coordinates: Vector or list of coordinate tuples in the form [(x1, y1), (x2, y2),...(xn, yn)]
+    :param dem: digital elevation model Raster (if no flow direction surface is available)
     :param direction: flow direction surface (if available)
-    :param basin_path: path for output basin raster
-    :return: raster instance with enumerated basins
+    :param basin_path: path for output basin Raster
+    :return: Raster instance with enumerated basins
     """
     # Check coordinates
-    if isinstance(coordinates, basestring) or isinstance(coordinates, vector):
-        coordinates = vector(coordinates).transform(raster(dem).projection).vertices[:, [0, 1]]
+    if isinstance(coordinates, basestring) or isinstance(coordinates, Vector):
+        coordinates = Vector(coordinates).transform(Raster(dem).projection).vertices[:, [0, 1]]
 
     # Use dem if fd not specified
     garbage = False
     if direction is not None:
         fd, garbage = force_gdal(direction)
-        fd = raster(fd)
+        fd = Raster(fd)
     else:
         try:
             fd = watershed(dem)[0]
         except RasterError:
-            raise BlueGrassError('If a flow direction raster is not specified, a valid DEM must be specified')
+            raise BlueGrassError('If a flow direction Raster is not specified, a valid DEM must be specified')
 
     csx, csy = fd.csx, fd.csy
 
@@ -370,7 +370,7 @@ def water_outlet(coordinates, dem=None, direction=None,  basin_path=None):
     # If an output path is specified, save the output
     if basin_path is not None:
         outrast.save(basin_path)
-        outrast = raster(basin_path)
+        outrast = Raster(basin_path)
 
     return outrast
 
@@ -386,7 +386,7 @@ def watershed_basin(dem, basin_area, basin_path=None, flow_direction='SFD', half
     :param half_basins: Split basins into halves along streams if desired.
     :return: Raster instance of enumerated basins
     """
-    # Ensure input raster is valid and in a gdal format
+    # Ensure input Raster is valid and in a gdal format
     dem, garbage = force_gdal(dem)
 
     # Ensure the minimum basin area makes sense
@@ -431,7 +431,7 @@ def watershed_basin(dem, basin_area, basin_path=None, flow_direction='SFD', half
         except:
             pass
 
-    basins = raster(basinpath)
+    basins = Raster(basinpath)
     basins.garbage = {'path': basinpath, 'num': 1}
 
     return basins
@@ -446,9 +446,9 @@ def gwflow(phead, status, hc_x, hc_y, s, top, bottom, **kwargs):
     maxit = kwargs.get('maxit', 10000)
 
     # Ensure all input rasters match
-    phead = raster(phead)
+    phead = Raster(phead)
     status, hc_x, hc_y, s, top, bottom = [force_gdal(rast.match_raster(phead)) for rast in
-                                          map(raster, [status, hc_x, hc_y, s, top, bottom])]
+                                          map(Raster, [status, hc_x, hc_y, s, top, bottom])]
     phead = force_gdal(phead)
 
     # Parse output paths
@@ -479,7 +479,7 @@ def gwflow(phead, status, hc_x, hc_y, s, top, bottom, **kwargs):
         graster.out_gdal('head', format="GTiff", output=out_head)
         graster.out_gdal('budget', format='GTiff', output=out_budget)
 
-    return raster(out_head), raster(out_budget)
+    return Raster(out_head), Raster(out_budget)
 
 
 def sun(elevation, day, step=1):
@@ -508,7 +508,7 @@ def sun(elevation, day, step=1):
         except:
             pass
 
-    sun = raster(out_sun)
+    sun = Raster(out_sun)
     sun.garbage = {'path': out_sun, 'num': 1}
     return sun
 
@@ -525,6 +525,6 @@ def lidar(las_file, las_srs_epsg, output_raster, resolution=1, return_type='min'
                           method=return_type, resolution=resolution, return_filter=return_filter, flags='e')
         graster.out_gdal('outrast', format="GTiff", output=output_raster)
 
-    elev = raster(output_raster)
+    elev = Raster(output_raster)
     elev.garbage = {'path': output_raster, 'num': 1}
     return elev

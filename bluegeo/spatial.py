@@ -44,45 +44,45 @@ class ExtentError(Exception):
     pass
 
 
-class extent(object):
+class Extent(object):
 
     def __init__(self, data):
         """
         Extent to be used to control geometries
-        :param data: iterable of (top, bottom, left, right) or vector class instance, or instance of raster class
+        :param data: iterable of (top, bottom, left, right) or Vector class instance, or instance of Raster class
         """
         if any(isinstance(data, o) for o in [tuple, list, numpy.ndarray]):
             self.bounds = data
             self.geo = None
-        elif isinstance(data, vector):
+        elif isinstance(data, Vector):
             self.bounds = (data.top, data.bottom, data.left, data.right)
             self.geo = data
-        elif isinstance(data, raster):
+        elif isinstance(data, Raster):
             self.bounds = (data.top, data.bottom, data.left, data.right)
             self.geo = data
-        elif isinstance(data, extent):
+        elif isinstance(data, Extent):
             self.__dict__.update(data.__dict__)
         else:
-            raise ExtentError('Unsupported extent argument of type {}'.format(type(data).__name__))
+            raise ExtentError('Unsupported Extent argument of type {}'.format(type(data).__name__))
 
         try:
             if self.bounds[0] <= self.bounds[1] or self.bounds[2] >= self.bounds[3]:
                 assert False
         except:
-            raise ExtentError("Invalid or null extent")
+            raise ExtentError("Invalid or null Extent")
 
     def within(self, other):
         """
-        Check if this extent is within another
-        :param other: other data that can be instantiated using the extent class
+        Check if this Extent is within another
+        :param other: other data that can be instantiated using the Extent class
         :return: boolean
         """
         try:
-            other = extent(other).transform(self.geo.projection)
+            other = Extent(other).transform(self.geo.projection)
         except AttributeError:
-            other = extent(other)
+            other = Extent(other)
         top, bottom, left, right = self.bounds
-        _top, _bottom, _left, _right = extent(other).bounds
+        _top, _bottom, _left, _right = Extent(other).bounds
         if all([top <= _top, bottom >= _bottom, left >= _left, right <= _right]):
             return True
         else:
@@ -90,34 +90,34 @@ class extent(object):
 
     def intersects(self, other):
         """
-        Check if this extent intersects another
-        :param other: other data that can be instantiated using the extent class
+        Check if this Extent intersects another
+        :param other: other data that can be instantiated using the Extent class
         :return: boolean
         """
         try:
-            other = extent(other).transform(self.geo.projection)
+            other = Extent(other).transform(self.geo.projection)
         except AttributeError:
-            other = extent(other)
+            other = Extent(other)
         top, bottom, left, right = self.bounds
-        _top, _bottom, _left, _right = extent(other).bounds
+        _top, _bottom, _left, _right = Extent(other).bounds
         if any([top <= _bottom, bottom >= _top, left >= _right, right <= _left]):
             return False
         else:
             return True
 
     def contains(self, other):
-        return extent(other).within(self)
+        return Extent(other).within(self)
 
     def transform(self, projection, precision=1E-09):
         """
-        Transform the current extent to the defined projection.
+        Transform the current Extent to the defined projection.
         Note, the geo attribute will be disconnected for safety.
         :param projection: input projection argument
-        :return: new extent instance
+        :return: new Extent instance
         """
         if self.geo is None:
             # Cannot transform, as the coordinate system is unknown
-            return extent(self.bounds)
+            return Extent(self.bounds)
 
         # Gather the spatial references
         wkt = parse_projection(projection)
@@ -127,7 +127,7 @@ class extent(object):
         outsr.ImportFromWkt(wkt)
         if insr.IsSame(outsr):
             # Nothing needs to be done
-            return extent(self.bounds)
+            return Extent(self.bounds)
 
         def optimize_extent(ct, constant_bound, start, stop, accum=True, direction='y'):
             space = numpy.linspace(start, stop, 4)
@@ -164,47 +164,47 @@ class extent(object):
 
         right = optimize_extent(coordTransform, self.bounds[3], self.bounds[1], self.bounds[0], True, 'x')
 
-        return extent((top, bottom, left, right))
+        return Extent((top, bottom, left, right))
 
     @property
     def corners(self):
-        """Get corners of extent as coordinates [(x1, y1), ...(xn, yn)]"""
+        """Get corners of Extent as coordinates [(x1, y1), ...(xn, yn)]"""
         top, bottom, left, right = self.bounds
         return [(left, top), (right, top), (right, bottom), (left, bottom)]
 
     def __eq__(self, other):
-        check = extent(other)
+        check = Extent(other)
         if not self.geo is None:
             check = check.transform(self.geo.projection)
         return numpy.all(numpy.isclose(self.bounds, check.bounds))
 
 
-class raster(object):
+class Raster(object):
     """
-    Main raster data interfacing class
+    Main Raster data interfacing class
 
     Data can be:
-        1.  Path to a GDAL supported raster
-        2.  Similarly, a gdal raster instance
+        1.  Path to a GDAL supported Raster
+        2.  Similarly, a gdal Raster instance
         3.  Path to an HDF5 dataset
         4.  An h5py dataset instance
-        5.  Another instance of this raster class,
+        5.  Another instance of this Raster class,
             which creates a copy of the input.
 
     Data are first read virtually, whereby all
     attributes may be accessed, but no underlying
     grid data are loaded into memory.
 
-    Data from the raster may be loaded into memory
+    Data from the Raster may be loaded into memory
     using standard __getitem__ syntax, by accessing
     the .array attribute (property), or by iterating
     all chunks (i.e. blocks, or tiles).
 
-    Modes for modifying raster datasets are 'r',
+    Modes for modifying Raster datasets are 'r',
     'r+', and 'w'.  Using 'w' will create an empty
-    raster, 'r+' will allow direct modification of the
+    Raster, 'r+' will allow direct modification of the
     input dataset, and 'r' will automatically
-    create a copy of the raster for writing if
+    create a copy of the Raster for writing if
     a function that requires modification is called.
     """
     def __init__(self, input_data, mode='r', **kwargs):
@@ -221,7 +221,7 @@ class raster(object):
                 self.build_new_raster(input_data, **kwargs)
             # Check if input_data is a valid file
             elif not os.path.isfile(input_data) and not os.path.isdir(input_data):
-                raise RasterError('%s is not a raster file' % input_data)
+                raise RasterError('%s is not a Raster file' % input_data)
             else:
                 # Try an HDF5 input_data source
                 try:
@@ -248,8 +248,8 @@ class raster(object):
         elif isinstance(input_data, h5py.File):
             self.load_from_hdf5(input_data)
             self.format = 'HDF5'
-        # ...or a raster instance
-        elif isinstance(input_data, raster):
+        # ...or a Raster instance
+        elif isinstance(input_data, Raster):
             # Create pointer to other instance (same object)
             self.__dict__ = input_data.__dict__
             # Garbage is only collected if one instance exists
@@ -260,13 +260,13 @@ class raster(object):
                               "Data may be one of:\n"
                               "path\ngdal.Dataset\n"
                               "h5py.File\n"
-                              "raster instance\n"
-                              "kwargs to build new raster".format(type(input_data).__name__))
+                              "Raster instance\n"
+                              "kwargs to build new Raster".format(type(input_data).__name__))
 
         # Populate other attributes
         self.activeBand = 1
         # Set default interpolation- this should be changed manually to
-        #   configure all interpolations of this raster.  Use one of:
+        #   configure all interpolations of this Raster.  Use one of:
         #     'bilinear',
         #     'nearest',
         #     'cubic',
@@ -282,7 +282,7 @@ class raster(object):
             self.aMethod = 'np'
 
     def load_from_gdal(self, ds):
-        '''Load attributes from a gdal raster'''
+        '''Load attributes from a gdal Raster'''
         self.projection = ds.GetProjectionRef()
         gt = ds.GetGeoTransform()
         self.left = float(gt[0])
@@ -319,8 +319,8 @@ class raster(object):
 
     def new_hdf5_raster(self, output_path, compress):
         """
-        Create a new HDF5 data source for raster.  Factory for 'save' and 'empty'.
-        :param output_path: path for raster
+        Create a new HDF5 data source for Raster.  Factory for 'save' and 'empty'.
+        :param output_path: path for Raster
         :return: None
         """
         # Do not overwrite self
@@ -331,7 +331,7 @@ class raster(object):
         with h5py.File(output_path, mode='w', libver='latest') as newfile:
             # Copy data from data source to new file
             prvb = self.activeBand
-            # File may not exist yet if being built from new raster
+            # File may not exist yet if being built from new Raster
             if hasattr(self, 'path'):
                 chunks = self.chunks
             else:
@@ -367,7 +367,7 @@ class raster(object):
             self.new_hdf5_raster(output_path, compress=compress)
 
             # Transfer data
-            out_rast = raster(output_path, mode='r+')
+            out_rast = Raster(output_path, mode='r+')
             for _ in self.bands:
                 out_rast.activeBand = self.activeBand
                 if self.useChunks:
@@ -409,12 +409,12 @@ class raster(object):
 
     def build_new_raster(self, path, **kwargs):
         """
-        Build a new raster from a set of keyword args
+        Build a new Raster from a set of keyword args
         """
         # Force to HDF5 TODO: Provide support for GDAL types
         if path.split('.')[-1].lower() != 'h5':
             path += '.h5'
-        # Get kwargs- for building the new raster
+        # Get kwargs- for building the new Raster
         self.projection = parse_projection(
             kwargs.get('projection', None))
         self.csy = float(kwargs.get('csy', 1))
@@ -429,7 +429,7 @@ class raster(object):
         data = kwargs.get('data', None)
         if data is None and self.shape is None:
             raise RasterError('Either "data" or "shape" must be specified'
-                              ' when building a new raster.')
+                              ' when building a new Raster.')
         if NUMEXPR:
             self.aMethod = 'ne'
         else:
@@ -491,13 +491,13 @@ class raster(object):
         """
         Create a copy of the underlying dataset to use for writing
         temporarily.  Used when mode is 'r' and processing is required,
-        or self is instantiated using another raster instance.
+        or self is instantiated using another Raster instance.
         Defaults to HDF5 format.
         """
         path = generate_name(self.path, file_suffix, format)
-        # Write new file and return raster
+        # Write new file and return Raster
         self.save(path)
-        new_rast = raster(path)
+        new_rast = Raster(path)
         # new_rast is temporary, so prepare garbage
         new_rast.garbage = {'path': path, 'num': 1}
         new_rast.mode = 'r+'
@@ -505,10 +505,10 @@ class raster(object):
 
     def empty(self, path=None, compress=True):
         """
-        Return an empty copy of the raster- fast for empty raster instantiation
+        Return an empty copy of the Raster- fast for empty Raster instantiation
         :param path: output path if desired
         :param compress: Compress the output
-        :return: raster instance
+        :return: Raster instance
         """
         if path is None:
             out_path = generate_name(self.path, 'copy', 'h5')
@@ -518,7 +518,7 @@ class raster(object):
         self.new_hdf5_raster(out_path, compress=compress)
 
         # Add to garbage if temporary, and make writeable
-        outrast = raster(out_path)
+        outrast = Raster(out_path)
         if path is None:
             outrast.garbage = {'path': out_path, 'num': 1}
         outrast.mode = 'r+'
@@ -526,11 +526,11 @@ class raster(object):
 
     def full(self, data, path=None, compress=True):
         """
-        Return a copy of the raster filled with the input data
-        :param data: Array or scalar to be used to fill the raster
+        Return a copy of the Raster filled with the input data
+        :param data: Array or scalar to be used to fill the Raster
         :param path: output path if not temporary
         :param compress: Compress the output or not
-        :return: raster instance
+        :return: Raster instance
         """
         outrast = self.empty(path=path, compress=compress)
         # h5py is very slow to broadcast and write- broadcast in advance
@@ -559,7 +559,7 @@ class raster(object):
                 mode = gdalconst.GA_Update
             ds = gdal.Open(self.path, mode)
             if ds is None:
-                raise RasterError('Oops...the raster %s is now missing.' %
+                raise RasterError('Oops...the Raster %s is now missing.' %
                                   self.path)
             yield ds
             # Somehow need to find a way to safely close a gdal dataset using
@@ -641,7 +641,7 @@ class raster(object):
 
     @property
     def mgrid(self):
-        """Return arrays of the coordinates of all raster grid cells"""
+        """Return arrays of the coordinates of all Raster grid cells"""
         top_c = self.top - (self.csy * 0.5)
         left_c = self.left + (self.csx * 0.5)
         ishape, jshape = self.shape
@@ -771,7 +771,7 @@ class raster(object):
             return gdal.GetDataTypeByName(datatypes[dtype])
         except KeyError:
             raise RasterError('Unrecognized data type "%s" encountered while'
-                              ' trying to save a GDAL raster' % dtype)
+                              ' trying to save a GDAL Raster' % dtype)
 
     def astype(self, dtype):
         '''Change the data type of self and return copy'''
@@ -802,14 +802,14 @@ class raster(object):
             out.nodataValues[band - 1] =\
                 numpy.asscalar(numpy.array(out.nodata).astype(dtype))
 
-        # Return casted raster
+        # Return casted Raster
         return out
 
     def define_projection(self, projection):
-        '''Define the raster projection'''
+        '''Define the Raster projection'''
         if (self.projection != '' and
                 self.projection is not None) and self.mode == 'r':
-            raise RasterError('The current raster already has a spatial'
+            raise RasterError('The current Raster already has a spatial'
                               ' reference, use mode="r+" to replace.')
         self.projection = parse_projection(projection)
         # Write projection to output files
@@ -825,7 +825,7 @@ class raster(object):
 
     def match_raster(self, input_raster, tolerance=1E-05):
         """
-        Align extent and cells with another raster
+        Align Extent and cells with another Raster
         """
         def isclose(input, values):
             values = [(val - tolerance, val + tolerance) for val in values]
@@ -834,7 +834,7 @@ class raster(object):
             else:
                 return False
 
-        inrast = raster(input_raster)
+        inrast = Raster(input_raster)
 
         # Check if spatial references align
         insrs = osr.SpatialReference()
@@ -842,7 +842,7 @@ class raster(object):
         outsrs = osr.SpatialReference()
         outsrs.ImportFromWkt(inrast.projection)
         samesrs = insrs.IsSame(outsrs)
-        inrast_bbox = extent(inrast).bounds
+        inrast_bbox = Extent(inrast).bounds
 
         # Check if cells align
         if all([isclose(self.csx, [inrast.csx]),
@@ -932,15 +932,15 @@ class raster(object):
 
     def clip(self, bbox_or_dataset):
         """
-        Slice self using bounding box coordinates or, using vector or raster data coverage.
+        Slice self using bounding box coordinates or, using Vector or Raster data coverage.
 
-        Note: the bounding box may not be honoured exactly, as the extent needs to be snapped to the cell size.
-        To yield an extact bounding box extent use transform.
-        :param bbox_or_dataset: raster, vector, extent, or bbox (top, bottom, left, right)
+        Note: the bounding box may not be honoured exactly, as the Extent needs to be snapped to the cell size.
+        To yield an extact bounding box Extent use transform.
+        :param bbox_or_dataset: Raster, Vector, Extent, or bbox (top, bottom, left, right)
         """
         # Get input
         clipper = assert_type(bbox_or_dataset)(bbox_or_dataset)
-        bbox = extent(clipper).transform(self.projection).bounds
+        bbox = Extent(clipper).transform(self.projection).bounds
 
         # Check that bbox is not inverted
         if any([bbox[0] <= bbox[1], bbox[2] >= bbox[3]]):
@@ -953,10 +953,10 @@ class raster(object):
         # Check if no change
         if all([self.top == bbox[0], self.bottom == bbox[1],
                 self.left == bbox[2], self.right == bbox[3],
-                isinstance(clipper, extent)]):
+                isinstance(clipper, Extent)]):
             return self.copy('clip')
 
-        # Create output dataset with new extent
+        # Create output dataset with new Extent
         path = generate_name(self.path, 'clip', 'h5')
         kwargs = {
             'projection': self.projection,
@@ -970,11 +970,11 @@ class raster(object):
             'interpolationMethod': self.interpolationMethod,
             'useChunks': self.useChunks
         }
-        outds = raster(path, mode='w', **kwargs)
-        # If a vector or raster is specified, use it to create a mask
-        if isinstance(clipper, vector):
+        outds = Raster(path, mode='w', **kwargs)
+        # If a Vector or Raster is specified, use it to create a mask
+        if isinstance(clipper, Vector):
             spatial_mask = clipper.transform(self.projection).rasterize(outds.path).array
-        elif isinstance(clipper, raster):
+        elif isinstance(clipper, Raster):
             spatial_mask = clipper.match_raster(self).mask.array
         else:
             spatial_mask = None
@@ -990,8 +990,8 @@ class raster(object):
 
     def clip_to_data(self):
         """
-        Change raster extent to include the minimum bounds where data exist
-        :return: raster instance
+        Change Raster Extent to include the minimum bounds where data exist
+        :return: Raster instance
         """
         i, j = numpy.where(self.array != self.nodata)
         y, x = indices_to_coords(([i.min(), i.max()], [j.min(), j.max()]),
@@ -1001,22 +1001,22 @@ class raster(object):
 
     def transform(self, **kwargs):
         """
-        Change cell size, projection, or extent.
+        Change cell size, projection, or Extent.
         ------------------------
         In Args
 
         "projection": output projection argument
-            (wkt, epsg, osr.SpatialReference, raster instance)
+            (wkt, epsg, osr.SpatialReference, Raster instance)
 
         "csx": output cell size in the x-direction
 
         "cxy": output cell size in the y-direction
 
-        "extent": (extent instance) bounding box for output
-            Note- if extent does not have a defined coordinate system,
+        "Extent": (Extent instance) bounding box for output
+            Note- if Extent does not have a defined coordinate system,
             it is assumed to be in the output spatial reference
 
-        "template": other raster instance, overrides all other arguments and projects into the raster
+        "template": other Raster instance, overrides all other arguments and projects into the Raster
         """
         template = kwargs.get('template', None)
         if template is None:
@@ -1028,11 +1028,11 @@ class raster(object):
             if csy is not None:
                 csy = float(csy)
             projection = parse_projection(kwargs.get('projection', None))
-            output_extent = kwargs.get('extent', None)
+            output_extent = kwargs.get('Extent', None)
             if output_extent is None:
-                bbox = extent(self)
+                bbox = Extent(self)
             else:
-                bbox = extent(output_extent)
+                bbox = Extent(output_extent)
 
             # Check for spatial reference change
             if projection != '':
@@ -1044,13 +1044,13 @@ class raster(object):
                     insrs, outsrs = None, None
             else:
                 insrs, outsrs = None, None
-            if all([i is None for i in [insrs, outsrs, csx, csy]] + [bbox == extent(self)]):
+            if all([i is None for i in [insrs, outsrs, csx, csy]] + [bbox == Extent(self)]):
                 print ("Warning: No transformation operation was necessary")
                 return self.copy('transform')
 
-            # Recalculate the extent and calculate potential new cell sizes if a coordinate system change is necessary
+            # Recalculate the Extent and calculate potential new cell sizes if a coordinate system change is necessary
             if insrs is not None:
-                # Get the corners and transform the extent
+                # Get the corners and transform the Extent
                 bbox = bbox.transform(outsrs)
 
                 # Calculate the new cell size
@@ -1071,18 +1071,18 @@ class raster(object):
 
             top, bottom, left, right = bbox.bounds
 
-            # Snap the potential new cell sizes to the extent
+            # Snap the potential new cell sizes to the Extent
             ncsx = (right - left) / int(round((right - left) / ncsx))
             ncsy = (top - bottom) / int(round((top - bottom) / ncsy))
 
-            # One of extent or cell sizes must be updated to match depending on args
+            # One of Extent or cell sizes must be updated to match depending on args
             if output_extent is not None:
                 # Check that cell sizes are compatible if they are inputs
                 if csx is not None:
                     xresid = round((bbox.bounds[3] - bbox.bounds[2]) % csx, 5)
                     if xresid != round(csx, 5) and xresid != 0:
                         raise RasterError('Transform cannot be completed due to an'
-                                          ' incompatible extent %s and cell size (%s) in'
+                                          ' incompatible Extent %s and cell size (%s) in'
                                           ' the x-direction' % ((bbox.bounds[3], bbox.bounds[2]), csx))
                 else:
                     # Use ncsx
@@ -1091,22 +1091,22 @@ class raster(object):
                     yresid = round((bbox.bounds[0] - bbox.bounds[1]) % csy, 5)
                     if yresid != round(csy, 5) and yresid != 0:
                         raise RasterError('Transform cannot be completed due to an'
-                                          ' incompatible extent %s and cell size (%s) in'
+                                          ' incompatible Extent %s and cell size (%s) in'
                                           ' the y-direction' % ((bbox.bounds[0], bbox.bounds[1]), csy))
                 else:
                     # Use ncsy
                     csy = ncsy
             else:
-                # Use the cell size to modify the output extent
+                # Use the cell size to modify the output Extent
                 if csx is None:
                     csx = ncsx
                 if csy is None:
                     csy = ncsy
 
-                # Compute the shape using the existing extent and input cell sizes
+                # Compute the shape using the existing Extent and input cell sizes
                 shape = (int(round((top - bottom) / csy)), int(round(right - left) / csx))
 
-                # Expand extent to fit cell size
+                # Expand Extent to fit cell size
                 resid = (right - left) - (csx * shape[1])
                 if resid < 0:
                     resid /= -2.
@@ -1116,7 +1116,7 @@ class raster(object):
                 left -= resid
                 right += resid
 
-                # Expand extent to fit cell size
+                # Expand Extent to fit cell size
                 resid = (top - bottom) - (csy * shape[0])
                 if resid < 0:
                     resid /= -2.
@@ -1125,13 +1125,13 @@ class raster(object):
                     resid = (numpy.ceil(resid) - resid) * csy
                 bottom -= resid
                 top += resid
-                bbox = extent((top, bottom, left, right))
+                bbox = Extent((top, bottom, left, right))
 
             # Compute new shape
             shape = (int(round((bbox.bounds[0] - bbox.bounds[1]) / csy)),
                      int(round((bbox.bounds[3] - bbox.bounds[2]) / csx)))
 
-            # Create output raster dataset
+            # Create output Raster dataset
             if insrs is not None:
                 insrs = insrs.ExportToWkt()
             if outsrs is not None:
@@ -1141,11 +1141,11 @@ class raster(object):
                 output_srs = self.projection
 
         else:
-            t = raster(template)
+            t = Raster(template)
             insrs = self.projection
             outsrs = t.projection
             output_srs = t.projection
-            shape, bbox, csx, csy = t.shape, extent(t), t.csx, t.csy
+            shape, bbox, csx, csy = t.shape, Extent(t), t.csx, t.csy
 
         # Cast to floating point if the interpolation method is not nearest
         if 'int' in self.dtype.lower() and self.interpolationMethod != 'nearest':
@@ -1171,7 +1171,7 @@ class raster(object):
             # The context manager does not work with ogr datasets
             pass
 
-        # Direct to input raster dataset
+        # Direct to input Raster dataset
         if self.format != 'gdal':
             with self.copy('copy', 'tif') as input_raster:
                 with input_raster.dataset as inds:
@@ -1185,8 +1185,8 @@ class raster(object):
                 gdal.ReprojectImage(inds, outds, insrs, outsrs, self.interpolation)
         inds, outds = None, None
 
-        # Return new raster
-        outrast = raster(path)
+        # Return new Raster
+        outrast = Raster(path)
         # This is temporary as an output
         outrast.garbage = {'path': path, 'num': 1}
         outrast.mode = 'r+'
@@ -1210,7 +1210,7 @@ class raster(object):
 
     def new_gdal_raster(self, output_path, shape, bands, dtype, left, top, csx, csy,
                         projection, chunks, compress=True):
-        """Generate a new gdal raster dataset"""
+        """Generate a new gdal Raster dataset"""
         extension = output_path.split('.')[-1].lower()
         if extension not in self.gdal_drivers.keys():
             raise RasterError(
@@ -1238,29 +1238,29 @@ class raster(object):
             bigtiff = 'BIGTIFF=NO'
         parszOptions = [tiled, blockysize, blockxsize, comp, bigtiff]
         ds = driver.Create(output_path, int(shape[1]), int(shape[0]),
-                           bands, raster.get_gdal_dtype(dtype),
+                           bands, Raster.get_gdal_dtype(dtype),
                            parszOptions)
         if ds is None:
-            raise RasterError('GDAL error trying to create new raster.')
+            raise RasterError('GDAL error trying to create new Raster.')
         ds.SetGeoTransform((left, float(csx), 0, top, 0, csy * -1.))
         projection = parse_projection(projection)
         ds.SetProjection(projection)
         ds = None
-        outraster = raster(output_path, mode='r+')
+        outraster = Raster(output_path, mode='r+')
         return outraster
 
     def polygonize(self):
         """
-        Factory for raster.vectorize to wrap the gdal.Polygonize method
-        :return: vector instance
+        Factory for Raster.vectorize to wrap the gdal.Polygonize method
+        :return: Vector instance
         """
         # Create a .tif if necessary
         raster_path, garbage = force_gdal(self)
-        input_raster = raster(raster_path)
+        input_raster = Raster(raster_path)
 
-        # Allocate an output vector
+        # Allocate an output Vector
         vector_path = generate_name(self.path, 'polygonize', 'shp')
-        outvect = vector(vector_path, mode='w', geotype='Polygon', projection=self.projection)
+        outvect = Vector(vector_path, mode='w', geotype='Polygon', projection=self.projection)
         outvect.add_fields('raster_val', self.dtype)
 
         with input_raster.dataset as ds:
@@ -1279,17 +1279,17 @@ class raster(object):
             except:
                 pass
 
-        outvect.__dict__.update(vector(vector_path).__dict__)
+        outvect.__dict__.update(Vector(vector_path).__dict__)
         outvect.garbage = {'path': vector_path, 'num': 1}
         return outvect
 
     def vectorize(self, geotype='Polygon', **kwargs):
         """
-        Create a polygon, line, or point vector from the raster
-        :param geotype: The geometry type of the output vector.  Choose from 'Polygon', 'LineString', and 'Point'
+        Create a polygon, line, or point Vector from the Raster
+        :param geotype: The geometry type of the output Vector.  Choose from 'Polygon', 'LineString', and 'Point'
         :param kwargs:
-            centroid=False Use the centroid of the raster regions when creating points
-        :return: vector instance
+            centroid=False Use the centroid of the Raster regions when creating points
+        :return: Vector instance
         """
         if geotype == 'Polygon':
             # Apply gdal.Polygonize method
@@ -1301,7 +1301,7 @@ class raster(object):
         elif geotype == 'Point':
             a = self.array
 
-            # If centroid is specified, label the raster and grab the respective points
+            # If centroid is specified, label the Raster and grab the respective points
             if kwargs.get('centroid', False):
                 labels, number = sklabel(a, return_num=True, background=self.nodata)
                 properties = regionprops(labels)
@@ -1309,38 +1309,38 @@ class raster(object):
                 coords = numpy.array([properties[i].centroid for i in range(number)])
                 coords[:, 0] = (self.top - (self.csy / 2)) - (coords[:, 0] * self.csy)
                 coords[:, 1] = (self.left + (self.csx / 2)) + (coords[:, 1] * self.csx)
-                return vector([shpwkb.dumps(pnt) for pnt in geometry.MultiPoint(numpy.fliplr(coords))],
+                return Vector([shpwkb.dumps(pnt) for pnt in geometry.MultiPoint(numpy.fliplr(coords))],
                               fields=numpy.array(values, dtype=[('raster_val', self.dtype)]),
                               projection=self.projection)
 
-            # Grab the coordinates and make a vector using shapely wkb string dumps
+            # Grab the coordinates and make a Vector using shapely wkb string dumps
             m = a != self.nodata
             y, x = indices_to_coords(numpy.where(m), self.top, self.left, self.csx, self.csy)
 
-            return vector([shpwkb.dumps(pnt) for pnt in geometry.MultiPoint(zip(x, y)).geoms],
+            return Vector([shpwkb.dumps(pnt) for pnt in geometry.MultiPoint(zip(x, y)).geoms],
                           fields=numpy.array(a[m], dtype=[('raster_val', self.dtype)]),
                           projection=self.projection)
 
     def extent_to_vector(self, as_mask=False):
         """
-        Write the current raster extent to a shapefile
-        :param as_mask: Return a vector of values with data in the raster.  Otherwise the image bounds are used.
-        :return: vector instance
+        Write the current Raster Extent to a shapefile
+        :param as_mask: Return a Vector of values with data in the Raster.  Otherwise the image bounds are used.
+        :return: Vector instance
         """
         if as_mask:
             # Polygonize mask
             return self.mask.vectorize('Polygon')
         else:
-            # Create a wkb from the boundary of the raster
-            geo = geometry.Polygon(extent(self).corners)
+            # Create a wkb from the boundary of the Raster
+            geo = geometry.Polygon(Extent(self).corners)
             _wkb = shpwkb.dumps(geo)
 
             # Create an output shapefile from geometry
-            return vector([_wkb], projection=self.projection)
+            return Vector([_wkb], projection=self.projection)
 
     @property
     def mask(self):
-        """Return a raster instance of the data mask (boolean)"""
+        """Return a Raster instance of the data mask (boolean)"""
         return self != self.nodata
 
     @staticmethod
@@ -1428,11 +1428,11 @@ class raster(object):
 
     def __getitem__(self, s):
         """
-        Slice a raster using numpy-like syntax.
-        :param s: item for slicing, may be a slice object, integer, instance of the extent class
+        Slice a Raster using numpy-like syntax.
+        :param s: item for slicing, may be a slice object, integer, instance of the Extent class
         :return:
         """
-        # TODO: add boolean, fancy, and extent slicing
+        # TODO: add boolean, fancy, and Extent slicing
         if self.format == 'gdal':
             # Do a simple check for necessary no data value fixes using topleft
             if not self.ndchecked:
@@ -1453,7 +1453,7 @@ class raster(object):
                     self.gdal_args_from_slice(s, self.shape)
             except:
                 raise RasterError('Boolean and fancy indexing currently'
-                                  ' unsupported for GDAL raster data sources.'
+                                  ' unsupported for GDAL Raster data sources.'
                                   ' Convert to HDF5 to use this'
                                   ' functionality.')
             with self.dataset as ds:
@@ -1490,7 +1490,7 @@ class raster(object):
             with self.dataset as ds:
                 ds[str(self.band)][s] = a
             # except Exception as e:
-            #     raise RasterError('Error writing raster data. Check that mode'
+            #     raise RasterError('Error writing Raster data. Check that mode'
             #                       ' is "r+" and that the arrays match.\n\nMore'
             #                       ' info:\n%s' % e)
 
@@ -1499,15 +1499,15 @@ class raster(object):
         Factory for all operand functions
         :param r: value
         :param op: operand
-        :return: raster instance
+        :return: Raster instance
         """
         if isinstance(r, numbers.Number) or isinstance(r, numpy.ndarray):
             out = self.full(r)
         else:
             try:
-                r = raster(r)
+                r = Raster(r)
             except:
-                raise RasterError('Expected a number, numpy array, or valid raster while'
+                raise RasterError('Expected a number, numpy array, or valid Raster while'
                                   ' using the "%s" operator' % op)
             out = r.match_raster(self)
 
@@ -1547,9 +1547,9 @@ class raster(object):
     def perform_i_operation(self, r, op):
         """
         Factory for all i-operand functions
-        :param r: number, array, or raster
+        :param r: number, array, or Raster
         :param op: operand
-        :return: raster instance
+        :return: Raster instance
         """
         if self.mode == 'r':
             raise RasterError('%s open as read-only.' %
@@ -1558,9 +1558,9 @@ class raster(object):
             r = self.full(r)
         else:
             try:
-                r = raster(r)
+                r = Raster(r)
             except:
-                raise RasterError('Expected a number, numpy array, or valid raster while'
+                raise RasterError('Expected a number, numpy array, or valid Raster while'
                                   ' using the "%s=" operator' % op)
             r.match_raster(self)
 
@@ -1593,7 +1593,7 @@ class raster(object):
 
     def perform_cond_operation(self, r, op):
         """
-        Wrap the numpy conditional operators using underlying raster data
+        Wrap the numpy conditional operators using underlying Raster data
         :param r:
         :param op:
         :return:
@@ -1604,12 +1604,12 @@ class raster(object):
             r = numpy.broadcast_to(r, self.shape)
         else:
             r = assert_type(r)(r)
-            if isinstance(r, vector):
+            if isinstance(r, Vector):
                 r = r.rasterize(self)
-            elif isinstance(r, raster):
+            elif isinstance(r, Raster):
                 r = r.match_raster(self)
 
-        # Create a mask raster where rasters match
+        # Create a mask Raster where rasters match
         mask = self.astype('bool').full(0)
         mask.nodataValues = [0 for i in range(self.bandCount)]
 
@@ -1715,10 +1715,10 @@ class raster(object):
             'np': 'numpy'
         }
         if os.path.isfile(self.path):
-            prestr = ('A happy raster named %s of house %s\n' %
+            prestr = ('A happy Raster named %s of house %s\n' %
                       (os.path.basename(self.path), self.format.upper()))
         else:
-            prestr = ('An orphaned raster %s of house %s\n' %
+            prestr = ('An orphaned Raster %s of house %s\n' %
                       (os.path.basename(self.path), self.format.upper()))
         return (prestr +
                 '    Bands               : %s\n'
@@ -1768,7 +1768,7 @@ class raster(object):
                         self.garbage['path'], e)
 
 
-class mosaic(raster):
+class mosaic(Raster):
     """Handle a mosaic of rasters"""
     def __init__(self, raster_list):
         self.rasterList = []
@@ -1777,7 +1777,7 @@ class mosaic(raster):
         self.cellSizes = []
         projection = None
         for inputRaster in raster_list:
-            rast = raster(inputRaster)
+            rast = Raster(inputRaster)
             self.rasterList.append(inputRaster)
             self.extents.append((rast.top, rast.bottom, rast.left, rast.right))
             self.cellSizes.append((rast.csx, rast.csy))
@@ -1802,7 +1802,7 @@ class mosaic(raster):
         precision = numpy.argmax([numpy.dtype(dtype).itemsize for dtype in self.rasterDtypes])
         dtype = self.rasterDtypes[precision]
 
-        # Build a new raster using the combined specs
+        # Build a new Raster using the combined specs
         path = generate_name(self.path, 'rastermosaic', 'h5')
         # TODO: Add this path to the garbage of the output
         super(mosaic, self).__init__(path, mode='w', csx=csx, csy=csy, top=top, left=left,
@@ -1843,7 +1843,7 @@ class mosaic(raster):
 
     def interpolation_method(self, method):
         """
-        Update interpolation methods for each raster
+        Update interpolation methods for each Raster
         :param method: A single method, or a list of methods that matches the number of rasters
         :return: None
         """
@@ -1860,14 +1860,14 @@ class mosaic(raster):
 # Numpy-like methods
 def rastround(input_raster, decimal_places):
     """
-    Round a raster to a defined number of decimal places
-    :param input_raster: raster to be rounded
+    Round a Raster to a defined number of decimal places
+    :param input_raster: Raster to be rounded
     :param decimal_places: (int) number of decimal places
-    :return: raster instance
+    :return: Raster instance
     """
     # Open everything
     dp = int(decimal_places)
-    r = raster(input_raster)
+    r = Raster(input_raster)
     out = r.empty()
 
     # Perform rounding
@@ -1883,21 +1883,21 @@ def rastround(input_raster, decimal_places):
 
 
 def copy(input_raster):
-    """Copy a raster dataset"""
-    return raster(input_raster).copy('copy')
+    """Copy a Raster dataset"""
+    return Raster(input_raster).copy('copy')
 
 
 def empty(input_raster):
-    return raster(input_raster).empty()
+    return Raster(input_raster).empty()
 
 
 def full(input_raster):
-    return raster(input_raster).full()
+    return Raster(input_raster).full()
 
 
 def unique(input_raster):
     """Compute unique values"""
-    r = raster(input_raster)
+    r = Raster(input_raster)
     if r.useChunks:
         uniques = []
         for a, s in r.iterchunks():
@@ -1909,10 +1909,10 @@ def unique(input_raster):
 def rastmin(input_raster):
     """
     Calculate the minimum value
-    :param input_raster: A raster-compatible object
+    :param input_raster: A Raster-compatible object
     :return: Minimum value
     """
-    r = raster(input_raster)
+    r = Raster(input_raster)
     if r.useChunks:
         stack = []
         for a, s in r.iterchunks():
@@ -1923,20 +1923,20 @@ def rastmin(input_raster):
         if len(stack) > 0:
             return min(stack)
         else:
-            raise ValueError('Cannot collect minimum: No data in raster')
+            raise ValueError('Cannot collect minimum: No data in Raster')
     else:
         try:
             return numpy.min(r.array[r.array != r.nodata])
         except ValueError:
-            raise ValueError('Cannot collect minimum: No data in raster')
+            raise ValueError('Cannot collect minimum: No data in Raster')
 
 def rastmax(input_raster):
     """
     Calculate the maximum value
-    :param input_raster: A raster-compatible object
+    :param input_raster: A Raster-compatible object
     :return: Maximum value
     """
-    r = raster(input_raster)
+    r = Raster(input_raster)
     if r.useChunks:
         stack = []
         for a, s in r.iterchunks():
@@ -1947,23 +1947,23 @@ def rastmax(input_raster):
         if len(stack) > 0:
             return max(stack)
         else:
-            raise ValueError('Cannot collect maximum: No data in raster')
+            raise ValueError('Cannot collect maximum: No data in Raster')
     else:
         try:
             return numpy.max(r.array[r.array != r.nodata])
         except ValueError:
-            raise ValueError('Cannot collect maximum: No data in raster')
+            raise ValueError('Cannot collect maximum: No data in Raster')
 
 
 
-class vector(object):
+class Vector(object):
 
     def __init__(self, data=None, mode='r', fields=None, projection=None, geotype=None):
         """
         Vector interfacing class
         :param data: Input data- may be one of:
             1. Path (string)
-            2. ogr vector instance
+            2. ogr Vector instance
             3. Table
             4. wkt geometry
             5. wkb geometry
@@ -1975,7 +1975,7 @@ class vector(object):
         populate_from_ogr = False
         if isinstance(data, basestring):
             if os.path.isfile(data) and mode != 'w':
-                # Open a vector file or a table
+                # Open a Vector file or a table
                 self.driver = self.get_driver_by_path(data)
                 if self.driver == 'table':
                     # TODO: Implement table driver
@@ -1985,7 +1985,7 @@ class vector(object):
                     driver = ogr.GetDriverByName(self.driver)
                     _data = driver.Open(data)
                     if _data is None:
-                        raise VectorError('Unable to open the dataset {} as a vector'.format(data))
+                        raise VectorError('Unable to open the dataset {} as a Vector'.format(data))
                     populate_from_ogr = True
                     self.path = data
             elif mode == 'w':
@@ -1994,11 +1994,11 @@ class vector(object):
                 # Check input geometry type to make sure it works
                 if geotype not in ['Polygon', 'LineString', 'Point']:
                     raise VectorError(
-                        'Geometry type {} not understood while creating new vector data source.  '
+                        'Geometry type {} not understood while creating new Vector data source.  '
                         'Use one of: {}'.format(geotype, ', '.join(geotypes))
                     )
 
-                # Create some attributes so vector.empty can be called
+                # Create some attributes so Vector.empty can be called
                 self.geometryType = geotype
                 self.projection = parse_projection(projection)
                 if fields is not None:
@@ -2017,8 +2017,8 @@ class vector(object):
             self.path = None
             populate_from_ogr = True
 
-        elif isinstance(data, vector):
-            # Update to new vector instance
+        elif isinstance(data, Vector):
+            # Update to new Vector instance
             self.__dict__.update(data.__dict__)
             # Garbage is only collected if one instance exists
             if hasattr(self, 'garbage'):
@@ -2040,7 +2040,7 @@ class vector(object):
             if fields is not None and len(fields) != len(geos_and_types):
                 raise VectorError('The number of input fields and well-known geometries do not match')
 
-            # Create some attributes so vector.empty can be called
+            # Create some attributes so Vector.empty can be called
             self.geometryType = geos_and_types[0][1]
             self.path = generate_name(None, '', 'shp')
             self.projection = parse_projection(projection)
@@ -2080,7 +2080,7 @@ class vector(object):
                     outlyr.CreateFeature(outFeat)
                     outFeat.Destroy()
 
-            self.__dict__.update(vector(outVect.path).__dict__)
+            self.__dict__.update(Vector(outVect.path).__dict__)
 
         else:
             raise VectorError('Cannot read the input data of type {}'.format(type(data).__name__))
@@ -2156,8 +2156,8 @@ class vector(object):
     @contextmanager
     def layer(self, i=0):
         """
-        Open the source vector file for writing
-        :return: ogr vector layer instance
+        Open the source Vector file for writing
+        :return: ogr Vector layer instance
         """
         driver = ogr.GetDriverByName(self.driver)
         if self.mode in ['r+', 'w']:
@@ -2174,11 +2174,11 @@ class vector(object):
 
     def save(self, path):
         """
-        Save the vector instance
+        Save the Vector instance
         :param path: Output save path
-        :return: vector instance where saved
+        :return: Vector instance where saved
         """
-        # TODO: Allow NoneType path and save as in-memory vector
+        # TODO: Allow NoneType path and save as in-memory Vector
         outDriver = self.get_driver_by_path(path)
         if outDriver == self.driver:
             # Simply copy files
@@ -2262,7 +2262,7 @@ class vector(object):
     def empty(self, spatial_reference=None, fields=[], prestr='copy', out_path=None):
         """
         Create a copy of self as an output shp without features
-        :return: Fresh vector instance
+        :return: Fresh Vector instance
         """
         add_to_garbage = False
         if out_path is None:
@@ -2285,7 +2285,7 @@ class vector(object):
         # Generate file and layer
         driver = ogr.GetDriverByName(self.get_driver_by_path(out_path))
         ds = driver.CreateDataSource(out_path)
-        layer = ds.CreateLayer('bluegeo vector', outsr, self.geometry_type)
+        layer = ds.CreateLayer('bluegeo Vector', outsr, self.geometry_type)
 
         # Add fields
         for name, dtype in fields:
@@ -2299,22 +2299,22 @@ class vector(object):
             # Create field
             layer.CreateField(fieldDefn)
 
-        # Clean up and return vector instance
+        # Clean up and return Vector instance
         del layer
         ds.Destroy()
 
-        return_vect = vector(out_path, mode='r+')
+        return_vect = Vector(out_path, mode='r+')
         if add_to_garbage:
             return_vect.garbage = {'path': out_path, 'num': 1}
         return return_vect
 
     def add_fields(self, name, dtype, data=None):
         """
-        Create a new vector with the output field(s)
+        Create a new Vector with the output field(s)
         :param name: single or list of names to create
         :param dtype: single or list of data types for each field
         :param data: list of lists to write to each new field
-        :return: vector instance
+        :return: Vector instance
         """
         if isinstance(name, basestring):
             name, dtype = [name], [dtype]  # Need to be iterable (and not strings)
@@ -2324,7 +2324,7 @@ class vector(object):
             with self.layer() as inlyr:
                 outLyrDefn = inlyr.GetLayerDefn()
                 for _name, _dtype in zip(name, dtype):
-                    # Modify the current vector with the field
+                    # Modify the current Vector with the field
                     fieldDefn = ogr.FieldDefn(_name, self.numpy_dtype_to_ogr(_dtype))
                     # Create field
                     inlyr.CreateField(fieldDefn)
@@ -2394,19 +2394,19 @@ class vector(object):
                         outlyr.CreateFeature(outFeat)
                         outFeat.Destroy()
 
-            return vector(outVect)  # Re-read vector to ensure meta up to date
+            return Vector(outVect)  # Re-read Vector to ensure meta up to date
 
     def transform(self, sr):
         """
         Project dataset into a new system
         :param sr: Input spatial reference
-        :return: vector instance
+        :return: Vector instance
         """
         # Create ogr coordinate transformation object
         insr = osr.SpatialReference()
         outsr = osr.SpatialReference()
         if self.projection == '':
-            raise VectorError('Source vector has an unknown spatial reference, and cannot be transformed')
+            raise VectorError('Source Vector has an unknown spatial reference, and cannot be transformed')
         insr.ImportFromWkt(self.projection)
         outsr.ImportFromWkt(parse_projection(sr))
 
@@ -2446,7 +2446,7 @@ class vector(object):
                     # Add to output layer and clean up
                     outlyr.CreateFeature(outFeat)
                     outFeat.Destroy()
-        return vector(outVect)  # Re-read vector to ensure meta up to date
+        return Vector(outVect)  # Re-read Vector to ensure meta up to date
 
     @staticmethod
     def check_fields(fields):
@@ -2492,10 +2492,10 @@ class vector(object):
 
     def __getitem__(self, item):
         """
-        __getitem__ functionality of vector class
+        __getitem__ functionality of Vector class
         :param item: If an index or slice is used, geometry wkb's are returned.
         If a string is used, it will return a numpy array of the field values.
-        If an instance of the extent class is used, the output will be a clipped vector instance
+        If an instance of the Extent class is used, the output will be a clipped Vector instance
         :return: List of wkb's or numpy array of field
         """
         with self.layer() as lyr:
@@ -2525,8 +2525,8 @@ class vector(object):
                                    dtype=dtype)
 
             # TODO: Finish this- need to figure out how ogr.Layer.Clip works. Maybe through an in-memory ds
-            elif isinstance(item, extent):
-                # Clip and return a vector instance
+            elif isinstance(item, Extent):
+                # Clip and return a Vector instance
                 data = self.empty(self.projection, self.fieldTypes, prestr='clip')
                 # Perform a clip
                 with item.layer as cliplyr:
@@ -2535,15 +2535,15 @@ class vector(object):
                             # With geometry
                             cliplyr.Clip(cliplyr, outlyr)
                         else:
-                            # With extent
+                            # With Extent
                             cliplyr.Clip(extlyr, outlyr)
 
         return data
 
     def __setitem__(self, item, val):
-        """Set a field or geometry if the vector is open for writing"""
+        """Set a field or geometry if the Vector is open for writing"""
         if self.mode not in ['r+', 'w']:
-            raise VectorError('Current vector open as read-only')
+            raise VectorError('Current Vector open as read-only')
 
         # Check the type of input
         if isinstance(item, basestring):
@@ -2670,10 +2670,10 @@ class vector(object):
             datum = datum.replace('_', ' ')
         size = self.size
         if size > 0:
-            prestr = ('A happy vector named %s of house %s\n' %
+            prestr = ('A happy Vector named %s of house %s\n' %
                       (os.path.basename(self.path), self.driver))
         else:
-            prestr = ('An orphaned vector %s of house %s\n' %
+            prestr = ('An orphaned Vector %s of house %s\n' %
                       (os.path.basename(self.path), self.driver))
         return (prestr +
                 '    Features   : %s\n'
@@ -2755,7 +2755,7 @@ class vector(object):
             raise VectorError('File path does not have an extension')
 
         try:
-            return vector.drivers()[ext]
+            return Vector.drivers()[ext]
         except KeyError:
             raise VectorError('Unsupported file format: "{}"'.format(ext))
 
@@ -2867,13 +2867,13 @@ class vector(object):
 
     def rasterize(self, template_raster, attribute_field=None):
         """
-        Create a raster from the current instance
-        :param template_raster: raster to use specs from
-        :param attribute_field: attribute field to use for raster values (returns a mask if None)
-        :return: raster instance
+        Create a Raster from the current instance
+        :param template_raster: Raster to use specs from
+        :param attribute_field: attribute field to use for Raster values (returns a mask if None)
+        :return: Raster instance
         """
-        # Grab the raster specs
-        r = raster(template_raster)
+        # Grab the Raster specs
+        r = Raster(template_raster)
         top, left, nrows, ncols, csx, csy = r.top, r.left, r.shape[0], r.shape[1], r.csx, r.csy
 
         # Transform self if necessary
@@ -2898,7 +2898,7 @@ class vector(object):
             dtype = 'bool'
             write_data = numpy.ones(shape=vector.featureCount)
 
-        # Allocate output array and raster for writing raster values
+        # Allocate output array and Raster for writing Raster values
         outarray = numpy.full(r.shape, nodata, dtype)
 
         outrast = r.astype(dtype)
@@ -3018,7 +3018,7 @@ class vector(object):
 
 
 def force_gdal(input_raster):
-    r = raster(input_raster)
+    r = Raster(input_raster)
     if r.format == 'HDF5':
         path = generate_name(r.path, 'copy', 'tif')
         r.save(path)
@@ -3033,41 +3033,41 @@ def assert_type(data):
     """
     Check and return the type of data
     :param data: data to parse
-    :return: object to instantiate (raster, vector, or extent)
+    :return: object to instantiate (Raster, Vector, or Extent)
     """
     def raise_type_error():
         raise TypeError('Unable to provide a means to open {}'.format(data))
 
-    if isinstance(data, vector):
-        return vector
-    if isinstance(data, raster):
-        return raster
-    if isinstance(data, extent):
-        return extent
+    if isinstance(data, Vector):
+        return Vector
+    if isinstance(data, Raster):
+        return Raster
+    if isinstance(data, Extent):
+        return Extent
     if any([isinstance(data, t) for t in [list, tuple, numpy.ndarray]]) and len(data) == 4:
         # An iterable that is expected to be a bounding box
-        return extent
+        return Extent
 
     if isinstance(data, basestring):
-        # Check if gdal raster
+        # Check if gdal Raster
         ds = gdal.Open(data)
         if ds is not None:
-            return raster
+            return Raster
 
-        # Check if a bluegeo raster
+        # Check if a bluegeo Raster
         if data.split('.')[-1].lower() == 'h5':
             with h5py.File(data, libver='latest') as ds:
                 # Just check for the format attribute
                 if 'format' in dict(ds.attrs).keys():
-                    return raster
+                    return Raster
 
-        # Check if a vector
+        # Check if a Vector
         try:
-            driver = vector.get_driver_by_path(data)
+            driver = Vector.get_driver_by_path(data)
         except:
             raise_type_error()
         if driver == 'table':
-            return vector
+            return Vector
         else:
             # Try to open dataset
             driver = ogr.GetDriverByName(driver)
@@ -3075,4 +3075,4 @@ def assert_type(data):
             if _data is None:
                 raise_type_error()
             else:
-                return vector
+                return Vector

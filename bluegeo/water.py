@@ -21,9 +21,9 @@ class hruError(Exception):
 def wetness(dem, minimum_area):
     """
     Calculate a wetness index using streams of a minimum contributing area
-    :param dem: dem (raster)
+    :param dem: dem (Raster)
     :param minimum_area: area in units^2
-    :return: raster instance
+    :return: Raster instance
     """
     return normalize(inverse(cost_surface(bluegrass.stream_order(dem, minimum_area), topo(dem).slope())))
 
@@ -79,7 +79,7 @@ def convergence(size=(11, 11), fd=None):
     if fd is None:
         fa, fd = self.route()
     else:
-        fd = raster(fd)
+        fd = Raster(fd)
         if 'int' not in fd.dtype:
             fd = fd.astype('int32')
     # Allocate output
@@ -105,12 +105,12 @@ def stream_slope(dem, streams, units='degrees'):
     :param units:
     :return:
     """
-    dem = raster(dem)
+    dem = Raster(dem)
     dem.interpolationMethod = 'bilinear'
 
     with dem.match_raster(streams) as dem:
         elev = dem.array
-    strms = raster(streams)
+    strms = Raster(streams)
     m = strms.array != strms.nodata
 
     # Compute stream slope
@@ -158,7 +158,7 @@ def aggradation(stream_slope, slope_thresh=6, stream_slope_thresh=5):
     Uses the dem as an input
     surface, and accepts (or they will be derived):
 
-    streams: a streams raster
+    streams: a streams Raster
     min_contrib_area: minimum contributing area to define streams
     slope: a slope surface used to control the region delineation
     :param stream_slope:
@@ -167,7 +167,7 @@ def aggradation(stream_slope, slope_thresh=6, stream_slope_thresh=5):
     :return:
     """
     # Get or compute necessary datasets
-    strslo = raster(stream_slope)
+    strslo = Raster(stream_slope)
     seeds = set(zip(*numpy.where(strslo.array != strslo.nodata)))
     slope = topo(self).slope().array
 
@@ -233,12 +233,12 @@ def aggradation(stream_slope, slope_thresh=6, stream_slope_thresh=5):
 def channel_density(streams, sample_distance=50):
     """
     Compute channel density- poor man's sinuosity
-    :param streams: stream raster
+    :param streams: stream Raster
     :param sample_distance: distance to sample density
-    :return: raster instance
+    :return: Raster instance
     """
-    # Allocate output as a raster cast to 32-bit floating points
-    streams = raster(streams)
+    # Allocate output as a Raster cast to 32-bit floating points
+    streams = Raster(streams)
 
     i = numpy.ceil(sample_distance / streams.csy)
     if i < 1:
@@ -260,14 +260,14 @@ def channel_density(streams, sample_distance=50):
 def sinuosity(dem, stream_order, sample_distance=100):
     """
     Calculate sinuosity from a dem or streams
-    :param kwargs: dem=path to dem _or_ stream_order=path to strahler stream order raster
+    :param kwargs: dem=path to dem _or_ stream_order=path to strahler stream order Raster
         distance=search distance to calculate sinuosity ratio
     :return: sinuosity as a ratio
 
     Updated October 25, 2017
     """
-    # Collect as raster of streams
-    stream_order = raster(stream_order)
+    # Collect as Raster of streams
+    stream_order = Raster(stream_order)
     distance = sample_distance
     radius = distance / 2.
     if distance <= 0:
@@ -377,11 +377,11 @@ def h60(dem, basins, output_raster):
     Returns the indices of H60 regions.
     '''
     # Read DEM
-    dem = raster(dem)
+    dem = Raster(dem)
     a = dem.load('r')
     # Read basins and create output dataset
-    bas = raster(basins)
-    output = raster(bas)
+    bas = Raster(basins)
+    output = Raster(bas)
     loadout = output.load('r+')
     # Create an index for basins
     out = sklabel(loadout, connectivity=2, background=bas.nodata[0],
@@ -422,17 +422,17 @@ def h60(dem, basins, output_raster):
 
 class hru(object):
     """
-    Create a model domain instance that is a child of the raster class
+    Create a model domain instance that is a child of the Raster class
     Example:
         >>> # Create an instance of the hru class, and call is "hrus"
-        >>> hrus = hru('path_to_dem.tif', 'path_to_mask.shp')  # Note, the mask may be a raster or a vector
+        >>> hrus = hru('path_to_dem.tif', 'path_to_mask.shp')  Raster
         >>> # Add elevation as a spatial discretization dataset, and split it using an interval of 250m
         >>> hrus.add_elevation(250)
         Successfully added ELEVATION to spatial data
         >>> # Split HRU's into 4 classes of solar radiation, calling the attribute "SOLRAD"
         >>> hrus.add_spatial_data('solar_radiation.tif', 'SOLRAD', number=4)
         Successfully added SOLRAD to spatial data
-        >>> # Add landcover as an attribute using a vector file and the attribute field "COVER_CLASS".  Specify a mode filter to compute zonal stats.
+        >>> # Add landcover as an attribute using a Vector file and the attribute field "COVER_CLASS".  Specify a mode filter to compute zonal stats.
         >>> hrus.add_zonal_data('landcover.shp', 'COVER', 'mode', vector_attribute='COVER_CLASS')
         Successfully added COVER to zonal data
         >>> # Add aspect only as an attribute using zonal stats
@@ -461,14 +461,14 @@ class hru(object):
     def __init__(self, dem, basin_mask, output_srid=4269):
         """
         HRU instance for dynamic HRU creation tasks
-        :param dem: (str or raster) Digital Elevation Model
-        :param basin_mask: (str, vector or raster) mask to use for the overall basin
+        :param dem: (str or Raster) Digital Elevation Model
+        :param basin_mask: (str, Vector or Raster) mask to use for the overall basin
         :param output_srid: spatial reference for the output centroids
         """
         # Prepare dem using mask
-        dem = raster(dem)
+        dem = Raster(dem)
         mask = assert_type(basin_mask)(basin_mask)
-        if isinstance(mask, raster):
+        if isinstance(mask, Raster):
             # Reduce the DEM to the necessary data
             mask = mask.match_raster(dem)
             m = mask.array
@@ -501,14 +501,14 @@ class hru(object):
         If the bins argument is used, it will override the other interval argumants.
         Similarly, if the number argument is not 0 it will override the interval argument.
         If neither of bins, interval, or number are specified, the discrete values will be used as regions.
-        :param dataset: vector or raster
+        :param dataset: Vector or Raster
         :param name: Name to be used for output HRU's
         :param summary_method: Method used to summarize original data within bins
         :param interval: float: Interval in units to divide into HRU's
         :param number: Number of regions to split the dataset into
         :param bins: Manual bin edges used to split the dataset into regions
         :param dataset_interpolation: Method used to interpolate the dataset
-        :param vector_attribute: Attribute field to use for data values if the dataset is a vector
+        :param vector_attribute: Attribute field to use for data values if the dataset is a Vector
         :param correlation_dict: dictionary used to correlate the attributed value with text
         :return: None
         """
@@ -524,11 +524,11 @@ class hru(object):
             print "Warning: Existing zonal dataset {} will be overwritten".format(name)
 
         data = assert_type(dataset)(dataset)
-        if isinstance(data, vector) and vector_attribute is None:
-            raise hruError('If a vector is used to add spatial data, an attribute field name must be specified')
+        if isinstance(data, Vector) and vector_attribute is None:
+            raise hruError('If a Vector is used to add spatial data, an attribute field name must be specified')
 
         # Rasterize or align the input data
-        if isinstance(data, vector):
+        if isinstance(data, Vector):
             ds = data.rasterize(self.dem, vector_attribute)
         else:
             ds = data.match_raster(self.dem)
@@ -581,11 +581,11 @@ class hru(object):
                        dataset_interpolation='bilinear', vector_attribute=None, correlation_dict=None):
         """
         Prepare a dataset for zonal statistics while creating HRUs
-        :param dataset: Instance of the raster class
+        :param dataset: Instance of the Raster class
         :param name: Name of the dataset to be used in the HRU set
         :param summary_method: Statistical method to be applied
         :param dataset_interpolation: Method used to interpolate the dataset
-        :param vector_attribute: Attribute field to use for data values if the dataset is a vector
+        :param vector_attribute: Attribute field to use for data values if the dataset is a Vector
         :param correlation_dict: dictionary used to correlate the attributed value with text
         :return: None
         """
@@ -600,11 +600,11 @@ class hru(object):
             print "Warning: Existing zonal dataset {} will be overwritten".format(name)
 
         data = assert_type(dataset)(dataset)
-        if isinstance(data, vector) and vector_attribute is None:
-            raise hruError('If a vector is used to add zonal attributes, an attribute field name must be specified')
+        if isinstance(data, Vector) and vector_attribute is None:
+            raise hruError('If a Vector is used to add zonal attributes, an attribute field name must be specified')
 
         # Rasterize or align the input data
-        if isinstance(data, vector):
+        if isinstance(data, Vector):
             ds = data.rasterize(self.dem, vector_attribute)
         else:
             ds = data.match_raster(self.dem)
@@ -851,8 +851,8 @@ class hru(object):
 
     def save_hru_raster(self, output_name):
         """
-        Save the current HRU set as a raster
-        :param output_name: name of the output raster
+        Save the current HRU set as a Raster
+        :param output_name: name of the output Raster
         :return: None
         """
         # Create HRUs and add data if needed
@@ -879,7 +879,7 @@ class hru(object):
 class riparian(object):
     """Objects and methods for the delineation and calculation of sensitivity of the riparian"""
     def __init__(self, dem):
-        self.dem = raster(dem)
+        self.dem = Raster(dem)
         self.dem.interpolationMethod = 'bilinear'
 
         self.update_region = False  # Used to track changes in the riparian delineation
@@ -934,11 +934,11 @@ class riparian(object):
         """
         if streams is not None:
             streams = assert_type(streams)(streams)
-            if isinstance(streams, vector):
+            if isinstance(streams, Vector):
                 print "Rasterizing streams"
                 self.streams = streams.rasterize(self.dem)
             else:
-                print "Matching stream raster to study area"
+                print "Matching stream Raster to study area"
                 self.streams = streams.match_raster(self.dem)
         elif not hasattr(self, 'streams'):
             print "Delineating streams"
@@ -952,6 +952,8 @@ class riparian(object):
             if not hasattr(self, 'fa'):
                 print "Calculating flow accumulation"
                 self.fa = bluegrass.watershed(self.dem, flow_direction='MFD', positive_fd=False)[1]
+
+            print "Scaling cost using contributing area"
 
             # Get rid of nans
             fa = self.fa.copy()
@@ -1144,12 +1146,12 @@ class riparian(object):
             raise Exception("The directory {} already exists".format(dir_path))
         os.mkdir(dir_path)
         for key, attr in self.__dict__.iteritems():
-            if isinstance(attr, raster):
+            if isinstance(attr, Raster):
                 attr.save(os.path.join(dir_path), '{}.h5'.format(key))
 
     def load(self, dir_path):
         files = [os.path.join(dir_path, f) for f in os.listdir(dir_path)]
-        self.__dict__.update({os.path.basename(f).split('.')[0]: raster(f) for f in files})
+        self.__dict__.update({os.path.basename(f).split('.')[0]: Raster(f) for f in files})
 
     def __repr__(self):
         return "Riparian delineation and sensitivity instance with:\n" + '\n'.join(self.__dict__.keys())
@@ -1165,7 +1167,7 @@ def segment_water(dem, slope_threshold=0, slope=None):
     if slope is None:
         slope = topo(dem).slope()
     else:
-        slope = raster(slope)
+        slope = Raster(slope)
 
     labels = label(slope <= slope_threshold, True)[1]
 
@@ -1191,22 +1193,22 @@ def bankfull(dem, average_annual_precip=250, contributing_area=None, flood_facto
              streams=None, min_stream_area=None):
     """
     Calculate a bankfull depth using the given precipitation and flood factor
-    :param dem: Input elevation raster
-    :param average_annual_precip: Average annaul precipitation (cm) as a scalar, vector, or raster
-    :param contributing_area: A contributing area (km**2) raster. It will be calculated using the DEM if not provided.
+    :param dem: Input elevation Raster
+    :param average_annual_precip: Average annaul precipitation (cm) as a scalar, Vector, or Raster
+    :param contributing_area: A contributing area (km**2) Raster. It will be calculated using the DEM if not provided.
     :param flood_factor: Coefficient to amplify the bankfull depth
-    :param streams: Input stream vector or raster.  They will be calculated using the min_stream_area if not provided
+    :param streams: Input stream Vector or Raster.  They will be calculated using the min_stream_area if not provided
     :param min_stream_area: If no streams are provided, this is used to derived streams.  Units are m**2
-    :return: raster instance of the bankful depth
+    :return: Raster instance of the bankful depth
     """
-    dem = raster(dem)
+    dem = Raster(dem)
 
     # Grab the streams
     if streams is not None:
         streams = assert_type(streams)(streams)
-        if isinstance(streams, vector):
+        if isinstance(streams, Vector):
             streams = streams.rasterize(dem)
-        elif isinstance(streams, raster):
+        elif isinstance(streams, Raster):
             streams = streams.match_raster(dem)
     else:
         if min_stream_area is None:
@@ -1219,7 +1221,7 @@ def bankfull(dem, average_annual_precip=250, contributing_area=None, flood_facto
     if contributing_area is None:
         contrib = bluegrass.watershed(dem)[1] * (dem.csx * dem.csy / 1E6)  # in km**2
     else:
-        contrib = raster(contributing_area)
+        contrib = Raster(contributing_area)
 
     # Parse the precip input and create the precip variable
     if any([isinstance(average_annual_precip, t) for t in [int, float, numpy.ndarray]]):
@@ -1260,23 +1262,23 @@ def valley_confinement(dem, min_stream_area, cost_threshold=2500, streams=None, 
                        max_width=False, minimum_drainage_area=0, min_stream_length=100, min_valley_bottom_area=10000):
     """
      Valley Confinement algorithm based on https://www.fs.fed.us/rm/pubs/rmrs_gtr321.pdf
-    :param dem: (raster) Elevation raster
+    :param dem: (Raster) Elevation Raster
     :param min_stream_area: (float) Minimum contributing area to delineate streams if they are not provided.
     :param cost_threshold: (float) The threshold used to constrain the cumulative cost of slope from streams
-    :param streams: (vector or raster) A stream vector or raster.
-    :param waterbodies: (vector or raster) A vector or raster of waterbodies. If this is not provided, they will be segmented from the DEM.
-    :param average_annual_precip: (float, ndarray, raster) Average annual precipitation (in cm)
+    :param streams: (Vector or Raster) A stream Vector or Raster.
+    :param waterbodies: (Vector or Raster) A Vector or Raster of waterbodies. If this is not provided, they will be segmented from the DEM.
+    :param average_annual_precip: (float, ndarray, Raster) Average annual precipitation (in cm)
     :param slope_threshold: (float) A threshold (in percent) to clip the topographic slope to.  If False, it will not be used.
-    :param use_flood_option: (boolean) Determines whether a bankfull flood extent will be used or not.
+    :param use_flood_option: (boolean) Determines whether a bankfull flood Extent will be used or not.
     :param flood_factor: (float) A coefficient determining the amplification of the bankfull
     :param max_width: (float) The maximum valley width of the bottoms.
     :param minimum_drainage_area: (float) The minimum drainage area used to filter streams (km**2).
     :param min_stream_length: (float) The minimum stream length (m) used to filter valley bottom polygons.
     :param min_valley_bottom_area: (float) The minimum area for valey bottom polygons.
-    :return: raster instance (of the valley bottom)
+    :return: Raster instance (of the valley bottom)
     """
-    # Create a raster instance from the DEM
-    dem = raster(dem)
+    # Create a Raster instance from the DEM
+    dem = Raster(dem)
 
     # The moving mask is a mask of input datasets as they are calculated
     moving_mask = numpy.zeros(shape=dem.shape, dtype='bool')
@@ -1297,9 +1299,9 @@ def valley_confinement(dem, min_stream_area, cost_threshold=2500, streams=None, 
     # Calculate streams if they are not provided
     if streams is not None:
         streams = assert_type(streams)(streams)
-        if isinstance(streams, vector):
+        if isinstance(streams, Vector):
             streams = streams.rasterize(dem)
-        elif isinstance(streams, raster):
+        elif isinstance(streams, Raster):
             streams = streams.match_raster(dem)
     else:
         streams = bluegrass.stream_extract(dem, min_stream_area)
@@ -1332,15 +1334,15 @@ def valley_confinement(dem, min_stream_area, cost_threshold=2500, streams=None, 
     print "Removing waterbodies"
     if waterbodies is not None:
         waterbodies = assert_type(waterbodies)(waterbodies)
-        if isinstance(waterbodies, vector):
+        if isinstance(waterbodies, Vector):
             waterbodies = waterbodies.rasterize(dem)
-        elif isinstance(waterbodies, raster):
+        elif isinstance(waterbodies, Raster):
             waterbodies = waterbodies.match_raster(dem)
     else:
         waterbodies = segment_water(dem, slope=slope)
     moving_mask[waterbodies.array] = 0
 
-    # Create a raster from the moving mask and run a mode filter
+    # Create a Raster from the moving mask and run a mode filter
     print "Applying a mode filter"
     valleys = dem.astype('bool')
     valleys[:] = moving_mask
@@ -1358,7 +1360,7 @@ def valley_confinement(dem, min_stream_area, cost_threshold=2500, streams=None, 
         if inds[0].size * dem.csx * dem.csy >= min_valley_bottom_area and length >= min_stream_length:
             a[inds] = 1
 
-    # Write to output and return a raster instance
+    # Write to output and return a Raster instance
     valleys[:] = a
     print "Completed successfully"
     return valleys

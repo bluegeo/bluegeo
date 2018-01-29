@@ -3,7 +3,7 @@ import tempfile
 
 
 """
-Create a QGIS colour map file from a raster to display unique values
+Create a QGIS colour map file from a Raster to display unique values
 Devin Cairns, started March, 2017
 """
 
@@ -11,10 +11,10 @@ Devin Cairns, started March, 2017
 def create_map(input_raster, alpha=255, output='temp'):
     """
     Do it
-    :param input_raster: Any object supported by bluegeo.raster
+    :param input_raster: Any object supported by bluegeo.Raster
     :return: Location to a .txt that may be imported in to QGIS
     """
-    nodata = raster(input_raster).nodata
+    nodata = Raster(input_raster).nodata
     unique_values = unique(input_raster)
     if output == 'temp':
         with tempfile.NamedTemporaryFile() as f:
