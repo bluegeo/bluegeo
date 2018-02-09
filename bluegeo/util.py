@@ -78,12 +78,14 @@ def transform_points(points, inproj, outproj):
     :param outproj: output projection of points as wkt
     :return: projected points
     """
-    insr = osr.SpatialReference()
-    insr.ImportFromWkt(inproj)
-    outsr = osr.SpatialReference()
-    outsr.ImportFromWkt(outproj)
-    if insr.IsSame(outsr):
+    if compare_projections(inproj, outproj):
         return points
+
+    insr = osr.SpatialReference()
+    insr.ImportFromWkt(parse_projection(inproj))
+    outsr = osr.SpatialReference()
+    outsr.ImportFromWkt(parse_projection(outproj))
+
     coordTransform = osr.CoordinateTransformation(insr, outsr)
     return [coordTransform.TransformPoint(x, y)[:2] for x, y in points]
 
