@@ -43,5 +43,14 @@ sudo python
 #    grass.run_command('g.extension', extension='r.stream.order', flags='s')
 ```
 
+### To manually install Anaconda to manage env's and packages:
+```
+cd /tmp
+curl -O https://repo.continuum.io/archive/Anaconda2-5.0.1-Linux-x86_64.sh
+bash Anaconda2-5.0.1-Linux-x86_64.sh
+cd /home/ubuntu
+export PATH=~/anaconda2/bin:$PATH
+```
+
 References:
 https://python-packaging.readthedocs.io/en/latest/minimal.html

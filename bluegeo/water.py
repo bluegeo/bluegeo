@@ -425,7 +425,7 @@ class hru(object):
     Create a model domain instance that is a child of the Raster class
     Example:
         >>> # Create an instance of the hru class, and call is "hrus"
-        >>> hrus = hru('path_to_dem.tif', 'path_to_mask.shp')  Raster
+        >>> hrus = hru('path_to_dem.tif', 'path_to_mask.shp')
         >>> # Add elevation as a spatial discretization dataset, and split it using an interval of 250m
         >>> hrus.add_elevation(250)
         Successfully added ELEVATION to spatial data

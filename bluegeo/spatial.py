@@ -1957,6 +1957,27 @@ def rastmax(input_raster):
 
 
 class Vector(object):
+    """Vector data handler"""
+
+    GEOMETRIES = {'Unknown': ogr.wkbUnknown,
+                  'Point': ogr.wkbPoint,
+                  'LineString': ogr.wkbLineString,
+                  'Polygon': ogr.wkbPolygon,
+                  'MultiPoint': ogr.wkbMultiPoint,
+                  'MultiLineString': ogr.wkbMultiLineString,
+                  'MultiPolygon': ogr.wkbMultiPolygon,
+                  'GeometryCollection': ogr.wkbGeometryCollection,
+                  'None': ogr.wkbNone,
+                  'LinearRing': ogr.wkbLinearRing,
+                  'PointZ': ogr.wkbPointZM,
+                  'Point25D': ogr.wkb25DBit,
+                  'LineString25D': ogr.wkbLineString25D,
+                  'Polygon25D': ogr.wkbPolygon25D,
+                  'MultiPoint25D': ogr.wkbMultiPoint25D,
+                  'MultiLineString25D': ogr.wkbMultiLineString25D,
+                  'MultiPolygon25D': ogr.wkbMultiPolygon25D,
+                  'GeometryCollection25D': ogr.wkbGeometryCollection25D
+                  }
 
     def __init__(self, data=None, mode='r', fields=None, projection=None, geotype=None):
         """
@@ -2259,7 +2280,7 @@ class Vector(object):
             # TODO: this
             raise VectorError('Not implemented yet')
 
-    def empty(self, spatial_reference=None, fields=[], prestr='copy', out_path=None):
+    def empty(self, spatial_reference=None, fields=[], prestr='copy', out_path=None, geom_type=None):
         """
         Create a copy of self as an output shp without features
         :return: Fresh Vector instance
@@ -2285,7 +2306,11 @@ class Vector(object):
         # Generate file and layer
         driver = ogr.GetDriverByName(self.get_driver_by_path(out_path))
         ds = driver.CreateDataSource(out_path)
-        layer = ds.CreateLayer('bluegeo Vector', outsr, self.geometry_type)
+        if geom_type is not None:
+            out_geotype = self.GEOMETRIES[geom_type]
+        else:
+            out_geotype = self.geometry_type
+        layer = ds.CreateLayer('bluegeo Vector', outsr, out_geotype)
 
         # Add fields
         for name, dtype in fields:
@@ -2490,6 +2515,156 @@ class Vector(object):
 
         return numpy.array(vertices)
 
+    def buffer(self, distance):
+        """
+        Perform a buffer operation on the vector
+        :param float distance: Width of the buffer
+        :return: Vector instance
+        """
+        distance = float(distance)
+
+        # Create empty output
+        out_vect = self.empty(self.projection, self.fieldTypes, prestr='buffer', geom_type='Polygon')
+
+        # Transform geometries and populate output
+        with self.layer() as inlyr:
+            with out_vect.layer() as outlyr:
+                # Output layer definition
+                outLyrDefn = outlyr.GetLayerDefn()
+                # Gather field values to write to output
+                new_fields = self.check_fields(self.fieldTypes)
+                fields = {newField[0]: self.field_to_pyobj(self[oldField[0]], self.fieldWidth[oldField[0]],
+                                                           self.fieldPrecision[oldField[0]])
+                          for oldField, newField in zip(self.fieldTypes, new_fields)}
+
+                # Iterate geometries and populate output with buffered geo's
+                for i in range(self.featureCount):
+                    # Gather and transform geometry
+                    inFeat = inlyr.GetFeature(i)
+                    geo = inFeat.GetGeometryRef()
+                    buffered_geo = geo.Buffer(distance)
+
+                    # Write output fields and geometries
+                    out_feature = ogr.Feature(outLyrDefn)
+                    for name, dtype in new_fields:
+                        out_feature.SetField(name, fields[name][i])
+                    out_feature.SetGeometry(buffered_geo)
+
+                    # Add to output layer and clean up
+                    outlyr.CreateFeature(out_feature)
+                    out_feature.Destroy()
+
+        return Vector(out_vect)  # Re-read Vector to ensure meta up to date
+
+    def dissolve(self, field=None):
+        """
+        Perform a dissolve operation
+        :param str field: Field to use as dissolve filter
+        :return: Vector instance
+        """
+        # Check if the field exists before commencing the algorithm
+        if field is not None and not field in self.fieldNames:
+            raise VectorError('The field {} does not exist'.format(field))
+
+        # Create empty output
+        out_vect = self.empty(self.projection, self.fieldTypes, prestr='dissolve')
+
+        # Collect the input features
+        if field is not None:
+            field_data = self[field]
+            feat_values = numpy.unique(field_data)
+
+            # A dissolve is redundant if all fields are unique
+            if feat_values.size == self.featureCount:
+                print "Warning, no dissolve took place because the input field has entirely unique values"
+                return self
+        else:
+            feat_values = [None]
+
+        # Open layers and populate with dissolved data
+        with self.layer() as _:
+            with out_vect.layer() as outlyr:
+                # Output layer definition
+                outLyrDefn = outlyr.GetLayerDefn()
+
+                # Iterate the output features and dissolve using shapely.ops.cascaded_union
+                for i, feat_value in enumerate(feat_values):
+                    # Gather geometries
+                    if field is None:
+                        indices = numpy.arange(self.featureCount)
+                    else:
+                        indices = numpy.where(field_data == feat_value)[0]
+
+                    geos = [shpwkb.loads(self[ind][0]) for ind in indices]
+
+                    # Perform union
+                    out_geo = shpwkb.dumps(ops.cascaded_union(geos))
+
+                    # Write output geometries
+                    out_feature = ogr.Feature(outLyrDefn)
+                    out_feature.SetGeometry(out_geo)
+
+                    # Add to output layer and clean up
+                    outlyr.CreateFeature(out_feature)
+                    out_feature.Destroy()
+
+        return Vector(out_vect)  # Re-read Vector to ensure meta up to date
+
+    def fix(self):
+        """
+        Remove null and invalid features to ensure smooth sailing
+        :return: Vector instance
+        """
+        # Create empty output
+        out_vect = self.empty(self.projection, self.fieldTypes, prestr='fixed')
+
+        # Transform geometries and populate output
+        with self.layer() as inlyr:
+            with out_vect.layer() as outlyr:
+                # Output layer definition
+                outLyrDefn = outlyr.GetLayerDefn()
+                # Gather field values to write to output
+                new_fields = self.check_fields(self.fieldTypes)
+                fields = {newField[0]: self.field_to_pyobj(self[oldField[0]], self.fieldWidth[oldField[0]],
+                                                           self.fieldPrecision[oldField[0]])
+                          for oldField, newField in zip(self.fieldTypes, new_fields)}
+
+                # Iterate geometries and populate where valid or not null
+                removed = 0
+                for i in range(self.featureCount):
+                    # Gather and transform geometry
+                    inFeat = inlyr.GetFeature(i)
+                    geo = inFeat.GetGeometryRef()
+
+                    # Do the test
+                    passed = True
+                    try:
+                        _wkb = geo.ExportToWkb()
+                        shp_geo = shpwkb.loads(_wkb)
+                        if any([_wkb is None, not shp_geo.is_valid, shp_geo.is_empty]):
+                            passed = False
+                    except:
+                        passed = False
+
+                    if passed:
+                        out_feature = ogr.Feature(outLyrDefn)
+                        for name, dtype in new_fields:
+                            out_feature.SetField(name, fields[name][i])
+                        out_feature.SetGeometry(ogr.CreateGeometryFromWkb(_wkb))
+
+                        # Add to output layer and clean up
+                        outlyr.CreateFeature(out_feature)
+                        out_feature.Destroy()
+                    else:
+                        removed += 1
+
+        if removed > 0:
+            print "Removed {} of {} geometries".format(removed, self.featureCount)
+        else:
+            print "All geometries passed test"
+
+        return Vector(out_vect)  # Re-read Vector to ensure meta up to date
+
     def __getitem__(self, item):
         """
         __getitem__ functionality of Vector class
@@ -2507,11 +2682,12 @@ class Vector(object):
                 for i in iter:
                     feature = lyr.GetFeature(i)
                     geo = feature.GetGeometryRef()
+
                     try:
                         data.append(geo.ExportToWkb())
                     except:
                         # Null geometry
-                        data.append('')
+                        data.append(shpwkb.dumps(getattr(geometry, self.geometryType)([])))
                     feature.Destroy()
 
             elif isinstance(item, basestring):
@@ -2521,8 +2697,12 @@ class Vector(object):
                 except IndexError:
                     raise VectorError('No field named {} in the file {}'.format(item, self.path))
 
-                data = numpy.array([lyr.GetFeature(i).GetField(item) for i in numpy.arange(self.featureCount)],
-                                   dtype=dtype)
+                data = [lyr.GetFeature(i).GetField(item) for i in numpy.arange(self.featureCount)]
+                try:
+                    data = numpy.array(data, dtype=dtype)
+                except:
+                    print "Warning: could not read field {} as {}, and it has been cast to string".format(item, dtype)
+                    data = numpy.array(map(str, data))
 
             # TODO: Finish this- need to figure out how ogr.Layer.Clip works. Maybe through an in-memory ds
             elif isinstance(item, Extent):
@@ -2808,27 +2988,7 @@ class Vector(object):
         ogr geometry types from string representations
         :return: dict of ogr geometry objects
         """
-        _types  = {'Unknown': ogr.wkbUnknown,
-                   'Point': ogr.wkbPoint,
-                   'LineString': ogr.wkbLineString,
-                   'Polygon': ogr.wkbPolygon,
-                   'MultiPoint': ogr.wkbMultiPoint,
-                   'MultiLineString': ogr.wkbMultiLineString,
-                   'MultiPolygon': ogr.wkbMultiPolygon,
-                   'GeometryCollection': ogr.wkbGeometryCollection,
-                   'None': ogr.wkbNone,
-                   'LinearRing': ogr.wkbLinearRing,
-                   'PointZ': ogr.wkbPointZM,
-                   'Point25D': ogr.wkb25DBit,
-                   'LineString25D': ogr.wkbLineString25D,
-                   'Polygon25D': ogr.wkbPolygon25D,
-                   'MultiPoint25D': ogr.wkbMultiPoint25D,
-                   'MultiLineString25D': ogr.wkbMultiLineString25D,
-                   'MultiPolygon25D': ogr.wkbMultiPolygon25D,
-                   'GeometryCollection25D': ogr.wkbGeometryCollection25D
-                   }
-
-        return _types[self.geometryType]
+        return self.GEOMETRIES[self.geometryType]
 
     @staticmethod
     def geom_wkb_to_name(code):

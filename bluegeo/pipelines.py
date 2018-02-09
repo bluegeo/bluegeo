@@ -9,6 +9,7 @@ from collections import defaultdict
 import pandas
 from csv import reader as csv_reader
 import sys
+from numba import jit
 
 # for version compatibility
 if sys.version_info[0] < 3:
@@ -153,14 +154,36 @@ class Hydat(object):
                 stations = [s.split('_')[1] for s in re.findall(expression, site.read())]
                 self.stations[prov][time] = stations
 
-    def get_station_data(self, prov, time, station_id):
+    def get_province(self, station_id, time):
+        """
+        Collect the province using a station ID and time
+        :param station_id: Station ID
+        :param time: daily or hourly
+        :return: province string
+        """
+        # Make sure the stations have been collected
+        if not hasattr(self, 'stations'):
+            self.collect_stations()
+
+        keys = self.stations.keys()
+
+        index = numpy.where(
+            [any([True for id in self.stations[prov][time] if id == station_id]) for prov in keys]
+        )[0]
+
+        if index.size == 0:
+            raise Exception('Cannot find the station "{}" with {} data'.format(station_id, time))
+
+        return keys[int(index)]
+
+    def get_station_data(self, station_id, time='daily'):
         """
         Collect data from a station
-        :param prov: Provincial code (i.e. AB, BC, SK, MB, etc.)
-        :param time: (string) daily or hourly
         :param station_id: Station ID
         :return: pandas dataframe
         """
+        prov = self.get_province(station_id, time)
+
         # Download and read the file into a dataframe, and strip white space from headings
         df = pandas.read_csv(
             urlretrieve(self.build_url(prov, time, station_id))[0]
@@ -177,4 +200,3 @@ class Hydat(object):
         """
         # Fix the datetime field
         a = station_df['Date']
-
