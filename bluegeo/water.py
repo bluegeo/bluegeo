@@ -420,6 +420,66 @@ def h60(dem, basins, output_raster):
     return h60basins
 
 
+def snap_pour_point(points, sfd, fa, min_contrib_area=1E7):
+    """
+    Snap pour points to a cell with a specified minimum contributing area.
+    Points are recursively routed down slope until the minimum contributing area is reached.
+    :param points: Vector or list of coordinate tuples in the form [(x1, y1), (x2, y2),...(xn, yn)]
+    :param sfd: Single flow direction raster
+    :param min_contrib_area: Minimum contributing area in map units (default is 10 km ** 2)
+    :return: coordinate tuples in the form [(x1, y1), (x2, y2),...(xn, yn)]
+    """
+    # Map of flow direction: downstream index
+    #
+    downstream = {1: (1, 1),
+                  2: (1, 1),
+                  3: (1, 1),
+                  4: (1, 1),
+                  5: (1, 1),
+                  6: (1, 1),
+                  7: (1, 1),
+                  8: (1, 1),}
+
+    # Make sure SFD and FA are read into Raster instances
+    sfd = Raster(sfd)
+    fa = Raster(fa)
+
+    # Check that the sfd and fa maps align
+    if not sfd.aligns(fa):
+        raise WaterError('Input flow accumulation and single flow direction rasters must align spatially')
+
+    if isinstance(points, basestring) or isinstance(points, Vector):
+        # Convert the vector to a list of coordinates in the raster map projection
+        points = Vector(points).transform(Raster(sfd).projection).vertices[:, [0, 1]]
+
+    # Convert the coordinates to raster map indices
+    points = map(tuple, [[p[0] for p in points], [p[1] for p in points]])
+    indices = util.coords_to_indices(points, sfd.top, sfd.left, sfd.csx, sfd.csy, sfd.shape)
+
+    # Collect the area as a unit of number of cells
+    num_cells = min_contrib_area / sfd.csx * sfd.csy
+
+    snapped_points = []
+    point_index = -1  # For warning prints
+    for i, j in zip(indices):
+        point_index += 1
+        snapped = True
+        while fa[i, j] < num_cells:
+            try:
+                o_i, o_j = downstream[sfd[i, j]]
+                i += o_i
+                j += o_j
+            except (KeyError, IndexError):
+                print "Warning: unable to snap point at index {}".format(point_index)
+                snapped = False
+                break
+
+        if snapped:
+            snapped_points.append((i, j))
+
+    return snapped_points
+
+
 class hru(object):
     """
     Create a model domain instance that is a child of the Raster class

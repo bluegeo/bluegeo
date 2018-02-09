@@ -52,6 +52,24 @@ def parse_projection(projection):
     return outwkt
 
 
+def compare_projections(proj1, proj2):
+    osr_proj1 = osr.SpatialReference()
+    osr_proj2 = osr.SpatialReference()
+
+    osr_proj1.ImportFromWkt(parse_projection(proj1))
+    osr_proj2.ImportFromWkt(parse_projection(proj2))
+
+    return osr_proj1.IsSame(osr_proj2)
+
+
+def isclose(input, values, tolerance):
+    values = [(val - tolerance, val + tolerance) for val in values]
+    if any([lower < input < upper for lower, upper in values]):
+        return True
+    else:
+        return False
+
+
 def transform_points(points, inproj, outproj):
     """
     Transform a list of points [(x, y), (x, y)...]

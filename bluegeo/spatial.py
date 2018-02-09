@@ -27,7 +27,8 @@ try:
 except ImportError:
     print "Warning: Shapely is not installed and some operations will not be possible."
 
-from util import parse_projection, generate_name, coords_to_indices, indices_to_coords, transform_points
+from util import (parse_projection, generate_name, coords_to_indices, indices_to_coords, transform_points, isclose,
+                  compare_projections)
 
 gdal.PushErrorHandler('CPLQuietErrorHandler')
 
@@ -827,28 +828,15 @@ class Raster(object):
         """
         Align Extent and cells with another Raster
         """
-        def isclose(input, values):
-            values = [(val - tolerance, val + tolerance) for val in values]
-            if any([lower < input < upper for lower, upper in values]):
-                return True
-            else:
-                return False
-
         inrast = Raster(input_raster)
 
-        # Check if spatial references align
-        insrs = osr.SpatialReference()
-        insrs.ImportFromWkt(self.projection)
-        outsrs = osr.SpatialReference()
-        outsrs.ImportFromWkt(inrast.projection)
-        samesrs = insrs.IsSame(outsrs)
-        inrast_bbox = Extent(inrast).bounds
+        samesrs = compare_projections(self.projection, inrast.projection)
 
         # Check if cells align
-        if all([isclose(self.csx, [inrast.csx]),
-                isclose(self.csy, [inrast.csy]),
-                isclose((self.top - inrast.top) % self.csy, [0, self.csy]),
-                isclose((self.left - inrast.left) % self.csx, [0, self.csx]),
+        if all([isclose(self.csx, [inrast.csx], tolerance),
+                isclose(self.csy, [inrast.csy], tolerance),
+                isclose((self.top - inrast.top) % self.csy, [0, self.csy], tolerance),
+                isclose((self.left - inrast.left) % self.csx, [0, self.csx], tolerance),
                 samesrs]):
             # Simple slicing is sufficient
             return self.clip(inrast_bbox)
@@ -929,6 +917,23 @@ class Raster(object):
                 (slice(i_, _i_), slice(j_, _j_)),
                 shape,
                 (top, bottom, left, right))
+
+    def aligns(self, other_raster, tolerance=1E-06):
+        """
+        Check if the raster instance is aligned spatially with another raster
+        :param other_raster: Raster to test
+        :returns bool:
+        """
+        inrast = Raster(other_raster)
+
+        # Check spatial references
+
+        return all([isclose(self.csx, [inrast.csx], tolerance),
+                    isclose(self.csy, [inrast.csy], tolerance),
+                    isclose(self.top, [inrast.top], tolerance),
+                    isclose(self.left, [inrast.left], tolerance),
+                    self.shape == inrast.shape,
+                    compare_projections(self.projection, inrast.projection)])
 
     def clip(self, bbox_or_dataset):
         """
