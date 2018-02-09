@@ -2763,7 +2763,7 @@ class Vector(object):
                         inlyr.SetFeature(inFeat)
             return
         elif isinstance(item, slice):
-            start, stop = slice.start, slice.stop
+            start, stop = item.start, item.stop
             # Make sure start and stop are not slice member descriptors
             if not isinstance(start, int):
                 start = 0
