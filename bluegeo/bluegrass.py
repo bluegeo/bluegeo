@@ -122,7 +122,7 @@ class GrassSession(object):
 
 # r. functions
 def watershed(dem, flow_direction='SFD', accumulation_path=None, direction_path=None, positive_fd=True,
-              change_nodata=True):
+              change_nodata=True, memory_manage=False):
     """
     Calculate hydrologic routing networks
     :param dem: Digital Elevation Model Raster
@@ -136,11 +136,13 @@ def watershed(dem, flow_direction='SFD', accumulation_path=None, direction_path=
     dem, garbage = force_gdal(dem)
 
     # Write flags using args
-    flags = 'm'
+    flags = ''
     if positive_fd:
         flags += 'a'
     if flow_direction.lower() == 'sfd':
         flags += 's'
+    if memory_manage:
+        flags += 'm'
 
     # Parse output paths
     if accumulation_path is None:
