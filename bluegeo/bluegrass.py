@@ -136,7 +136,7 @@ def watershed(dem, flow_direction='SFD', accumulation_path=None, direction_path=
     dem, garbage = force_gdal(dem)
 
     # Write flags using args
-    flags = ''
+    flags = 'm'
     if positive_fd:
         flags += 'a'
     if flow_direction.lower() == 'sfd':
