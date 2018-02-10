@@ -431,14 +431,14 @@ def snap_pour_point(points, sfd, fa, min_contrib_area=1E7):
     """
     # Map of flow direction: downstream index
     #
-    downstream = {1: (1, 1),
-                  2: (1, 1),
-                  3: (1, 1),
-                  4: (1, 1),
-                  5: (1, 1),
-                  6: (1, 1),
+    downstream = {1: (-1, 1),
+                  2: (-1, 0),
+                  3: (-1, -1),
+                  4: (0, -1),
+                  5: (1, -1),
+                  6: (1, 0),
                   7: (1, 1),
-                  8: (1, 1),}
+                  8: (0, 1)}
 
     # Make sure SFD and FA are read into Raster instances
     sfd = Raster(sfd)
@@ -469,7 +469,8 @@ def snap_pour_point(points, sfd, fa, min_contrib_area=1E7):
                 o_i, o_j = downstream[sfd[i, j]]
                 i += o_i
                 j += o_j
-            except (KeyError, IndexError):
+            except KeyError:
+            # except (KeyError, IndexError):  Commented out for testing- revert if you see this
                 print "Warning: unable to snap point at index {}".format(point_index)
                 snapped = False
                 break
@@ -477,7 +478,10 @@ def snap_pour_point(points, sfd, fa, min_contrib_area=1E7):
         if snapped:
             snapped_points.append((i, j))
 
-    return snapped_points
+    snapped_points = map(tuple, [[pt[0] for pt in snapped_points], [pt[1] for pt in snapped_points]])
+    y, x = indices_to_coords(snapped_points, sfd.top, sfd.left, sfd.csx, sfd.csy)
+
+    return zip(x, y)
 
 
 class hru(object):
