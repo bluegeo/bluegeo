@@ -92,7 +92,10 @@ class GrassSession(object):
 
     def cleanup(self):
         if os.path.exists(self.location_path) and not self.persist:
-            shutil.rmtree(self.location_path)
+            try:
+                shutil.rmtree(self.location_path)
+            except:
+                pass
         if 'GISRC' in os.environ:
             del os.environ['GISRC']
 

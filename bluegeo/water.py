@@ -420,7 +420,7 @@ def h60(dem, basins, output_raster):
     return h60basins
 
 
-def snap_pour_point(points, sfd, fa, min_contrib_area=1E7):
+def snap_pour_points(points, sfd, fa, min_contrib_area=1E7):
     """
     Snap pour points to a cell with a specified minimum contributing area.
     Points are recursively routed down slope until the minimum contributing area is reached.
@@ -457,16 +457,16 @@ def snap_pour_point(points, sfd, fa, min_contrib_area=1E7):
     indices = util.coords_to_indices(points, sfd.top, sfd.left, sfd.csx, sfd.csy, sfd.shape)
 
     # Collect the area as a unit of number of cells
-    num_cells = min_contrib_area / sfd.csx * sfd.csy
+    num_cells = min_contrib_area / (sfd.csx * sfd.csy)
 
     snapped_points = []
     point_index = -1  # For warning prints
-    for i, j in zip(indices):
+    for i, j in zip(indices[0], indices[1]):
         point_index += 1
         snapped = True
         while fa[i, j] < num_cells:
             try:
-                o_i, o_j = downstream[sfd[i, j]]
+                o_i, o_j = downstream[int(numpy.squeeze(sfd[i, j]))]
                 i += o_i
                 j += o_j
             except KeyError:
