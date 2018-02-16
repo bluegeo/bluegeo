@@ -1993,7 +1993,7 @@ class Vector(object):
             3. Table
             4. wkt geometry
             5. wkb geometry
-            6. A list of any of the above
+            6. A list of wkt's or wkb's
         """
         self.mode = mode.lower()
         if self.mode not in ['r', 'w', 'r+']:

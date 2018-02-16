@@ -18,6 +18,43 @@ class hruError(Exception):
     pass
 
 
+def delineate_watersheds(points, dem=None, fd=None, fa=None, as_vector=True, snap_tolerance=1E6):
+    """
+    Delineate watersheds from pour points
+    :param points: Vector or list of coordinate tuples in the form [(x1, y1), (x2, y2),...(xn, yn)]
+    :param dem: digital elevation model Raster (if no flow direction surface is available)
+    :param fd: Flow direction surface (if available)
+    :param fa: Flow accumulation surface (if available). This will only be used for snapping pour points
+    :param as_vector: Return a polygon vector with a different feature for each watershed
+    :param snap_tolerance: Snap the pour points to a minimum basin size. Use 0 to omit this argument
+    :return: Vector (if as_vector is True) or Raster (if as_vector is False), and the snapped points if specified
+    """
+    if fd is None:
+        if dem is None:
+            raise WaterError('One of either a DEM or Flow Direction must be specified')
+        fd, fa = bluegrass.watershed(dem)
+
+    if snap_tolerance > 0:
+        if fa is None:
+            if dem is None:
+                raise WaterError('Either flow accumulation or a DEM must be specified if snapping pour points')
+            fd, fa = bluegrass.watershed(dem)
+
+        points = snap_pour_points(points, fd, fa, snap_tolerance)
+
+    else:
+        if isinstance(points, basestring) or isinstance(points, Vector):
+            # Convert the vector to a list of coordinates in the raster map projection
+            points = Vector(points).transform(Raster(fd).projection).vertices[:, [0, 1]]
+
+    if not as_vector:
+        return bluegrass.water_outlet(points, direction=fd)
+
+    basins = [bluegrass.water_outlet([point], direction=fd).polygonize()[:] for point in points]
+
+    return Vector(basins, mode='w', projection=fd.projection)
+
+
 def wetness(dem, minimum_area):
     """
     Calculate a wetness index using streams of a minimum contributing area
