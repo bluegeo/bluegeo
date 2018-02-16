@@ -52,7 +52,7 @@ def delineate_watersheds(points, dem=None, fd=None, fa=None, as_vector=True, sna
 
     basins = [bluegrass.water_outlet([point], direction=fd).polygonize()[:] for point in points]
 
-    return Vector(basins, mode='w', projection=fd.projection)
+    return Vector(basins, mode='w', projection=Raster(fd).projection)
 
 
 def wetness(dem, minimum_area):
