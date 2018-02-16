@@ -22,4 +22,12 @@ sudo -H LLVM_CONFIG=/usr/bin/llvm-config-2.7 pip install llvmlite numba
 # Install development version of bluegeo
 cd bluegeo
 #If working on a development version and you want any changes to bluegeo reflected when you import it, install bluegeo with the following flag
-pip install -e .
+sudo pip install -e .
+
+# Uncomment this section if you wish to install R
+
+#sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys E298A3A825C0D65DFD57CBB651716619E084DAB9
+#sudo add-apt-repository 'deb [arch=amd64,i386] https://cran.rstudio.com/bin/linux/ubuntu xenial/'
+#sudo apt-get update
+#sudo apt-get -y install r-base
+#sudo apt-get install -y libcurl4-openssl-dev
