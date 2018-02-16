@@ -50,7 +50,7 @@ def delineate_watersheds(points, dem=None, fd=None, fa=None, as_vector=True, sna
     if not as_vector:
         return bluegrass.water_outlet(points, direction=fd)
 
-    basins = [bluegrass.water_outlet([point], direction=fd).polygonize()[:] for point in points]
+    basins = [bluegrass.water_outlet([point], direction=fd).polygonize()[:][0] for point in points]
 
     return Vector(basins, mode='w', projection=Raster(fd).projection)
 
