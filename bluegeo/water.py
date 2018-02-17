@@ -58,7 +58,8 @@ def delineate_watersheds(points, dem=None, fd=None, fa=None, as_vector=True, sna
     # srt = numpy.argsort([ogr.CreateGeometryFromWkb(b).Area() for b in basins])[::-1]
     # basins = [basins[i] for i in srt]
 
-    return Vector(basins, mode='w', projection=Raster(fd).projection)
+    # return Vector(basins, mode='w', projection=Raster(fd).projection)
+    return basins
 
 
 def wetness(dem, minimum_area):
