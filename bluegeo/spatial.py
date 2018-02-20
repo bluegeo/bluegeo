@@ -2058,10 +2058,6 @@ class Vector(object):
             # Try for an iterable of wkt's or wkb's
             geos_and_types = [self.geo_from_wellknown(d) for d in data]
 
-            # Ensure the geometry types are all the same
-            if not all([geos_and_types[0][1] == g[1] for g in geos_and_types]):
-                raise VectorError('Input well-known geometries have multiple geometry types.')
-
             # Make sure the same number of fields were specified
             if fields is not None and len(fields) != len(geos_and_types):
                 raise VectorError('The number of input fields and well-known geometries do not match')
@@ -2921,7 +2917,7 @@ class Vector(object):
         """
         return {'shp': 'ESRI Shapefile',
                 'kml': 'KML',
-                'kmz': 'KML',
+                'kmz': 'LIBKML',
                 'geojson': 'GeoJSON',
                 'csv': 'table',
                 'xls': 'table',
@@ -2980,7 +2976,8 @@ class Vector(object):
                       'Integer': 'int32',
                       'Integer64': 'int64',
                       'String': 'S{}'.format(width),
-                      'Date': 'datetime64'}
+                      'Date': 'datetime64',
+                      'DateTime': 'datetime64'}
 
         try:
             return fieldTypes[field_type]
