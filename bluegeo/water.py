@@ -54,12 +54,11 @@ def delineate_watersheds(points, dem=None, fd=None, fa=None, as_vector=True, sna
     for point in points:
         basins += bluegrass.water_outlet([point], direction=fd).polygonize()[:]
 
-    # # Sort basins by area (largest to smallest)
-    # srt = numpy.argsort([ogr.CreateGeometryFromWkb(b).Area() for b in basins])[::-1]
-    # basins = [basins[i] for i in srt]
+    # Sort basins by area (largest to smallest)
+    srt = numpy.argsort([ogr.CreateGeometryFromWkb(b).Area() for b in basins])[::-1]
+    basins = [basins[i] for i in srt]
 
-    # return Vector(basins, mode='w', projection=Raster(fd).projection)
-    return basins
+    return Vector(basins, mode='w', projection=Raster(fd).projection)
 
 
 def wetness(dem, minimum_area):
