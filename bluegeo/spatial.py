@@ -2956,7 +2956,7 @@ class Vector(object):
                   'int8': ogr.OFTInteger,
                   'uint8': ogr.OFTInteger,
                   'bool': ogr.OFTInteger,
-                  'DateTime64': ogr.OFTDate,
+                  'datetime64': ogr.OFTDate,
                   's': ogr.OFTString
                   }
 
