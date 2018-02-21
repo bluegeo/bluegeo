@@ -519,7 +519,7 @@ def slope_aspect(elevation):
     out_aspect = Raster(aspect)
     out_aspect.garbage = {'path': aspect, 'num': 1}
 
-    return slope, aspect
+    return out_slope, out_aspect
 
 
 def sun(elevation, day, step=1, slope=None, aspect=None):
