@@ -116,7 +116,7 @@ class Extent(object):
         :param projection: input projection argument
         :return: new Extent instance
         """
-        if self.geo is None:
+        if self.geo is None or self.geo.projection == '':
             # Cannot transform, as the coordinate system is unknown
             return Extent(self.bounds)
 
@@ -1346,7 +1346,7 @@ class Raster(object):
     @property
     def mask(self):
         """Return a Raster instance of the data mask (boolean)"""
-        return self != self.nodata
+        return self.array != self.nodata
 
     @staticmethod
     def gdal_args_from_slice(s, shape):
@@ -2102,7 +2102,7 @@ class Vector(object):
                     outlyr.CreateFeature(outFeat)
                     outFeat.Destroy()
 
-            self.__dict__.update(Vector(outVect.path).__dict__)
+            self.__dict__.update(Vector(outVect.path, mode='r+').__dict__)
 
         else:
             raise VectorError('Cannot read the input data of type {}'.format(type(data).__name__))

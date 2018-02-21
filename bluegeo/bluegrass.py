@@ -487,7 +487,42 @@ def gwflow(phead, status, hc_x, hc_y, s, top, bottom, **kwargs):
     return Raster(out_head), Raster(out_budget)
 
 
-def sun(elevation, day, step=1):
+def slope_aspect(elevation):
+    """
+    Calculate slope and aspect
+    :param elevation: elevation raster
+    :return: slope, aspect rasters
+    """
+    dem, dem_garbage = force_gdal(elevation)
+
+    slope = util.generate_name(elevation, 'slope', 'tif')
+    aspect = util.generate_name(elevation, 'aspect', 'tif')
+
+    with GrassSession(dem) as gs:
+        from grass.pygrass.modules.shortcuts import raster as graster
+        from grass.script import core as grass
+        graster.external(dem, output='dem')
+        # Calculate slope and aspect
+        grass.run_command('r.slope.aspect', elevation='dem', aspect='aspect', slope='slope')
+        graster.out_gdal('slope', format="GTiff", output=slope)
+        graster.out_gdal('aspect', format="GTiff", output=aspect)
+
+    if dem_garbage:
+        try:
+            os.remove(dem)
+        except:
+            pass
+
+    out_slope = Raster(slope)
+    out_slope.garbage = {'path': slope, 'num': 1}
+
+    out_aspect = Raster(aspect)
+    out_aspect.garbage = {'path': aspect, 'num': 1}
+
+    return slope, aspect
+
+
+def sun(elevation, day, step=1, slope=None, aspect=None):
     """
     Calculate global total solar radiation for a given dey (1-365)
     :param dem: Digital elevation model
@@ -496,20 +531,39 @@ def sun(elevation, day, step=1):
     :return: None
     """
     out_sun = util.generate_name(elevation, 'sun', 'tif')
-    dem, garbage = force_gdal(elevation)
+    dem, dem_garbage = force_gdal(elevation)
+    slope_garbage = aspect_garbage = False
+    if slope is not None:
+        slope, slope_garbage = force_gdal(slope)
+    if aspect is not None:
+        aspect, aspect_garbage = force_gdal(aspect)
 
     with GrassSession(dem) as gs:
         from grass.pygrass.modules.shortcuts import raster as graster
         from grass.script import core as grass
         graster.external(dem, output='dem')
         # Calculate slope and aspect first
-        grass.run_command('r.slope.aspect', elevation='dem', aspect='aspect', slope='slope')
+        if slope is None or aspect is None:
+            grass.run_command('r.slope.aspect', elevation='dem', aspect='aspect', slope='slope')
+        else:
+            graster.external(aspect, output='aspect')
+            graster.external(slope, output='slope')
         grass.run_command('r.sun', aspect='aspect', slope='slope', elevation='dem', glob_rad='rad', day=day, step=step)
         graster.out_gdal('rad', format="GTiff", output=out_sun)
 
-    if garbage:
+    if dem_garbage:
         try:
             os.remove(dem)
+        except:
+            pass
+    if slope_garbage:
+        try:
+            os.remove(slope)
+        except:
+            pass
+    if aspect_garbage:
+        try:
+            os.remove(aspect)
         except:
             pass
 
