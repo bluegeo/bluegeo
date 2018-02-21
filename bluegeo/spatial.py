@@ -829,6 +829,7 @@ class Raster(object):
         Align Extent and cells with another Raster
         """
         inrast = Raster(input_raster)
+        inrast_bbox = Extent(inrast).bounds
 
         samesrs = compare_projections(self.projection, inrast.projection)
 
