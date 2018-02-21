@@ -636,8 +636,14 @@ class hru(object):
 
         # Rasterize or align the input data
         if isinstance(data, Vector):
-            ds = data.rasterize(self.dem, vector_attribute)
+            rasterized_data = data.rasterize(self.dem, vector_attribute)
+            if isinstance(rasterized_data, tuple):
+                # A correlation dict was returned because the field was text
+                ds, correlation_dict = rasterized_data
+            else:
+                ds = rasterized_data
         else:
+            data.interpolationMethod = dataset_interpolation
             ds = data.match_raster(self.dem)
 
         # Read data and create mask
@@ -712,8 +718,14 @@ class hru(object):
 
         # Rasterize or align the input data
         if isinstance(data, Vector):
-            ds = data.rasterize(self.dem, vector_attribute)
+            rasterized_data = data.rasterize(self.dem, vector_attribute)
+            if isinstance(rasterized_data, tuple):
+                # A correlation dict was returned because the field was text
+                ds, correlation_dict = rasterized_data
+            else:
+                ds = rasterized_data
         else:
+            data.interpolationMethod = dataset_interpolation
             ds = data.match_raster(self.dem)
         a = ds.array
         a[~self.mask] = ds.nodata

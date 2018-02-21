@@ -3032,6 +3032,8 @@ class Vector(object):
         Create a Raster from the current instance
         :param template_raster: Raster to use specs from
         :param attribute_field: attribute field to use for Raster values (returns a mask if None)
+            if the attribute field is a string, a categorical raster is created, and a mapping of
+            the field is returned.
         :return: Raster instance
         """
         # Grab the Raster specs
@@ -3042,18 +3044,24 @@ class Vector(object):
         vector = self.transform(r.projection)
 
         # Grab the data type from the input field
+        return_map = False
         if attribute_field is not None:
             try:
                 dtype = [field[1] for field in vector.fieldTypes if field[0] == attribute_field][0]
             except IndexError:
                 raise VectorError('Cannot find the field {} during rasterize'.format(attribute_field))
-            # If dtype is a string, try to cast the field into a float, else error
+            # If dtype is a string, try to cast the field into a float, else enumerate
             write_data = vector[attribute_field]
             if 's' in dtype.lower():
                 try:
                     write_data = numpy.float32(write_data)
                 except:
-                    raise ValueError('Cannot cast the field {} into a numeric type'.format(attribute_field))
+                    return_map = True
+                    unique_values, indices = numpy.unique(write_data, return_inverse=True)
+                    values = numpy.arange(1, unique_values.size + 1)
+                    write_data = values[indices]
+                    value_map = dict(zip(values, unique_values))
+
             nodata = numpy.array(r.nodata).astype(dtype)
         else:
             nodata = 0
@@ -3154,6 +3162,9 @@ class Vector(object):
                 data_track[i_:_i, j_:_j][outarray[i_:_i, j_:_j] != nodata] = 1
 
         outrast[:] = outarray
+
+        if return_map:
+            return outrast, value_map
 
         return outrast
 
