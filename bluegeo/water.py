@@ -565,28 +565,34 @@ class hru(object):
         Successfully wrote output file output_file.rvh
         >>>
     """
-    def __init__(self, dem, basin_mask, output_srid=4269):
+    def __init__(self, dem, basin_mask=None, output_srid=4269):
         """
         HRU instance for dynamic HRU creation tasks
         :param dem: (str or Raster) Digital Elevation Model
-        :param basin_mask: (str, Vector or Raster) mask to use for the overall basin
+        :param basin_mask: (str, Vector or Raster) mask to use for the overall basin. If None, it is assumed that
+            the the comprises the watershed extent.
         :param output_srid: spatial reference for the output centroids
         """
         # Prepare dem using mask
         dem = Raster(dem)
-        mask = assert_type(basin_mask)(basin_mask)
-        if isinstance(mask, Raster):
-            # Reduce the DEM to the necessary data
-            mask = mask.match_raster(dem)
-            m = mask.array
-            d = dem.array
-            d[m == mask.nodata] = dem.nodata
-            dem = dem.empty()
-            dem[:] = d
-            self.dem = dem.clip_to_data()
+
+        if basin_mask is not None:
+            mask = assert_type(basin_mask)(basin_mask)
+            if isinstance(mask, Raster):
+                # Reduce the DEM to the necessary data
+                mask = mask.match_raster(dem)
+                m = mask.array
+                d = dem.array
+                d[m == mask.nodata] = dem.nodata
+                dem = dem.empty()
+                dem[:] = d
+                self.dem = dem.clip_to_data()
+            else:
+                # Clip the dem using a polygon
+                self.dem = dem.clip(mask)
+
         else:
-            # Clip the dem using a polygon
-            self.dem = dem.clip(mask)
+            self.dem = dem
 
         self.mask = self.dem.array != self.dem.nodata
 
@@ -797,7 +803,7 @@ class hru(object):
             method = methods[method]
             for id in self.hru_map.keys():
                 data = a[self.hru_map[id]]
-                data = data[data != nd]
+                data = data[(data != nd) & ~numpy.isinf(data) & ~numpy.isnan(data)]
                 if data.size == 0:
                     self.hru_attributes[id][name] = '[None]'
                     continue
@@ -869,7 +875,7 @@ class hru(object):
             self.compute_zonal_data()
 
         keys = self.hru_attributes[self.hru_attributes.keys()[0]].keys()
-        with open(output_name, 'w') as f:
+        with open(output_name, 'wb') as f:
             f.write(','.join(['ID'] + keys) + '\n')
             for hru in range(1, max(self.hru_attributes.keys()) + 1):
                 write = ','.join(map(str, [hru] + [self.hru_attributes[hru][key] for key in keys]))

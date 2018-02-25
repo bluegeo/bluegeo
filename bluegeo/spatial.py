@@ -3044,6 +3044,15 @@ class Vector(object):
         # Transform self if necessary
         vector = self.transform(r.projection)
 
+        # Make sure they overlap
+        if not Extent(r).intersects(Extent(vector)):
+            return r.full(r.nodata)
+
+        # Collect a mask vector from the raster and trim by half of the smallest cell size.
+        #   This will ensure polygons that intersect the raster boundary will retain vertices at the edges
+        extent = shpwkb.loads(r.extent_to_vector()[0][0]).buffer(min(r.csx, r.csy) / -2.)
+        extent = ogr.CreateGeometryFromWkb(shpwkb.dumps(extent))
+
         # Grab the data type from the input field
         return_map = False
         if attribute_field is not None:
@@ -3062,6 +3071,7 @@ class Vector(object):
                     values = numpy.arange(1, unique_values.size + 1)
                     write_data = values[indices]
                     value_map = dict(zip(values, unique_values))
+                    dtype = 'uint32'
 
             nodata = numpy.array(r.nodata).astype(dtype)
         else:
@@ -3092,10 +3102,6 @@ class Vector(object):
         def _rasterize(vertices, geom_type):
             """Rasterize a list of vertices within the containing envelope"""
             pixels = coords_to_indices(zip(*vertices), top, left, csx, csy, r.shape)
-
-            if pixels[0].size == 0:
-                # Nothing overlaps the output window
-                return numpy.zeros(shape=(1, 1), dtype='bool'), 0, 0
 
             # Remove duplicates in sequence if the geometry is not a point
             if 'Point' not in geom_type:
@@ -3136,6 +3142,12 @@ class Vector(object):
         for feature_index, wkb in enumerate(vector[:]):
             vertices = []
             geo = ogr.CreateGeometryFromWkb(wkb)
+
+            # Intersect the geometry with the raster extent
+            geo = extent.Intersection(geo)
+            if geo.IsEmpty():
+                continue
+
             get_next(geo, vertices, False, self.geom_wkb_to_name(geo.GetGeometryType()))
 
             # Track slices from this feature
