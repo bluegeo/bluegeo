@@ -1347,7 +1347,7 @@ class Raster(object):
     @property
     def mask(self):
         """Return a Raster instance of the data mask (boolean)"""
-        return self.array != self.nodata
+        return self != self.nodata
 
     @staticmethod
     def gdal_args_from_slice(s, shape):
@@ -1605,7 +1605,8 @@ class Raster(object):
         :return:
         """
         is_array = False
-        if any([isinstance(r, t) for t in [numpy.ndarray, int, float]]):
+        if any([isinstance(r, t) for t in [numpy.ndarray, int, float]] +
+               [type(r).__module__ == numpy.__name__]):
             is_array = True
             r = numpy.broadcast_to(r, self.shape)
         else:
@@ -3145,7 +3146,7 @@ class Vector(object):
 
             # Intersect the geometry with the raster extent
             geo = extent.Intersection(geo)
-            if geo.IsEmpty():
+            if geo is None or geo.IsEmpty():
                 continue
 
             get_next(geo, vertices, False, self.geom_wkb_to_name(geo.GetGeometryType()))
@@ -3262,3 +3263,6 @@ def assert_type(data):
                 raise_type_error()
             else:
                 return Vector
+
+    else:
+        raise ValueError('Unable to parse the data of type "{}" using the spatial library'.format(type(data).__name__))

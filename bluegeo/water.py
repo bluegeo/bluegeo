@@ -14,7 +14,7 @@ class WaterError(Exception):
     pass
 
 
-class hruError(Exception):
+class HruError(Exception):
     pass
 
 
@@ -527,43 +527,62 @@ def snap_pour_points(points, sfd, fa, min_contrib_area=1E7):
     return zip(x, y)
 
 
-class hru(object):
+class HRU(object):
     """
-    Create a model domain instance that is a child of the Raster class
+    An HRU instance is used to create spatial units and to calculate summary stats in a model domain
+
+    Datasets may be added in one of 3 ways:
+        1. As a "spatial" dataset, which is used to both spatially discretize the domain,
+            and provide data for each HRU
+        2. As a "zonal" dataset, which is simply summarized to a single value within each
+            spatial HRU using a statistical method
+        3. Used to "split" HRU's using an area proportion. This is designed to create
+            additional HRU's within spatial boundaries using another dataset, such as
+            landcover.
+
     Example:
-        >>> # Create an instance of the hru class, and call is "hrus"
-        >>> hrus = hru('path_to_dem.tif', 'path_to_mask.shp')
-        >>> # Add elevation as a spatial discretization dataset, and split it using an interval of 250m
-        >>> hrus.add_elevation(250)
-        Successfully added ELEVATION to spatial data
-        >>> # Split HRU's into 4 classes of solar radiation, calling the attribute "SOLRAD"
-        >>> hrus.add_spatial_data('solar_radiation.tif', 'SOLRAD', number=4)
-        Successfully added SOLRAD to spatial data
-        >>> # Add landcover as an attribute using a Vector file and the attribute field "COVER_CLASS".  Specify a mode filter to compute zonal stats.
-        >>> hrus.add_zonal_data('landcover.shp', 'COVER', 'mode', vector_attribute='COVER_CLASS')
-        Successfully added COVER to zonal data
-        >>> # Add aspect only as an attribute using zonal stats
-        >>> hrus.add_aspect(only_zonal=True)
-        Successfully added ASPECT to zonal data
-        >>> # Add slope only as an attribute using zonal stats
-        >>> hrus.add_slope(only_zonal=True)
-        Successfully added SLOPE to zonal data
-        >>> # Use a spatial mode filter 4 times to simplify the spatial HRU's
-        >>> hrus.simplify(4)  # Note, the build_spatial_hrus() method must normally be called, but it is done implicitly in most cases
-        Splitting by ELEVATION
-        Splitting by SOLRAD
-        HRU count reduced from 1246 to 424
-        >>> # Write to an output file for raven
-        >>> hrus.write_raven_rvh('template_file.rvh', 'output_file.rvh')  # Note, just as with spatial data, zonal data are also implicity added (compute_zonal_data() is called)
-        Computing LATITUDE and LONGITUDE
-        Computing AREA
-        Computing ELEVATION
-        Computing SOLRAD
-        Computing COVER
-        Computing ASPECT
-        Computing SLOPE
-        Successfully wrote output file output_file.rvh
-        >>>
+    ================================================================================================
+        # Create an instance of the hru class
+        # The domain inherits the properties of the input raster, and is masked by a mask dataset
+        # Note, the mask optional (in the case that the watershed is comprised of the DEM data)
+        hrus = hru('path_to_dem.tif', 'path_to_mask.shp')
+
+        # Split HRU's by adding a sub-basin file, using the field "name" to assign values,
+        #   and call the .rvh heading "SUB_BASIN"
+        hrus.add_spatial_data('sub_basins.shp', 'SUB_BASINS', 'mode', vector_attribute='name')
+
+        # Add elevation as a spatial discretization dataset, and split it using an interval of 250m
+        # A fixed number, explicit breakpoints, or discrete values (as is the case in the basins
+        #   line above) may also be used instead of an interval
+        hrus.add_elevation(250)
+
+        # Split HRU's into 4 classes of solar radiation, calling the attribute "SOLRAD"
+        hrus.add_spatial_data('solar_radiation.tif', 'SOLRAD', number=4)
+
+        # Remove spatial HRU's with areas less than 1 km**2
+        #   Note, all desired spatial datasets must be added (except for split) before using this function.
+        #   If not, this process will be reversed.
+        hrus.simplify_by_area(1E6)
+
+        # Add aspect only as an attribute using zonal stats
+        hrus.add_aspect(only_zonal=True)
+
+        # Add slope only as an attribute using zonal stats
+        hrus.add_slope(only_zonal=True)
+
+        # Add landcover by splitting spatial HRU's, and do not include covers with areas < 1 km**2.
+        # NOTE, splitting must be done only after adding all spatial and zonal datasets, because those
+        #   values are used when repeating HRU's. This will be reversed if those functions are called again.
+        #   Also, any of the "simplify" functions must be called prior to using split.
+        hrus.split('landcover.shp', 'COVER', vector_attribute='COVER_CLASS', minimum_areaa=1E6))
+
+        # Any raster data that are added as arguements may include a correlation dictionary to dictate
+        #   what the output (.rvh, or .csv) names are, for example:
+        # hrus.add_zonal_data('landcover.tif', summary_method='mode', dataset_interpolation='nearest',
+        #                     correlation_dict={1: 'Trees', 2: 'Grassland', 3: 'water', 4: 'Alpine'})
+
+        # Write to an output .rvh using a template
+        hrus.write_raven_rvh('template_file.rvh', 'output_file.rvh')
     """
     def __init__(self, dem, basin_mask=None, output_srid=4269):
         """
@@ -607,6 +626,33 @@ class hru(object):
         self.regen_spatial = True  # Flag to check if regeneration necessary
         self.regen_zonal = True
 
+    def collect_input_data(self, dataset, vector_attribute, dataset_interpolation):
+        """
+        INTERNAL method used to prepare input datasets
+        :param dataset:
+        :return:
+        """
+        data = assert_type(dataset)(dataset)
+        if isinstance(data, Vector) and vector_attribute is None:
+            raise HruError('If a Vector is used to add spatial data, an attribute field name must be specified')
+
+        # A correlation dictionary may be generated
+        correlation_dict = None
+
+        # Rasterize or align the input data
+        if isinstance(data, Vector):
+            rasterized_data = data.rasterize(self.dem, vector_attribute)
+            if isinstance(rasterized_data, tuple):
+                # A correlation dict was returned because the field was text
+                ds, correlation_dict = rasterized_data
+            else:
+                ds = rasterized_data
+        else:
+            data.interpolationMethod = dataset_interpolation
+            ds = data.match_raster(self.dem)
+
+        return ds, correlation_dict
+
     def add_spatial_data(self, dataset, name, summary_method='mean', interval=0, number=0, bins=[],
                          dataset_interpolation='bilinear', vector_attribute=None, correlation_dict=None):
         """
@@ -628,7 +674,7 @@ class hru(object):
         # Check arguments
         summary_method = str(summary_method).lower()
         if summary_method not in ['mean', 'mode', 'min', 'max', 'std']:
-            raise hruError("Invalid summary method {}".format(summary_method))
+            raise HruError("Invalid summary method {}".format(summary_method))
 
         # Add to spatial datasets and add original to zonal datasets
         if name in self.spatialData.keys():
@@ -636,25 +682,13 @@ class hru(object):
         if name in self.zonalData.keys():
             print "Warning: Existing zonal dataset {} will be overwritten".format(name)
 
-        data = assert_type(dataset)(dataset)
-        if isinstance(data, Vector) and vector_attribute is None:
-            raise hruError('If a Vector is used to add spatial data, an attribute field name must be specified')
-
-        # Rasterize or align the input data
-        if isinstance(data, Vector):
-            rasterized_data = data.rasterize(self.dem, vector_attribute)
-            if isinstance(rasterized_data, tuple):
-                # A correlation dict was returned because the field was text
-                ds, correlation_dict = rasterized_data
-            else:
-                ds = rasterized_data
-        else:
-            data.interpolationMethod = dataset_interpolation
-            ds = data.match_raster(self.dem)
+        ds, new_c_dict = self.collect_input_data(dataset, vector_attribute, dataset_interpolation)
+        if correlation_dict is None:
+            correlation_dict = new_c_dict
 
         # Read data and create mask
         spatial_data = ds.array
-        data_mask = (spatial_data != ds.nodata) & self.mask
+        data_mask = (spatial_data != ds.nodata) & self.mask & ~numpy.isnan(spatial_data) & ~numpy.isinf(spatial_data)
         a = spatial_data[data_mask]
         spatial_data = numpy.full(spatial_data.shape, 0, 'uint64')
 
@@ -710,29 +744,18 @@ class hru(object):
         """
         summary_method = str(summary_method).lower()
         if summary_method not in ['mean', 'mode', 'min', 'max', 'std']:
-            raise hruError("Invalid summary method {}".format(summary_method))
+            raise HruError("Invalid summary method {}".format(summary_method))
 
         if name in ['Area', 'Centroid']:
-            raise hruError("Name cannot be 'Area' or 'Centroid', as these are used when writing HRU's.")
+            raise HruError("Name cannot be 'Area' or 'Centroid', as these are used when writing HRU's.")
 
         if name in self.zonalData.keys():
             print "Warning: Existing zonal dataset {} will be overwritten".format(name)
 
-        data = assert_type(dataset)(dataset)
-        if isinstance(data, Vector) and vector_attribute is None:
-            raise hruError('If a Vector is used to add zonal attributes, an attribute field name must be specified')
+        ds, new_c_dict = self.collect_input_data(dataset, vector_attribute, dataset_interpolation)
+        if correlation_dict is None:
+            correlation_dict = new_c_dict
 
-        # Rasterize or align the input data
-        if isinstance(data, Vector):
-            rasterized_data = data.rasterize(self.dem, vector_attribute)
-            if isinstance(rasterized_data, tuple):
-                # A correlation dict was returned because the field was text
-                ds, correlation_dict = rasterized_data
-            else:
-                ds = rasterized_data
-        else:
-            data.interpolationMethod = dataset_interpolation
-            ds = data.match_raster(self.dem)
         a = ds.array
         a[~self.mask] = ds.nodata
         ds[:] = a
@@ -750,7 +773,7 @@ class hru(object):
         :return: None
         """
         if len(self.spatialData) == 0:
-            raise hruError('No spatial datasets have been added yet')
+            raise HruError('No spatial datasets have been added yet')
 
         # Iterate spatial datasets and create HRUs
         names = self.spatialData.keys()
@@ -770,7 +793,94 @@ class hru(object):
         hrua[m] = hrua[m] + a[m] + hrua.max()
         self.hrus[:], self.hru_map = label(hrua, return_map=True)
 
+        print "{} spatial HRU's built".format(len(self.hru_map))
+
         self.regen_spatial = False
+        self.regen_zonal = True
+
+    def split(self, dataset, name, vector_attribute=None, dataset_interpolation='nearest',
+              correlation_dict=None, minimum_area=0, exclude_from_area_filter=[]):
+        """
+        Split existing hru's into more using coverage of another dataset
+        :param dataset: Vector or Raster
+        :param name: Name for dataset in header
+        :param vector_attribute: name of the attribute field to use if the dataset is a vector
+        :param dataset_interpolation: Interpolation method to use for raster resampling
+        :param correlation_dict: Raster attribute table dictionary
+        :param minimum_area: minimum threshold area to disclude HRU's
+        :param exclude_from_area_filter: List of names that will not be removed with the area filter
+        :return: None
+        """
+        def collect_name_attr(d):
+            try:
+                return correlation_dict[d]
+            except KeyError:
+                raise KeyError('The value {} does not exist in the correlation '
+                               'dictionary for {}'.format(data, name))
+
+        if self.regen_spatial:
+            self.build_spatial_hrus()
+        if self.regen_zonal:
+            self.compute_zonal_data()  # Only self.hru_attributes are used
+
+        print "Creating additional HRU's based on {}...".format(name)
+
+        ds, new_c_dict = self.collect_input_data(dataset, vector_attribute, dataset_interpolation)
+        if correlation_dict is None:
+            correlation_dict = new_c_dict
+
+        a = ds.array
+        nd = ds.nodata
+
+        new_hrus = {}
+        cnt = -1
+
+        for id, ind in self.hru_map.iteritems():
+            data = a[ind]
+            data = data[(data != nd) & ~numpy.isinf(data) & ~numpy.isnan(data)]
+
+            # No data here, simply record an HRU with [None] for this attribute
+            if data.size == 0:
+                cnt += 1
+                new_hrus[cnt] = {key: val for key, val in self.hru_attributes[id].iteritems()}
+                new_hrus[cnt].update({name: '[None]', 'MAP_HRU': id})
+                continue
+
+            # Split data into unique values with respective areas (converted to proportions)
+            data, areas = numpy.unique(data, return_counts=True)
+            areas = areas.astype('float32') * self.dem.csx * self.dem.csy
+            areas /= areas.sum()
+
+            # Apply minimum proportion argument
+            current_area = self.hru_attributes[id]['AREA']
+            keep_area = areas * current_area >= minimum_area
+            # Check exclude list
+            if correlation_dict is not None:
+                data_names = [collect_name_attr(d) for d in data]
+            else:
+                data_names = data
+            keep_area = keep_area | [d in exclude_from_area_filter for d in data_names]
+            # If all types are below the proportion use the dominant type
+            if keep_area.size == 0:
+                keep_area = numpy.zeros(areas.shape, 'bool')
+                keep_area[numpy.argmax(areas)] = True
+            # Filter and re-normalize
+            data = data[keep_area]
+            areas = areas[keep_area]
+            areas /= areas.sum()
+
+            # Create additional HRU's
+            for d, area_prop in zip(data, areas):
+                cnt += 1
+                new_hrus[cnt] = {key: val for key, val in self.hru_attributes[id].iteritems()}
+                if correlation_dict is not None:
+                    d = collect_name_attr(d)
+                new_hrus[cnt].update({name: d, 'AREA': current_area * area_prop, 'MAP_HRU': id})
+
+        print "...Created {} additional HRU's based on {}".format(
+            len(new_hrus) - len(self.hru_attributes), name
+        )
+        self.hru_attributes = new_hrus
 
     def compute_zonal_data(self):
         """
@@ -836,7 +946,7 @@ class hru(object):
         potential_order = ['AREA', 'ELEVATION', 'LATITUDE', 'LONGITUDE', 'BASIN_ID', 'LAND_USE_CLASS', 'VEG_CLASS',
                            'SOIL_PROFILE', 'AQUIFER_PROFILE', 'TERRAIN_CLASS', 'SLOPE', 'ASPECT']
 
-        # TODO: Incorporate order into writing of .rvh
+        # TODO: Incorporate order or static headings mapping into writing of .rvh
 
         # Read template
         with open(template_file, 'r') as f:
@@ -876,7 +986,7 @@ class hru(object):
 
         keys = self.hru_attributes[self.hru_attributes.keys()[0]].keys()
         with open(output_name, 'wb') as f:
-            f.write(','.join(['ID'] + keys) + '\n')
+            f.write(','.join(['HRU_ID'] + keys) + '\n')
             for hru in range(1, max(self.hru_attributes.keys()) + 1):
                 write = ','.join(map(str, [hru] + [self.hru_attributes[hru][key] for key in keys]))
                 f.write(write + '\n')
@@ -926,7 +1036,37 @@ class hru(object):
         else:
             self.add_spatial_data(topo(self.dem).slope(), 'SLOPE', interval=interval, number=number, bins=bins)
 
-    def simplify(self, iterations):
+    def simplify_by_area(self, min_area):
+        """
+        Remove spatial HRU's with areas below the specified min_area
+        :param min_area: Minimum area in domain units to remove HRU's
+        :return: None
+        """
+        if self.regen_spatial:
+            self.build_spatial_hrus()
+
+        a = self.hrus.array
+        cnt = 0
+        for id, inds in self.hru_map.iteritems():
+            area = inds[0].size * self.dem.csx * self.dem.csy
+
+            if area < min_area:
+                # Apply no data to the hrus
+                cnt += 1
+                a[inds] = self.hrus.nodata
+
+        # Interpolate the newly formed gaps with the neighbours
+        self.hrus[:] = a
+        self.hrus = interpolate_nodata(self.hrus)
+
+        # Apply mask and relabel
+        a = self.hrus.array
+        a[~self.mask] = self.hrus.nodata
+        self.hrus[:], self.hru_map = label(a, return_map=True)
+
+        print "{} HRU's below {} [units] removed".format(cnt, min_area)
+
+    def simplify_by_filter(self, iterations):
         """
         Remove small segments of HRU's.  Applies an iterative mode filter.
         :param iterations: Number of iterations to smooth dataset

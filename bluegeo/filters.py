@@ -178,7 +178,11 @@ def most_common(input_raster, size=(3, 3)):
         # Iterate chunks and calculate mode (memory-intensive, so don't fill cache)
         for a, s in input_raster.iterchunks(expand=size, fill_cache=False):
             s_ = util.truncate_slice(s, size)
-            mode_raster[s_] = util.mode(util.window_on_last_axis(a, size), 2)[0]
+            try:
+                mode_raster[s_] = util.mode(util.window_on_last_axis(a, size), 2)[0]
+            except:
+                mode_raster[s_] = mode_raster.nodata
+                continue
     else:
         # Calculate over all data
         mode_raster[1:-1, 1:-1] = util.mode(util.window_on_last_axis(input_raster.array, size), 2)[0]

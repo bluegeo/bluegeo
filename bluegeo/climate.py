@@ -274,7 +274,7 @@ class Climate(object):
 
     def write_csv(self, rows):
         """Write an output csv using point data generated during downscaling"""
-        headings = ['ID', 'Longitude', 'Latitude', 'Elevation', 'Source', 'Month', 'Parameter', 'Value']
+        headings = ['point_ID', 'Longitude', 'Latitude', 'Elevation', 'Source', 'Month', 'Parameter', 'Value']
 
         path = os.path.join(os.path.dirname(self.h5file), 'climate_output')
         cnt = 0
