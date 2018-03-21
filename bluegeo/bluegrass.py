@@ -391,12 +391,13 @@ def watershed_basin(dem, basin_area, basin_path=None, flow_direction='SFD', half
     :param half_basins: Split basins into halves along streams if desired.
     :return: Raster instance of enumerated basins
     """
+    csx, csy = Raster(dem).csx, Raster(dem).csy
     # Ensure input Raster is valid and in a gdal format
     dem, garbage = force_gdal(dem)
 
     # Ensure the minimum basin area makes sense
     try:
-        minarea = float(basin_area)
+        minarea = float(basin_area) / (csx * csy)  # Number of cells
     except ValueError:
         raise BlueGrassError('Expected a number for the input basin area, not {}'.format(type(basin_area).__name__))
     if minarea <= 0:
