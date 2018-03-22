@@ -414,53 +414,125 @@ def sinuosity(dem, stream_order, sample_distance=100):
     return sinuosity_raster
 
 
-def h60(dem, basins, output_raster):
+def eca(tree_height, disturbance, curve, basins):
+    """
+    Calculate Equivalent Clearcut Area percentage at each basin
+    :param tree_height: Tree height (raster or vector)
+        If this is a vector:
+            -The height must be the first field
+            -Polygons must only include forested ares
+        If this is a raster:
+            -The values must be tree height
+            -Regions that are not classified as forests must have no data values
+    :param disturbance:
+        Disturbance mask (raster or vector). Regions with disturbance will have a hydrologic recovery of 0.
+    :param curve:
+        Hydrologic recovery vs tree height curve in the form [(x, y), (x, y),...]. The hydrologic recovery is
+        linearly interpolated between points.
+    :param basins:
+        Basin boundaries  (enumerated raster or vector) used to summarize ECA into a percentage
+    :return: Basin vector with an ECA percentage attribute
+    """
+    @jit(nopython=True)
+    def eca_curve(data):
+        for i in range(data.shape[0]):
+            for j in range(curve.shape[0]):
+                if curve[j, 0] <= data[i] < curve[j, 1]:
+                    data[i] = data[i] * curve[j, 2] + curve[j, 3]
+        return data
+
+    # Create polygons from basins to hold the ECA percentage output
+    basins = assert_type(basins)(basins)
+    if isinstance(basins, Raster):
+        basins = basins.polygonize()
+    basins.mode = 'r+'
+
+    # Calculate linear regression constants for each node in the curve
+    curve = numpy.array(curve).T
+    x = zip(curve[0][:-1], curve[0][1:])
+    y = zip(curve[1][:-1], curve[1][1:])
+    curve = numpy.array([(x[0], x[1]) + numpy.linalg.solve([[x, 1.], [x[1], 1]], [y[0], y[1]]) for x, y in zip(x, y)])
+
+    # Calculate ECA from area and hydrologic recovery (derived from tree height and the curve)
+    tree_height = assert_type(tree_height)(tree_height)
+    disturbance = assert_type(disturbance)(disturbance)
+
+    if isinstance(tree_height, Raster):
+        # Calculate ECA at each grid cell
+        A = tree_height.csx * tree_height.csy
+        height_data = tree_height != tree_height.nodata
+        ECA = A * (1. - eca_curve(tree_height.array[height_data], curve))
+
+        # Create an output dataset - the absence of eca data means eca is 0
+        output_eca = numpy.zeros(shape=height_data.shape, dtype='float32')
+        output_eca[height_data] = ECA
+
+        # Disturbance data must be applied as an array, and will have a value of the area [A * (1 - 0) = A]
+        if isinstance(disturbance, Vector):
+            disturbance = disturbance.rasterize(tree_height).array
+        output_eca[disturbance] = A
+
+        # Summarize by sub-basin
+        eca_perc = []
+        basins['ID'] = numpy.arange(1, basins.featureCount + 1)
+        basins, basin_map = label(basins.rasterize(tree_height, 'ID'), True)
+        for basin, inds in basin_map.iteritems():
+            eca_perc.append(output_eca[inds].sum() / (inds[0].size * A))
+    else:
+        # Calculate hydrologic recovery at each polygon
+        geos = [shpwkb.loads(geo) for geo in tree_height[:]]
+        HR = 1. - eca_curve(tree_height[tree_height.fieldNames[0]], curve)
+
+        # Create a spatial index of geos
+        def gen_idx():
+            """Generator for spatial index"""
+            for i, geo in enumerate(geos):
+                yield (i, geo.bounds, None)
+
+        idx = index.Index(gen_idx())
+
+        # Iterate basins and intersect eca polygons and disturbance polygons
+        if isinstance(disturbance, Raster):
+            disturbance = disturbance.mask.polygonize()
+
+        eca_perc = []
+        for basin_num, basin in enumerate(basins[:]):
+            print "Working on basin {}".format(basin_num)
+            # Start with an ECA of 0, and gradually increase it using intersections
+            ECA = 0
+            basin_geo = shpwkb.loads(basin)
+            # Perform an intersect operation on geos that intersect the basin
+            for i in idx.intersection(basin_geo.bounds):
+                intersect = basin_geo.intersection(geos[i])
+                if intersect.is_empty:
+                    continue
+                ECA += intersect.area * HR[i]
+
+            # Add disturbance
+            for dist in disturbance[:]:
+                dist_geo = shpwkb.loads(dist)
+                intersect = basin_geo.intersection(dist_geo)
+                if intersect.is_empty:
+                    continue
+                ECA += intersect.area
+
+            eca_perc.append(ECA / basin_geo.area)
+
+    basins['eca_perc'] = eca_perc
+    return basins
+
+
+def h60(dem, basins):
     '''
     Further divide basins into additional regions based on the H60 line.
     Returns the indices of H60 regions.
     '''
-    # Read DEM
-    dem = Raster(dem)
-    a = dem.load('r')
-    # Read basins and create output dataset
-    bas = Raster(basins)
-    output = Raster(bas)
-    loadout = output.load('r+')
-    # Create an index for basins
-    out = sklabel(loadout, connectivity=2, background=bas.nodata[0],
-                  return_num=False)
-    cursor = numpy.max(out)
-    h60basins = []
-    # Compute H60 Elevation at each region
-    out = out.ravel()
-    a = a.ravel()
-    indices = numpy.argsort(out)
-    bins = numpy.bincount(out)
-    bins = numpy.concatenate([[0], numpy.cumsum(bins[bins > 0])])
-    for lab, start, stop in zip(numpy.unique(out), bins[:-1], bins[1:]):
-        if lab == 0:
-            continue
-        inds = indices[start:stop]
-        elevset = a[inds]
-        m = elevset != dem.nodata[0]
-        elev_range = numpy.max(elevset[m]) - numpy.min(elevset[m])
-        cursor += 1
-        if elev_range < 300:
-            out[inds] = cursor
-            h60basins.append(cursor)
-        else:
-            h60basins.append(cursor)
-            h60elev = numpy.sort(elevset)[int(round((stop - start) * .4))]
-            outset = out[inds]
-            outset[m & (elevset >= h60elev)] = cursor
-            out[inds] = outset
-    out = out.reshape(loadout.shape)
-    out[out == 0] = output.nodata[0]
-    loadout[:] = out
-    loadout.flush()
-    output.saveRaster(output_raster)
-    del a, loadout
-    return h60basins
+    labels, basin_map = label(basins, True)
+    a = dem.array
+    for basin, inds in basin_map:
+        elev_set = a[inds]
+        elev_set = elev_set[elev_set != dem.nodata]
+        elev = numpy.sort(elev_set)[numpy.int64(inds[0].size * .4)]
 
 
 def snap_pour_points(points, sfd, fa, min_contrib_area=1E7):

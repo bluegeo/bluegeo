@@ -10,6 +10,7 @@ from osgeo import gdal, ogr, osr, gdalconst
 import h5py
 from skimage.measure import label as sklabel
 from skimage.measure import regionprops
+from rtree import index
 try:
     import Image
     import ImageDraw
@@ -2559,7 +2560,7 @@ class Vector(object):
 
         return Vector(out_vect)  # Re-read Vector to ensure meta up to date
 
-    def dissolve(self, field=None):
+    def dissolve(self, field=None, summary_method='first'):
         """
         Perform a dissolve operation
         :param str field: Field to use as dissolve filter
@@ -2571,6 +2572,11 @@ class Vector(object):
 
         # Create empty output
         out_vect = self.empty(self.projection, self.fieldTypes, prestr='dissolve')
+
+        newFields = out_vect.fieldTypes
+        fields = {(oldField[0], newField[0]): self.field_to_pyobj(self[oldField[0]], self.fieldWidth[oldField[0]],
+                                                   self.fieldPrecision[oldField[0]])
+                  for oldField, newField in zip(self.fieldTypes, newFields)}
 
         # Collect the input features
         if field is not None:
@@ -2605,11 +2611,155 @@ class Vector(object):
 
                     # Write output geometries
                     out_feature = ogr.Feature(outLyrDefn)
-                    out_feature.SetGeometry(out_geo)
+                    out_feature.SetGeometry(ogr.CreateGeometryFromWkb(out_geo))
+                    for name_tup, data in fields.iteritems():
+                        old_name, new_name = name_tup
+                        if old_name == field:
+                            write_data = feat_value
+                        else:
+                            if summary_method == 'first':
+                                write_data = data[indices[0]]
+                            else:
+                                write_data = getattr(numpy, summary_method)([data[ind] for ind in indices])
+                        out_feature.SetField(new_name, write_data)
 
                     # Add to output layer and clean up
                     outlyr.CreateFeature(out_feature)
                     out_feature.Destroy()
+
+        return Vector(out_vect)  # Re-read Vector to ensure meta up to date
+
+    def select(self, field, values):
+        """
+        Select by attribute
+        :param field: field name
+        :param value: select value(s)
+        :return: new vector instance
+        """
+        # Check if the field exists before commencing the algorithm
+        if field is not None and not field in self.fieldNames:
+            raise VectorError('The field {} does not exist'.format(field))
+
+        # Create empty output
+        out_vect = self.empty(self.projection, self.fieldTypes, prestr='select')
+
+        newFields = out_vect.fieldTypes
+
+        # Collect the input features
+        field_data = self[field]
+        locations = numpy.where(numpy.in1d(field_data, values))[0]
+
+        fields = {newField[0]: self.field_to_pyobj(self[oldField[0]][locations], self.fieldWidth[oldField[0]],
+                                                   self.fieldPrecision[oldField[0]])
+                  for oldField, newField in zip(self.fieldTypes, newFields)}
+
+        # Open layers and populate with selected data
+        with self.layer() as _:
+            with out_vect.layer() as outlyr:
+                # Output layer definition
+                outLyrDefn = outlyr.GetLayerDefn()
+
+                # Iterate indices and population output
+                for field_i, i in enumerate(locations):
+                    # Write output geometry
+                    out_feature = ogr.Feature(outLyrDefn)
+                    out_feature.SetGeometry(ogr.CreateGeometryFromWkb(self[i][0]))
+
+                    # Write fields
+                    for name, data in fields.iteritems():
+                        out_feature.SetField(name, data[field_i])
+
+                    # Add to output layer and clean up
+                    outlyr.CreateFeature(out_feature)
+                    out_feature.Destroy()
+
+        return Vector(out_vect)  # Re-read Vector to ensure meta up to date
+
+    def overlay_operation(self, other_vector, prestr):
+        """
+        Boilerplate for vector overlay operations
+        :param other_vector: this
+        :return:
+        """
+        other_vector = Vector(other_vector).transform(self.projection)
+        geos = [shpwkb.loads(geo) for geo in other_vector[:]]
+
+        # Create an rtree of the geometries
+        # Create spatial index using resulting multipolygon
+        def gen_idx():
+            """Generator for spatial index"""
+            for i, geo in enumerate(geos):
+                yield (i, geo.bounds, None)
+
+        idx = index.Index(gen_idx())
+
+        # Add fields from the other geometry, while making sure there are no duplicates
+        fields = [(name, dtype) for name, dtype in self.fieldTypes]
+        field_data = {name: (self.field_to_pyobj(self[name], self.fieldWidth[name], self.fieldPrecision[name]), 'i')
+                      for name, dtype in self.fieldTypes}  # Save the field data source for positioning
+
+        field_names = field_data.keys()
+        for name, dtype in other_vector.fieldTypes:
+            if name in field_names:
+                new_name = name[:8] + '_1'
+            else:
+                new_name = name
+            field_data[new_name] = (other_vector.field_to_pyobj(other_vector[name], other_vector.fieldWidth[name],
+                                                                other_vector.fieldPrecision[name]), 'j')
+            fields.append((new_name, dtype))
+
+        # The simplest geometry is preserved
+        simplest = {'Point': 0, 'MultiPoint': 1, 'LineString': 2, 'MultiLineString': 3,
+                    'Polygon': 4, 'MultiPolygon': 5}
+        geom_enum = [simplest[geos[0].geom_type], simplest[shpwkb.loads(self[0][0]).geom_type]]
+        copy_instance = [other_vector, self][numpy.argmin(geom_enum)]
+        out_vect = copy_instance.empty(self.projection, fields, prestr=prestr)
+
+        return out_vect, fields, field_data, other_vector, idx, geos
+
+    def intersect(self, other_vector):
+        """
+        Perform an intersect operation
+        :param other_vector: Another vector
+        :return: new Vector instance
+        """
+        out_vect, fields, field_data, other_vector, idx, geos = self.overlay_operation(other_vector, 'intersect')
+
+        # Open layers and populate with intersected data
+        with self.layer() as _:
+            with out_vect.layer() as outlyr:
+                # Output layer definition
+                outLyrDefn = outlyr.GetLayerDefn()
+
+                # Iterate parent geometries, find intersecting other geometries and perform intersect
+                for i in range(self.featureCount):
+                    parent_geo = shpwkb.loads(self[i][0])
+
+                    for j in idx.intersection(parent_geo.bounds):
+                        # Perform intersection
+                        try:
+                            intersection = parent_geo.intersection(geos[j])
+                        except:
+                            # Likely a topological error
+                            continue
+                        if intersection.is_empty:
+                            continue
+
+                        # Write output geometry
+                        out_feature = ogr.Feature(outLyrDefn)
+                        out_feature.SetGeometry(ogr.CreateGeometryFromWkb(shpwkb.dumps(intersection)))
+
+                        # Write fields
+                        for name, dtype in fields:
+                            data, pos = field_data[name]
+                            if pos == 'i':
+                                out_feature.SetField(name, data[i])
+                            else:
+                                out_feature.SetField(name, data[j])
+
+                        # Add to output layer and clean up
+                        outlyr.CreateFeature(out_feature)
+                        out_feature.Destroy()
 
         return Vector(out_vect)  # Re-read Vector to ensure meta up to date
 
@@ -2670,14 +2820,14 @@ class Vector(object):
 
     def __getitem__(self, item):
         """
-        __getitem__ functionality of Vector class
         :param item: If an index or slice is used, geometry wkb's are returned.
         If a string is used, it will return a numpy array of the field values.
         If an instance of the Extent class is used, the output will be a clipped Vector instance
         :return: List of wkb's or numpy array of field
         """
         with self.layer() as lyr:
-            if any([isinstance(item, obj) for obj in [slice, int, numpy.ndarray, list, tuple]]):
+            if any([isinstance(item, obj) for obj in [slice, int, numpy.ndarray, list, tuple,
+                                                      numpy.int64, numpy.int32, numpy.int16, numpy.int8]]):
                 data = []
                 iter = numpy.arange(self.featureCount)[item]
                 if not hasattr(iter, '__iter__'):
@@ -2900,7 +3050,7 @@ class Vector(object):
         }
 
         dtype = a.dtype.name
-        if dtype[0].lower() == 's' or width is None or prec is None:
+        if dtype[0].lower() == 's' or width is None or prec is None or 'datetime' in dtype.lower():
             dtype = 's'
             fmt = '{}'
         elif 'float' in dtype.lower():
