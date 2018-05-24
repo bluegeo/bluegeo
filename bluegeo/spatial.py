@@ -316,6 +316,7 @@ class Raster(object):
         """Load attributes from an HDF5 file"""
         self.__dict__.update({key: (None if not isinstance(val, numpy.ndarray) and val == 'None' else val)
                               for key, val in dict(ds.attrs).iteritems()})
+        self.nodataValues = [getattr(numpy, self.dtype)(d) for d in self.nodataValues]
         self.shape = tuple(self.shape)
         self.path = str(ds.filename)
 
@@ -2820,7 +2821,7 @@ class Vector(object):
 
     def __getitem__(self, item):
         """
-        :param item: If an index or slice is used, geometry wkb's are returned.
+        :param item: If an index or slice is used, geometry wkb's are returned.f
         If a string is used, it will return a numpy array of the field values.
         If an instance of the Extent class is used, the output will be a clipped Vector instance
         :return: List of wkb's or numpy array of field

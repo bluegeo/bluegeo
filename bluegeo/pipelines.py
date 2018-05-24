@@ -98,11 +98,33 @@ def collect_nrcan_dem(nts, tmp_dir=None, ftp_address='ftp.geogratis.gc.ca',
 
 
 class Hydat(object):
-    """Collect Environmenmt Canada Hydrometric Station Data"""
+    """
+    Collect Environmenmt Canada Hydrometric Station Data
+
+    Use:
+      1. Construct an instance of Hydat, changing the url if the gov. decides to change it
+      2. Collect a pandas dataframe with data from the station using the get_station_data method
+      3. Clean data in the dataframe using the clean_station_data method (not yet developed)
+    """
 
     def __init__(self, url='http://dd.weather.gc.ca/hydrometric/csv'):
-        """Constructor for queries of all hydat stations"""
         self.base_url = url  # Current URL for http data file collection
+
+    def get_station_data(self, station_id, time='daily'):
+        """
+        Collect data from a station
+        :param station_id: Station ID
+        :param str time: 'daily' or 'hourly'
+        :return: pandas dataframe
+        """
+        prov = self.get_province(station_id, time)
+
+        # Download and read the file into a dataframe, and strip white space from headings
+        df = pandas.read_csv(
+            urlretrieve(self.build_url(prov, time, station_id))[0]
+        ).rename(columns=lambda x: x.strip())
+
+        return df
 
     def build_url(self, province, time=None, station_id=None):
         """
@@ -176,21 +198,6 @@ class Hydat(object):
 
         return keys[int(index)]
 
-    def get_station_data(self, station_id, time='daily'):
-        """
-        Collect data from a station
-        :param station_id: Station ID
-        :return: pandas dataframe
-        """
-        prov = self.get_province(station_id, time)
-
-        # Download and read the file into a dataframe, and strip white space from headings
-        df = pandas.read_csv(
-            urlretrieve(self.build_url(prov, time, station_id))[0]
-        ).rename(columns=lambda x: x.strip())
-
-        return df
-
     @staticmethod
     def clean_station_data(station_df):
         """
@@ -198,5 +205,9 @@ class Hydat(object):
         :param station_df: dataframe of raw station data
         :return: pandas dataframe
         """
+        # TODO implement data preparation here
         # Fix the datetime field
-        a = station_df['Date']
+
+        # Cast to numeric fields where necessary
+
+        # Interpolate missing data

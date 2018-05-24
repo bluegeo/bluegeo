@@ -439,6 +439,10 @@ def eca(tree_height, disturbance, curve, basins):
             for j in range(curve.shape[0]):
                 if curve[j, 0] <= data[i] < curve[j, 1]:
                     data[i] = data[i] * curve[j, 2] + curve[j, 3]
+                elif data[i] < curve[0, 0]:
+                    data[i] = curve[0, 0] * curve[0, 2] + curve[0, 3]
+                elif data[i] >= curve[-1, 1]:
+                    data[i] = curve[-1, 1] * curve[-1, 2] + curve[-1, 3]
         return data
 
     # Create polygons from basins to hold the ECA percentage output
