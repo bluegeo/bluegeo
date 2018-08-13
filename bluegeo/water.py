@@ -1292,7 +1292,7 @@ class riparian(object):
         if scale_by_area:
             if not hasattr(self, 'fa'):
                 print "Calculating flow accumulation"
-                self.fa = bluegrass.watershed(self.dem, flow_direction='MFD', positive_fd=False)[1]
+                self.fa = bluegrass.watershed(self.dem, flow_direction='MFD', positive_fd=False, memory_manage=True)[1]
 
             print "Scaling cost using contributing area"
 
@@ -1374,7 +1374,7 @@ class riparian(object):
         if not hasattr(self, 'contributing_area') or self.update_region:
             print "Calculating contributing area"
             if not hasattr(self, 'fa'):
-                self.fa = bluegrass.watershed(self.dem)[1]
+                self.fa = bluegrass.watershed(self.dem, memory_manage=True)[1]
             a = self.fa.array
             # Sometimes the no data values is nan for flow accumulation
             a[numpy.isnan(a) | (a == self.fa.nodata)] = numpy.finfo('float32').min
