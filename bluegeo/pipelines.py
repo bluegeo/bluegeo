@@ -7,9 +7,7 @@ import urllib
 import re
 from collections import defaultdict
 import pandas
-from csv import reader as csv_reader
 import sys
-from numba import jit
 
 # for version compatibility
 if sys.version_info[0] < 3:

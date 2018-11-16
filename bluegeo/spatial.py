@@ -10,7 +10,6 @@ from osgeo import gdal, ogr, osr, gdalconst
 import h5py
 from skimage.measure import label as sklabel
 from skimage.measure import regionprops
-from rtree import index
 try:
     import Image
     import ImageDraw
@@ -1978,7 +1977,6 @@ class Vector(object):
                   'GeometryCollection': ogr.wkbGeometryCollection,
                   'None': ogr.wkbNone,
                   'LinearRing': ogr.wkbLinearRing,
-                  'PointZ': ogr.wkbPointZM,
                   'Point25D': ogr.wkb25DBit,
                   'LineString25D': ogr.wkbLineString25D,
                   'Polygon25D': ogr.wkbPolygon25D,

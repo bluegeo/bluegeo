@@ -1,3 +1,17 @@
+With Docker...
+==============
+Build the image (from the root dir)
+
+```docker build -t bluegeo .```
+
+Start a session in the container
+
+```
+docker run --rm -it bluegeo /bin/bash
+```
+
+Note, to preserve the container, do not use the `--rm` flag.
+
 INSTALLATION
 ==========
 

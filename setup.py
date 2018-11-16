@@ -9,7 +9,7 @@ import pkg_resources
 import sys
 
 
-version = open('bluegeo/VERSION', 'r').read().strip()
+version = '0.1'
 
 
 def is_installed(name):
@@ -20,7 +20,7 @@ def is_installed(name):
         return False
 
 
-requires = ['numpy', 'scipy', 'scikit-image', 'h5py', 'numexpr', 'shapely', 'pandas']
+requires = ['numpy', 'scipy', 'scikit-image', 'h5py', 'numexpr', 'shapely', 'pandas', 'numba']
 
 setup(name='bluegeo',
       version=version,
@@ -43,6 +43,5 @@ except:
     print "Warning: GRASS is not functioning- ensure GRASS is installed to use certain functionality"
 
 print "Installation Complete.  Additional dependencies are required to use certain functionality.  These include:\n" \
-      "numba: https://numba.pydata.org/\n" \
       "GDAL (including python-gdal): http://www.gdal.org/\n" \
       "GRASS (including grass-dev): https://grass.osgeo.org/\n"
