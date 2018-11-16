@@ -33,11 +33,6 @@ def collect_nrcan_dem(nts, tmp_dir=None, ftp_address='ftp.geogratis.gc.ca',
     if not os.path.isdir(tmp_dir):
         os.mkdir(tmp_dir)
 
-    # Login to ftp
-    ftp = FTP(ftp_address)
-    ftp.login()
-    ftp.cwd(ftp_dir)
-
     # Iterate NTS and collect rasters
     for num, lets in nts.iteritems():
         num = str(num)
@@ -45,12 +40,21 @@ def collect_nrcan_dem(nts, tmp_dir=None, ftp_address='ftp.geogratis.gc.ca',
             num = '00{}'.format(num)
         elif len(num) == 2:
             num = '0{}'.format(num)
+
+        # Open the ftp connection
+        ftp = FTP(ftp_address)
+        ftp.login()
+        ftp.cwd(ftp_dir)
+
         try:
             ftp.cwd(num)
         except:
             print "Warning: cannot access {}".format(num)
+            ftp.quit()
             continue
+
         dirs = ftp.nlst()
+        ftp.quit()
         if lets == 'all':
             # Include all
             inc = dirs
@@ -61,16 +65,23 @@ def collect_nrcan_dem(nts, tmp_dir=None, ftp_address='ftp.geogratis.gc.ca',
         if len(inc) == 0:
             print "Warning: None of the desired letters found in {}".format(num)
         for d in inc:
+            print "Collecting {}".format(d)
             tmpfile = os.path.join(tmp_dir, d)
+
             with open(tmpfile, 'wb') as zipf:
+                # Reopen the ftp connection for the download
+                ftp = FTP(ftp_address)
+                ftp.login()
+                ftp.cwd(ftp_dir)
+                ftp.cwd(num)
+                print "    Downloading..."
                 ftp.retrbinary('RETR ' + d, zipf.write)
+                ftp.quit()
             z = zf.ZipFile(tmpfile, 'r')
-            print 'Downloaded and now extracting {}'.format(d)
+            print "    Extracting..."
             z.extractall(tmp_dir)
             del z
             os.remove(tmpfile)
-        ftp.cwd('..')
-    ftp.quit()
 
     # Merge
     print "Merging rasters"

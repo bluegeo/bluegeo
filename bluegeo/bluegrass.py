@@ -75,7 +75,7 @@ class GrassSession(object):
         except OSError:
             os.mkdir(self.gisdb)
 
-        createcmd = "{0} -c {1} -e {2}".format(
+        createcmd = "{0} -c {1} -e {2} -text".format(
             self.grassbin,
             self.location_seed,
             self.location_path)
