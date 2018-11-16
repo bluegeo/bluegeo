@@ -7,10 +7,12 @@ Build the image (from the root dir)
 Start a session in the container
 
 ```
-docker run --rm -it bluegeo /bin/bash
+docker run --rm -v scratch:/scratch -it bluegeo /bin/bash
 ```
 
-Note, to preserve the container, do not use the `--rm` flag.
+Note:
+* To preserve the container, do not use the `--rm` flag.
+* A `scratch` directory is mounted to share files - omit it if necessary.
 
 INSTALLATION
 ==========
