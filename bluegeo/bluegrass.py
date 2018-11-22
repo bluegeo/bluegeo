@@ -1,3 +1,5 @@
+#! /usr/bin/env python
+
 import subprocess
 import sys
 import tempfile
@@ -49,7 +51,7 @@ class GrassSession(object):
             raise BlueGrassError("It appears that GRASS is not installed, or bluegrass cannot execute"
                                  " the start script ({})\nCheck the system path to the GRASS installation,"
                                  " or install grass and grass-dev.  Note, bluegrass is not supported on "
-                                 "Windows".format(startcmd))
+                                 "Windows.\nMore information:\n{}".format(startcmd, err))
         self.gisbase = out.strip('\n')
 
         self.gisdb = os.path.join(self.tempdir, 'mowerdb')
@@ -310,7 +312,7 @@ def stream_order(dem, minimum_contributing_area, stream_order_path=None, method=
     return order
 
 
-def water_outlet(coordinates, dem=None, direction=None,  basin_path=None):
+def water_outlet(coordinates, dem=None, direction=None,  basin_path=None, id=None):
     """
     Delineate basins from a list of points
     :param coordinates: Vector or list of coordinate tuples in the form [(x1, y1), (x2, y2),...(xn, yn)]
@@ -321,7 +323,17 @@ def water_outlet(coordinates, dem=None, direction=None,  basin_path=None):
     """
     # Check coordinates
     if isinstance(coordinates, basestring) or isinstance(coordinates, Vector):
-        coordinates = Vector(coordinates).transform(Raster(dem).projection).vertices[:, [0, 1]]
+        input_vect = Vector(coordinates).transform(Raster(dem).projection)
+        coordinates = input_vect.vertices[:, [0, 1]]
+        if id is not None:
+            try:
+                id_print = numpy.int32(input_vect[id])
+            except:
+                raise ValueError('Input ID field must be present, and be numeric')
+        else:
+            id_print = numpy.arange(coordinates.shape[0]) + 1
+    else:
+        id_print = numpy.arange(len(coordinates)) + 1
 
     # Use dem if fd not specified
     garbage = False
@@ -344,7 +356,8 @@ def water_outlet(coordinates, dem=None, direction=None,  basin_path=None):
         # Iterate points and populate output rasters
         areas = []
         index = []
-        for i, coord in enumerate(coordinates):
+        for _i, coord in enumerate(coordinates):
+            i = id_print[_i]
             grass.run_command('r.water.outlet', input="fd",
                               output="b%i" % (i), coordinates=tuple(coord))
             a = garray.array()
@@ -352,12 +365,12 @@ def water_outlet(coordinates, dem=None, direction=None,  basin_path=None):
             m = numpy.where(a == 1)
             area = m[0].shape[0] * (csx * csy)
             areas.append(area)
-            print "Basin {} area: {}".format(i + 1, area)
+            print "Basin {} area: {}".format(i, area)
             index.append(m)
 
     # Allocate output
-    outrast = fd.astype('uint32')
-    outrast.nodataValues = [0]
+    outrast = fd.astype('int32')
+    outrast.nodataValues = [numpy.iinfo('int32').max]
 
     if garbage:
         try:
@@ -368,8 +381,9 @@ def water_outlet(coordinates, dem=None, direction=None,  basin_path=None):
     # Write rasters to single dataset
     output = numpy.zeros(shape=outrast.shape, dtype='uint32')
     areas = numpy.array(areas)
-    for c, i in enumerate(numpy.arange(areas.shape[0])[numpy.argsort(areas)][::-1]):
-        output[index[i]] = c + 1
+    write_index = numpy.arange(areas.shape[0])[numpy.argsort(areas)][::-1]
+    for i in write_index:
+        output[index[i]] = id_print[i]
     outrast[:] = output
 
     # If an output path is specified, save the output
