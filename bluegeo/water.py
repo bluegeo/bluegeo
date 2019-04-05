@@ -61,6 +61,7 @@ def delineate_watersheds(points, dem=None, fd=None, fa=None, as_vector=True, sna
     return Vector(basins, mode='w', projection=Raster(fd).projection)
 
 
+
 def wetness(dem, minimum_area):
     """
     Calculate a wetness index using streams of a minimum contributing area

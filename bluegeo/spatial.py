@@ -10,6 +10,7 @@ from osgeo import gdal, ogr, osr, gdalconst
 import h5py
 from skimage.measure import label as sklabel
 from skimage.measure import regionprops
+from rtree import index
 try:
     import Image
     import ImageDraw
@@ -1012,6 +1013,7 @@ class Raster(object):
         ------------------------
         In Args
 
+        "projection": output projection argument
         "projection": output projection argument
             (wkt, epsg, osr.SpatialReference, Raster instance)
 
@@ -2738,11 +2740,21 @@ class Vector(object):
                         # Perform intersection
                         try:
                             intersection = parent_geo.intersection(geos[j])
-                        except:
+                        except Exception as e:
+                            print "Warning:\n{}".format(e)
                             # Likely a topological error
                             continue
                         if intersection.is_empty:
                             continue
+
+                        # If the intersection creates a geometry collection, reduce it to the
+                        # parent geometry type
+                        if intersection.type == 'GeometryCollection':
+                            intersection = [_geo for _geo in intersection if
+                                            _geo.type.replace('Multi', '') == out_vect.geometryType.replace('Multi', '')]
+                            intersection = getattr(
+                                geometry, 'Multi' + out_vect.geometryType.replace('Multi', '')
+                            )(intersection)
 
                         # Write output geometry
                         out_feature = ogr.Feature(outLyrDefn)
@@ -2761,6 +2773,31 @@ class Vector(object):
                         out_feature.Destroy()
 
         return Vector(out_vect)  # Re-read Vector to ensure meta up to date
+
+    def explode(self, name_field=None, file_type='shp'):
+        """
+        Explode features into separate files
+        """
+        for i in range(self.featureCount):
+            if name_field is not None:
+                if name_field not in self.fieldNames:
+                    raise ValueError('The field {} does not exist')
+            if name_field is not None:
+                out_name = self[name_field][i]
+            else:
+                out_name = i
+            print "Extracting {}".format(out_name)
+            try:
+                geo = self[i]
+            except AttributeError:
+                print "Warning: Error with geometry, skipping the above"
+                continue
+            dtype = [(field, self[field].dtype) for field in self.fieldNames]
+            fields = numpy.array([tuple([self[field][i] for field in self.fieldNames])], dtype=dtype)
+            base_path = '.'.join(os.path.basename(self.path).split('.')[:-1]) + '__{}.{}'.format(
+                out_name, file_type)
+            out_path = os.path.join(os.path.dirname(self.path), base_path)
+            Vector(geo, fields=fields, projection=self.projection).save(out_path)
 
     def fix(self):
         """
@@ -3102,8 +3139,8 @@ class Vector(object):
                   'float32': ogr.OFTReal,
                   'int32': ogr.OFTInteger,
                   'uint32': ogr.OFTInteger,
-                  'int64': ogr.OFTInteger64,
-                  'uint64': ogr.OFTInteger64,
+                  'int64': ogr.OFTInteger,
+                  'uint64': ogr.OFTInteger,
                   'int8': ogr.OFTInteger,
                   'uint8': ogr.OFTInteger,
                   'bool': ogr.OFTInteger,

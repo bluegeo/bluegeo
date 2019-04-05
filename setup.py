@@ -38,7 +38,7 @@ try:
     import bluegeo as bg
     with bg.bluegrass.GrassSession(26911) as gs:
         from grass.script import core as grass
-        grass.run_command('g.extension', extension='r.stream.order', flags='s')
+
 except:
     print "Warning: GRASS is not functioning- ensure GRASS is installed to use certain functionality"
 

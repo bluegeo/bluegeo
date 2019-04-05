@@ -312,7 +312,7 @@ def stream_order(dem, minimum_contributing_area, stream_order_path=None, method=
     return order
 
 
-def water_outlet(coordinates, dem=None, direction=None,  basin_path=None, id=None):
+def water_outlet(coordinates, dem=None, direction=None,  basin_path=None, id=None, vectors=False):
     """
     Delineate basins from a list of points
     :param coordinates: Vector or list of coordinate tuples in the form [(x1, y1), (x2, y2),...(xn, yn)]
@@ -327,11 +327,15 @@ def water_outlet(coordinates, dem=None, direction=None,  basin_path=None, id=Non
         coordinates = input_vect.vertices[:, [0, 1]]
         if id is not None:
             try:
-                id_print = numpy.int32(input_vect[id])
+                id_print = numpy.uint16(input_vect[id])
+                assert numpy.unique(id_print).size == id_print.size
             except:
-                raise ValueError('Input ID field must be present, and be numeric')
+                raise ValueError('Input ID field must be present,'
+                                 ' be numeric,'
+                                 ' non-negative,'
+                                 ' and have entirely unique values')
         else:
-            id_print = numpy.arange(coordinates.shape[0]) + 1
+            id_print = numpy.arange(coordinates.shape[0]).astype('uint16') + 1
     else:
         id_print = numpy.arange(len(coordinates)) + 1
 
@@ -369,8 +373,8 @@ def water_outlet(coordinates, dem=None, direction=None,  basin_path=None, id=Non
             index.append(m)
 
     # Allocate output
-    outrast = fd.astype('int32')
-    outrast.nodataValues = [numpy.iinfo('int32').max]
+    outrast = fd.astype('uint16')
+    outrast.nodataValues = [numpy.iinfo('uint16').max]
 
     if garbage:
         try:
@@ -378,20 +382,31 @@ def water_outlet(coordinates, dem=None, direction=None,  basin_path=None, id=Non
         except:
             pass
 
-    # Write rasters to single dataset
-    output = numpy.zeros(shape=outrast.shape, dtype='uint32')
     areas = numpy.array(areas)
     write_index = numpy.arange(areas.shape[0])[numpy.argsort(areas)][::-1]
-    for i in write_index:
-        output[index[i]] = id_print[i]
-    outrast[:] = output
+    output = numpy.full(outrast.shape, numpy.iinfo('uint16').max, 'uint16')
 
-    # If an output path is specified, save the output
-    if basin_path is not None:
-        outrast.save(basin_path)
-        outrast = Raster(basin_path)
+    if vectors:
+        out_vectors = []
+        for i in write_index:
+            output[index[i]] = id_print[i]
+            outrast[:] = output
+            out_vectors.append(outrast.vectorize())
+            output = numpy.full(outrast.shape, numpy.iinfo('uint16').max, 'uint16')
 
-    return outrast
+        return out_vectors
+    else:
+        # Write rasters to single dataset
+        for i in write_index:
+            output[index[i]] = id_print[i]
+        outrast[:] = output
+
+        # If an output path is specified, save the output
+        if basin_path is not None:
+            outrast.save(basin_path)
+            outrast = Raster(basin_path)
+
+        return outrast
 
 
 def watershed_basin(dem, basin_area, basin_path=None, flow_direction='SFD', half_basins=False):
