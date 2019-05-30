@@ -1,6 +1,6 @@
 from spatial import *
 import util
-from scipy.ndimage import binary_dilation, gaussian_filter
+from scipy.ndimage import binary_dilation, gaussian_filter, binary_erosion
 from scipy.interpolate import griddata
 from numba.decorators import jit
 
@@ -404,14 +404,35 @@ def interpolate_mask(input_raster, mask_raster, method='nearest'):
     return outrast
 
 
-def dilate(input_raster, dilate_value=1, iterations=1):
+def dilate(input_raster, iterations=1, interpolation_method='nearest'):
     """
     Perform a region dilation
     :param input_raster: Input Raster
     :param dilate_value: Raster value to dilate
     :return: Raster instance
     """
-    pass
+    r = Raster(input_raster)
+    a = r.array
+    output = binary_dilation(a != r.nodata, numpy.ones((3, 3)).astype('bool'), iterations)
+    mask_raster = r.astype('bool')
+    mask_raster.nodataValues = [0]
+    mask_raster[:] = output & (a == r.nodata)
+    return interpolate_mask(input_raster, mask_raster, method=interpolation_method)
+
+
+def erode(input_raster, iterations=1):
+    """
+
+    :param input_raster:
+    :return:
+    """
+    r = Raster(input_raster)
+    a = r.array
+    output = binary_erosion(a != r.nodata, numpy.ones((3, 3)).astype('bool'), iterations)
+    a[~output] = r.nodata
+    out_raster = r.empty()
+    out_raster[:] = a
+    return out_raster
 
 
 def normalize(input_raster):

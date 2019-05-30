@@ -312,7 +312,7 @@ def stream_order(dem, minimum_contributing_area, stream_order_path=None, method=
     return order
 
 
-def water_outlet(coordinates, dem=None, direction=None,  basin_path=None, id=None, vectors=False):
+def water_outlet(coordinates, dem, direction=None,  basin_path=None, id=None, vectors=False):
     """
     Delineate basins from a list of points
     :param coordinates: Vector or list of coordinate tuples in the form [(x1, y1), (x2, y2),...(xn, yn)]
@@ -383,12 +383,11 @@ def water_outlet(coordinates, dem=None, direction=None,  basin_path=None, id=Non
             pass
 
     areas = numpy.array(areas)
-    write_index = numpy.arange(areas.shape[0])[numpy.argsort(areas)][::-1]
     output = numpy.full(outrast.shape, numpy.iinfo('uint16').max, 'uint16')
 
     if vectors:
         out_vectors = []
-        for i in write_index:
+        for i in numpy.arange(areas.shape[0]):
             output[index[i]] = id_print[i]
             outrast[:] = output
             out_vectors.append(outrast.vectorize())
@@ -397,6 +396,7 @@ def water_outlet(coordinates, dem=None, direction=None,  basin_path=None, id=Non
         return out_vectors
     else:
         # Write rasters to single dataset
+        write_index = numpy.arange(areas.shape[0])[numpy.argsort(areas)][::-1]
         for i in write_index:
             output[index[i]] = id_print[i]
         outrast[:] = output

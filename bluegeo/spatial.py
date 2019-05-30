@@ -3137,6 +3137,8 @@ class Vector(object):
         """
         _types = {'float64': ogr.OFTReal,
                   'float32': ogr.OFTReal,
+                  'int16': ogr.OFTInteger,
+                  'uint16': ogr.OFTInteger,
                   'int32': ogr.OFTInteger,
                   'uint32': ogr.OFTInteger,
                   'int64': ogr.OFTInteger,

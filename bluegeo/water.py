@@ -301,118 +301,84 @@ def channel_density(streams, sample_distance=50):
     return convolve(_streams, weights)
 
 
-def sinuosity(dem, stream_order, sample_distance=100):
+def sinuosity(streams, sample_distance=100):
     """
     Calculate sinuosity from a dem or streams
-    :param kwargs: dem=path to dem _or_ stream_order=path to strahler stream order Raster
-        distance=search distance to calculate sinuosity ratio
-    :return: sinuosity as a ratio
+    :param streams: Raster with streams - ideally a stream order raster or each reach should be a different value
+    :return: sinuosity (length / length)
 
     Updated October 25, 2017
     """
     # Collect as Raster of streams
-    stream_order = Raster(stream_order)
-    distance = sample_distance
-    radius = distance / 2.
-    if distance <= 0:
+    streams = Raster(streams)
+
+    if sample_distance <= 0:
         raise WaterError('Sinuosity sampling distance must be greater than 0')
+    i = numpy.ceil(sample_distance / streams.csy)
+    if i < 1:
+        i = 1
+    j = numpy.ceil(sample_distance / streams.csx)
+    if j < 1:
+        j = 1
+    shape = map(int, (i, j))
+    weights = numpy.ones(shape=shape, dtype='float32')
 
-    # Remove connecting regions to avoid over-counting
-    m = min_filter(stream_order).array != max_filter(stream_order).array
-    a = stream_order.array
-    a[m] = stream_order.nodata
+    # Label the streams
+    stream_labels, stream_map = label(streams, True)
 
-    # Label and map stream order
-    stream_labels, stream_map = label(a, True)
-    # Get window kernel using distance
-    kernel = util.kernel_from_distance(radius, stream_order.csx, stream_order.csy)
+    # Iterate reaches and populate an output
+    out = numpy.zeros(shape=streams.shape, dtype='float32')
+    for reach, inds in stream_map.items():
+        i_fr = inds[0].min()
+        i_to = inds[0].max() + 1
+        j_fr = inds[1].min()
+        j_to = inds[1].max() + 1
 
-    # Iterate stream orders and calculate sinuosity
-    @jit(nopython=True)
-    def calc_distance(a, csx, csy, output):
-        """Brute force outer min distance"""
-        diag = numpy.sqrt((csx ** 2) + (csy ** 2))
-        iInds, jInds = numpy.where(a)
-        for ind in range(iInds.shape[0]):
-            i = iInds[ind]
-            j = jInds[ind]
-            iFr, jFr = i - ((kernel.shape[0] - 1) / 2), j - ((kernel.shape[1] - 1) / 2)
-            if iFr < 0:
-                kiFr = abs(iFr)
-                iFr = 0
-            else:
-                kiFr = 0
-            if jFr < 0:
-                kjFr = abs(jFr)
-                jFr = 0
-            else:
-                kjFr = 0
-            iTo, jTo = i + ((kernel.shape[0] - 1) / 2) + 1, j + ((kernel.shape[1] - 1) / 2) + 1
-            if iTo > a.shape[0]:
-                kiTo = kernel.shape[0] - (iTo - a.shape[0])
-                iTo = a.shape[0]
-            else:
-                kiTo = kernel.shape[0]
-            if jTo > a.shape[1]:
-                kjTo = kernel.shape[1] - (jTo - a.shape[1])
-                jTo = a.shape[1]
-            else:
-                kjTo = kernel.shape[1]
-            iInner, jInner = numpy.where(a[iFr:iTo, jFr:jTo] & kernel[kiFr:kiTo, kjFr:kjTo])
-            distance = 0
-            connected = numpy.empty(iInner.shape, numpy.int64)
-            for _ind in range(iInner.shape[0]):
-                connected[_ind] = -1
-            for _ind in range(iInner.shape[0]):
-                localMin = 1E38
-                localMinInd = -1
-                for _outind in range(iInner.shape[0]):
-                    if connected[_outind] != _ind:
-                        d = numpy.sqrt((((iInner[_ind] - iInner[_outind]) * csy)**2) +
-                                       (((jInner[_ind] - jInner[_outind]) * csx)**2))
-                        if d < localMin and d != 0 and d <= diag:
-                            localMin = d
-                            localMinInd = _outind
-                if localMinInd != -1:
-                    connected[_ind] = localMinInd
-                    distance += localMin
-                else:
-                    continue
-            output[i, j] = distance
-        return output
+        a = numpy.zeros(shape=(i_to - i_fr, j_to - j_fr), dtype='bool')
+        a[(inds[0] - i_fr, inds[1] - j_fr)] = 1
+        conv = convolve_sinu(a, weights, 0)
+        out[i_fr:i_to, j_fr:j_to] += conv
 
-    outa = stream_order.array
-    nodata_mask = outa == stream_order.nodata
-    sinuosity_raster = stream_order.astype('float32')
-    outa = outa.astype('float32')
-    cnt = 0
-    for region, indices in stream_map.iteritems():
-        cnt += 1
-        # Create slices using index
-        i, j = indices
-        iSlice, jSlice = (slice(i.min(), i.max() + 1), slice(j.min(), j.max() + 1))
-        i = i - i.min()
-        j = j - j.min()
-        sinu = numpy.zeros(shape=(iSlice.stop - iSlice.start, jSlice.stop - jSlice.start), dtype='bool')
-        sinu[i, j] = True
-        count_arr = numpy.zeros(shape=sinu.shape, dtype='float32')
-        if sinu.sum() > 1:
-            # Count cells in neighbourhood
-            count_arr = calc_distance(sinu, stream_order.csx, stream_order.csy, count_arr)
-        else:
-            count_arr[sinu] = distance
-        # Avoid false negatives where a full reach does not exist
-        count_arr[count_arr < distance] = distance
-        outa[iSlice, jSlice][sinu] = count_arr[sinu]
+    sinuosity = streams.astype('float32')
+    sinuosity.nodataValues = [0]
+    out /= numpy.mean([i, j, numpy.sqrt(i**2 + j**2)])
+    out[(out < 1) & (out > 0)] = 1
+    sinuosity[:] = out
 
-    sinuosity_raster.nodataValues = [-1]
-    outa[nodata_mask] = sinuosity_raster.nodata
-    outaVals = outa[~nodata_mask]
-    outaMin = outaVals.min()
-    outa[~nodata_mask] = (outaVals - outaMin) / (outaVals.max() - outaMin)
-    sinuosity_raster[:] = outa
+    return sinuosity
 
-    return sinuosity_raster
+
+def convolve_sinu(a, kernel, background):
+    """
+
+    :return:
+    """
+    padding = (map(int, ((kernel.shape[0] - 1.) / 2, numpy.ceil((kernel.shape[0] - 1.) / 2))),
+               map(int, ((kernel.shape[1] - 1.) / 2, numpy.ceil((kernel.shape[1] - 1.) / 2))))
+    mask = a == background
+    a[mask] = 0
+    return_shape = a.shape
+    a = numpy.pad(a.astype('float32'), padding, 'constant')
+
+    # Perform convolution
+    views = util.get_window_views(a, kernel.shape)  # Views into a over the kernel
+    local_dict = util.window_local_dict(views)  # Views turned into a pointer dictionary for numexpr
+    output = numpy.zeros(shape=return_shape, dtype='float32')  # Allocate output
+    # ne.evaluate only allows 32 arrays in one expression.  Need to chunk it up.
+    keys = ['a{}_{}'.format(i, j) for i in range(len(views)) for j in range(len(views[0]))]  # preserve order
+    kernel_len = len(keys)
+    keychunks = range(0, len(local_dict) + 31, 31)
+    keychunks = zip(keychunks[:-1],
+                    keychunks[1:-1] + [len(keys)])
+    kernel = kernel.ravel()
+    for ch in keychunks:
+        new_local = {k: local_dict[k] for k in keys[ch[0]: ch[1]]}
+        expression = '+'.join(['{}*{}'.format(prod_1, prod_2)
+                               for prod_1, prod_2 in zip(new_local.keys(), kernel[ch[0]: ch[1]])])
+        output += ne.evaluate(expression, local_dict=new_local)
+
+    output[mask] = background
+    return output
 
 
 def eca(tree_height, disturbance, curve, basins):

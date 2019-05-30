@@ -73,7 +73,7 @@ def isclose(input, values, tolerance):
 def transform_points(points, inproj, outproj):
     """
     Transform a list of points [(x, y), (x, y)...]
-    :param points: 
+    :param points:
     :param inproj: projection of points as wkt
     :param outproj: output projection of points as wkt
     :return: projected points
@@ -157,11 +157,11 @@ def window_local_dict(views, prefix='a'):
 def indices_to_coords(indices, top, left, csx, csy):
     """
     Convert a tuple of ([i...], [j...]) indices to coordinates
-    :param indices: 
-    :param top: 
-    :param left: 
-    :param csx: 
-    :param csy: 
+    :param indices:
+    :param top:
+    :param left:
+    :param csx:
+    :param csy:
     :return: Coordinates: ([y...], [x...])
     """
     i, j = numpy.asarray(indices[0]), numpy.asarray(indices[1])
@@ -210,14 +210,14 @@ def kernel_from_distance(distance, csx, csy):
     """
     Calculate a kernel mask using distance
     :param distance: Radius for kernel
-    :param csx: 
-    :param csy: 
+    :param csx:
+    :param csy:
     :return: kernel mask
     """
     num_cells_x = numpy.ceil(round((distance * 2.) / csx)) + 1
     num_cells_y = numpy.ceil(round((distance * 2.) / csy)) + 1
     centroid = (int((num_cells_y - 1) / 2.), int((num_cells_x - 1) / 2.))
-    kernel = numpy.ones(shape=(num_cells_y, num_cells_x), dtype='bool')
+    kernel = numpy.ones(shape=(int(num_cells_y), int(num_cells_x)), dtype='bool')
     kernel[centroid] = 0
     dt = ndimage.distance_transform_edt(kernel, (csy, csx))
     return dt <= distance
