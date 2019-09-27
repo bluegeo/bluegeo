@@ -48,11 +48,11 @@ def delineate_watersheds(points, dem=None, fd=None, fa=None, as_vector=True, sna
             points = Vector(points).transform(Raster(fd).projection).vertices[:, [0, 1]]
 
     if not as_vector:
-        return bluegrass.water_outlet(points, direction=fd)
+        return bluegrass.water_outlet(points, dem, direction=fd)
 
     basins = []
     for point in points:
-        basins += bluegrass.water_outlet([point], direction=fd).polygonize()[:]
+        basins += bluegrass.water_outlet([point], dem, direction=fd).polygonize()[:]
 
     # Sort basins by area (largest to smallest)
     srt = numpy.argsort([ogr.CreateGeometryFromWkb(b).Area() for b in basins])[::-1]
@@ -60,6 +60,32 @@ def delineate_watersheds(points, dem=None, fd=None, fa=None, as_vector=True, sna
 
     return Vector(basins, mode='w', projection=Raster(fd).projection)
 
+
+def auto_watersheds(dem, min_area):
+    """
+    Build basin shapefiles using a minimum contributing area
+    :param dem:
+    :return:
+    """
+    fd, fa = bluegrass.watershed(dem)
+    a = fa.array
+    a[a == fa.nodata] = 0
+    basins = bluegrass.watershed_basin(dem, min_area)
+
+    _, basin_map = label(basins, True)
+    outlets = []
+    for basin, index in basin_map.items():
+        if basin == basins.nodata:
+            continue
+        max_fa = a[index].max()
+        outlet = numpy.where(a == max_fa)
+        for i, j in zip(outlet[0], outlet[1]):
+            if i in index[0] and j in index[1]:
+                outlets.append((basins.left + (basins.csx * 0.5) + (basins.csx * j),
+                                basins.top - (basins.csy * 0.5) - (basins.csy * i)))
+                break
+
+    return delineate_watersheds(outlets, fd=fd, fa=fa, as_vector=True)
 
 
 def wetness(dem, minimum_area):

@@ -1,11 +1,12 @@
 cython
+networkx==2.2
 matplotlib<3.0
-numpy
-scipy
+numpy==1.16.4
+scipy==1.2.0
 scikit-image<0.15
 h5py
 numexpr
 shapely
-pandas
+pandas==0.23
 numba
 rtree

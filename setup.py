@@ -20,7 +20,20 @@ def is_installed(name):
         return False
 
 
-requires = ['cython', 'matplotlib<3.0', 'numpy', 'scipy', 'scikit-image<0.15', 'h5py', 'numexpr', 'shapely', 'pandas', 'numba', 'rtree']
+requires = [
+    'networkx==2.2',
+    'cython',
+    'matplotlib<3.0',
+    'numpy==1.16.4',
+    'scipy==1.2.0',
+    'scikit-image<0.15',
+    'h5py',
+    'numexpr',
+    'shapely',
+    'pandas==0.23',
+    'numba',
+    'rtree'
+]
 
 setup(name='bluegeo',
       version=version,
