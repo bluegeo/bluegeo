@@ -1531,7 +1531,7 @@ def segment_water(dem, slope_threshold=0, slope=None):
     return water
 
 
-def bankfull(dem, average_annual_precip=250, contributing_area=None, flood_factor=3,
+def bankfull(dem, average_annual_precip=250, contributing_area=None, flood_factor=1, max_width=5000,
              streams=None, min_stream_area=None):
     """
     Calculate a bankfull depth using the given precipitation and flood factor
@@ -1582,13 +1582,22 @@ def bankfull(dem, average_annual_precip=250, contributing_area=None, flood_facto
     bnkfl = bankfull.array
     bnkfl[~streams] = bankfull.nodata
     bankfull[:] = bnkfl
-    del bnkfl
     bankfull += dem
-    bankfull = interpolate_nodata(bankfull, method='linear')
+    bnkfl = bankfull.array
 
-    # Smooth using a mean filter 3 times
-    # for i in range(3):
-    #     bankfull = mean_filter(bankfull)
+    # Buffer by the max width
+    mask = distance_transform_edt(bnkfl == bankfull.nodata, (bankfull.csy, bankfull.csx)) < max_width
+
+    # Extrapolate the bankfull values to the buffer
+    xi = (bnkfl == bankfull.nodata) & mask
+    points = bnkfl != bankfull.nodata
+    values = bnkfl[points]
+    points = numpy.where(points)
+    points = numpy.vstack([points[0] * bankfull.csy, points[1] * bankfull.csx]).T
+    xi = numpy.where(xi)
+    bnkfl[xi] = griddata(points, values, (xi[0] * bankfull.csy, xi[1] * bankfull.csx), 'linear')
+    bnkfl[numpy.isnan(bnkfl) | np.isinf(bnkfl)] = bankfull.nodata
+    bankfull[:] = bnkfl
 
     # Create a flood depth by subtracting the dem
     bankfull -= dem
