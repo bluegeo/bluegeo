@@ -1596,7 +1596,7 @@ def bankfull(dem, average_annual_precip=250, contributing_area=None, flood_facto
     points = numpy.vstack([points[0] * bankfull.csy, points[1] * bankfull.csx]).T
     xi = numpy.where(xi)
     bnkfl[xi] = griddata(points, values, (xi[0] * bankfull.csy, xi[1] * bankfull.csx), 'linear')
-    bnkfl[numpy.isnan(bnkfl) | np.isinf(bnkfl)] = bankfull.nodata
+    bnkfl[numpy.isnan(bnkfl) | numpy.isinf(bnkfl)] = bankfull.nodata
     bankfull[:] = bnkfl
 
     # Create a flood depth by subtracting the dem
