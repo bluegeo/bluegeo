@@ -363,7 +363,7 @@ def interpolate_mask(input_raster, mask_raster, method='nearest'):
     # Gather points for interpolation
     in_nodata = a == inrast.nodata
     xi = mask & in_nodata
-    if xi.sum == 0:
+    if xi.sum() == 0:
         # Nothing to interpolate
         return inrast
 
