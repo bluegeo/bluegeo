@@ -1767,6 +1767,10 @@ def valley_width_transform(valleys):
             continue
         distances[inds] = distance_map[label]
 
+    print "Doubling dimensions"
+    max_distance = numpy.sqrt(valleys.csy**2 + valleys.csx**2) * 2
+    distances[distances > max_distance] *= 2
+
     output = valleys.astype('float32')
     output[:] = distances.astype('float32')
     return output
