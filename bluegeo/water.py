@@ -7,7 +7,11 @@ from terrain import *
 from filters import *
 from measurement import *
 import bluegrass
-from scipy.ndimage import binary_dilation
+from scipy.ndimage import binary_dilation, distance_transform_edt
+from scipy.ndimage import label as ndi_label
+from scipy.interpolate import griddata
+from skimage.feature import peak_local_max
+from skimage.segmentation import watershed
 
 
 class WaterError(Exception):
@@ -59,7 +63,6 @@ def delineate_watersheds(points, dem=None, fd=None, fa=None, as_vector=True, sna
     basins = [basins[i] for i in srt]
 
     return Vector(basins, mode='w', projection=Raster(fd).projection)
-
 
 
 def wetness(dem, minimum_area):
@@ -590,7 +593,7 @@ def snap_pour_points(points, sfd, fa, min_contrib_area=1E7):
                 i += o_i
                 j += o_j
             except KeyError:
-            # except (KeyError, IndexError):  Commented out for testing- revert if you see this
+                # except (KeyError, IndexError):  Commented out for testing- revert if you see this
                 print "Warning: unable to snap point at index {}".format(point_index)
                 snapped = False
                 break
@@ -661,6 +664,7 @@ class HRU(object):
         # Write to an output .rvh using a template
         hrus.write_raven_rvh('template_file.rvh', 'output_file.rvh')
     """
+
     def __init__(self, dem, basin_mask=None, output_srid=4269):
         """
         HRU instance for dynamic HRU creation tasks
@@ -956,7 +960,7 @@ class HRU(object):
 
         print "...Created {} additional HRU's based on {}".format(
             len(new_hrus) - len(self.hru_attributes), name
-        )
+            )
         self.hru_attributes = new_hrus
 
     def compute_zonal_data(self):
@@ -1220,6 +1224,7 @@ class HRU(object):
 
 class riparian(object):
     """Objects and methods for the delineation and calculation of sensitivity of the riparian"""
+
     def __init__(self, dem):
         self.dem = Raster(dem)
         self.dem.interpolationMethod = 'bilinear'
@@ -1719,3 +1724,49 @@ def valley_confinement(dem, min_stream_area, cost_threshold=2500, streams=None, 
     valleys[:] = a
     print "Completed successfully"
     return valleys
+
+
+def valley_width_transform(valleys):
+    """Calculate the approximate distributed valley width
+
+    `from bluegeo.water import valley_width_transform;test = valley_width_transform('/Users/devin/Desktop/valley.tif')`
+
+    Arguments:
+        valleys {[type]} -- [description]
+    """
+    valleys = Raster(valleys)
+    mask = valleys.array != valleys.nodata
+
+    # Calculate distance to the bank over all valleys
+    print "Calculating a distance transform"
+    distances = distance_transform_edt(mask, sampling=(valleys.csy, valleys.csx))
+
+    # Calculate local maxima
+    print "Calculating local maxima"
+    local_maxi = peak_local_max(distances, indices=False, footprint=numpy.ones((3, 3)), labels=mask)
+
+    # Use a watershed segmentation algorithm to produce labeled width breaks
+    def label_map(a):
+        shape = a.shape
+        a = a.ravel()
+        indices = numpy.argsort(a)
+        bins = numpy.bincount(a)
+        indices = numpy.split(indices, numpy.cumsum(bins[bins > 0][:-1]))
+        return dict(zip(numpy.unique(a), [numpy.unravel_index(ind, shape) for ind in indices]))
+
+    print "Labeling maxima"
+    breaks = ndi_label(local_maxi)[0]
+    distance_map = {brk: dist for brk, dist in zip(breaks[local_maxi], distances[local_maxi])}
+
+    print "Performing Watershed Segmentation"
+    labels = watershed(-distances, breaks, mask=mask)
+
+    print "Assigning distances to labels"
+    for label, inds in label_map(labels).items():
+        if label == 0:
+            continue
+        distances[inds] = distance_map[label]
+
+    output = valleys.astype('float32')
+    output[:] = distances.astype('float32')
+    return output
