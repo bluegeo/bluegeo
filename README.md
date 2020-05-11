@@ -1,14 +1,24 @@
 # bluegeo
 
-bluegeo is a library developed to assist in geospatial development where core scientific python libraries
+_bluegeo_ is a library developed to assist in geospatial development where core scientific python libraries
 such as numpy, scipy, scikit-image and scikit-learn can be implemented easily over raster and vector geospatial
-data. For example:
+data.
+
+For example:
 
 ```python
 import bluegeo as bg
 import numpy as np
 
-print np.mean(bg.Raster('elevation.tif')[:])
+# Virtually read a raster file
+r = bg.Raster('elevation.tif')
+
+# Slice the data, returning a numpy array
+# Note: Slice-based __getitem__ operations are supported, but fancy indexing is not
+a = np.ma.masked_equal(r[:], r.nodata)
+
+# Perform a numpy operation
+print(a.mean())
 784.91772
 ```
 
@@ -46,12 +56,25 @@ Note:
 
 ## Linux and bash provisioning
 
-The easiest way to use bluegeo is on Linux, using the bash script to install the dependencies
-
-Minimum server requirements on linux can be met using `privision.sh` for the user `ubuntu`
-
-example
+The easiest way to use bluegeo is on Linux, using the `privision.sh` script to install the dependencies:
 
 ```bash
 bluegeo/provision.sh
+```
+
+You may need to re-initialize conda after this
+
+```bash
+eval "$(~/miniconda/bin/conda shell.bash hook)"
+```
+
+Test the installation
+
+```bash
+python
+```
+
+```python
+>>> import bluegeo as bg
+>>>
 ```

@@ -10,7 +10,7 @@ from contextlib import contextmanager
 import os
 from osgeo import gdal, osr
 import csv
-from numba import jit
+from numba.core.decorators import jit
 import time
 import multiprocessing as mp
 import shutil

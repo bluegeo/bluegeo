@@ -7,7 +7,7 @@ Blue Geosimulation, 2017
 from .spatial import *
 from . import util
 import math
-from numba.decorators import jit
+from numba.core.decorators import jit
 from scipy import ndimage, interpolate
 
 try:

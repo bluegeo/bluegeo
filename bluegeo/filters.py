@@ -2,7 +2,7 @@ from .spatial import *
 from . import util
 from scipy.ndimage import binary_dilation, gaussian_filter, binary_erosion
 from scipy.interpolate import griddata
-from numba.decorators import jit
+from numba.core.decorators import jit
 
 
 class FilterError(Exception):
