@@ -53,8 +53,8 @@ try:
         from grass.script import core as grass
 
 except:
-    print "Warning: GRASS is not functioning- ensure GRASS is installed to use certain functionality"
+    print("Warning: GRASS is not functioning- ensure GRASS is installed to use certain functionality")
 
-print "Installation Complete.  Additional dependencies are required to use certain functionality.  These include:\n" \
+print("Installation Complete.  Additional dependencies are required to use certain functionality.  These include:\n" \
       "GDAL (including python-gdal): http://www.gdal.org/\n" \
-      "GRASS (including grass-dev): https://grass.osgeo.org/\n"
+      "GRASS (including grass-dev): https://grass.osgeo.org/\n")

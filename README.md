@@ -44,11 +44,11 @@ Note:
 - To preserve the container, do not use the `--rm` flag.
 - A `scratch` directory (absolute path) is mounted to share files - omit it if necessary.
 
-## Linux provisioning
+## Linux and bash provisioning
 
 The easiest way to use bluegeo is on Linux, using the bash script to install the dependencies
 
-Minimum server requirements on linux can be met using `privision.sh`
+Minimum server requirements on linux can be met using `privision.sh` for the user `ubuntu`
 
 example
 
