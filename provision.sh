@@ -12,7 +12,7 @@ conda activate bluegeo
 conda install -y gdal cython numpy scipy networkx matplotlib rtree scikit-image h5py numexpr shapely pandas numba
 
 # Install Ubuntu GIS ppa
-sudo add-apt-repository ppa:ubuntugis/ubuntugis-unstable
+sudo add-apt-repository -y ppa:ubuntugis/ubuntugis-unstable
 sudo apt-get update
 sudo apt-get -y install grass
 sudo apt-get -y install grass-dev

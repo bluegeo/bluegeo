@@ -53,6 +53,5 @@ Minimum server requirements on linux can be met using `privision.sh`
 example
 
 ```bash
-sudo chmod u+x bluegeo/provision.sh
 bluegeo/provision.sh
 ```
