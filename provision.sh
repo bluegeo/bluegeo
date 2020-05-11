@@ -7,7 +7,7 @@ bash ~/miniconda.sh -b -p $HOME/miniconda
 eval "$(/home/ubuntu/miniconda/bin/conda shell.bash hook)"
 
 # Install python dependencies
-conda create -n bluegeo
+conda create -y -n bluegeo
 conda activate bluegeo
 conda install -y gdal cython numpy scipy networkx matplotlib rtree scikit-image h5py numexpr shapely pandas numba
 
