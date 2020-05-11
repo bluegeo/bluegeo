@@ -1,5 +1,5 @@
-from spatial import *
-import util
+from .spatial import *
+from . import util
 from scipy.ndimage import binary_dilation, gaussian_filter, binary_erosion
 from scipy.interpolate import griddata
 from numba.decorators import jit
@@ -271,7 +271,7 @@ def interpolate_nodata(input_raster, method='nearest'):
     xi = numpy.where(xi)
     if method != 'nearest':
         # Corners of Raster must have data to ensure convex hull encompasses entire Raster
-        index = map(numpy.array, ([0, 0, a.shape[0] - 1, a.shape[0] - 1], [0, a.shape[1] - 1, 0, a.shape[1] - 1]))
+        index = list(map(numpy.array, ([0, 0, a.shape[0] - 1, a.shape[0] - 1], [0, a.shape[1] - 1, 0, a.shape[1] - 1])))
         corner_nodata = a[index] == inrast.nodata
         if corner_nodata.sum() != 0:
             index = (index[0][corner_nodata], index[1][corner_nodata])
@@ -325,7 +325,7 @@ def interpolate_mask(input_raster, mask_raster, method='nearest'):
         chunkSize = int(round(xGrid.shape[0] / (cpu_count() * 4)))
         if chunkSize < 1:
             chunkSize = 1
-        chunkRange = range(0, xGrid.shape[0] + chunkSize, chunkSize)
+        chunkRange = list(range(0, xGrid.shape[0] + chunkSize, chunkSize))
 
         iterator = []
         totalCalcs = 0
@@ -335,7 +335,7 @@ def interpolate_mask(input_raster, mask_raster, method='nearest'):
             iterator.append(
                 (pointGrid, xChunk, values, numpy.zeros(shape=(to - fr,), dtype='float32'), (fr, to))
             )
-        print "IDW requires {} calculations".format(totalCalcs)
+        print("IDW requires {} calculations".format(totalCalcs))
 
         import time
         now = time.time()
@@ -346,11 +346,11 @@ def interpolate_mask(input_raster, mask_raster, method='nearest'):
             import sys
             p.close()
             p.join()
-            raise e, None, sys.exc_info()[2]
+            raise e.with_traceback(sys.exc_info()[2])
         else:
             p.close()
             p.join()
-        print "Completed IDW interpolation in %s minutes" % (round((time.time() - now) / 60, 3))
+        print("Completed IDW interpolation in %s minutes" % (round((time.time() - now) / 60, 3)))
         return iterator
 
     inrast = Raster(input_raster)
@@ -470,8 +470,8 @@ def convolve(input_raster, kernel):
 
     # Create a padded array
     inrast = Raster(input_raster)
-    padding = (map(int, ((kernel.shape[0] - 1.) / 2, numpy.ceil((kernel.shape[0] - 1.) / 2))),
-               map(int, ((kernel.shape[1] - 1.) / 2, numpy.ceil((kernel.shape[1] - 1.) / 2))))
+    padding = (list(map(int, ((kernel.shape[0] - 1.) / 2, numpy.ceil((kernel.shape[0] - 1.) / 2)))),
+               list(map(int, ((kernel.shape[1] - 1.) / 2, numpy.ceil((kernel.shape[1] - 1.) / 2)))))
     a = inrast.array
     mask = a == inrast.nodata
     a[mask] = 0
@@ -484,14 +484,14 @@ def convolve(input_raster, kernel):
     # ne.evaluate only allows 32 arrays in one expression.  Need to chunk it up.
     keys = ['a{}_{}'.format(i, j) for i in range(len(views)) for j in range(len(views[0]))]  # preserve order
     kernel_len = len(keys)
-    keychunks = range(0, len(local_dict) + 31, 31)
-    keychunks = zip(keychunks[:-1],
-                    keychunks[1:-1] + [len(keys)])
+    keychunks = list(range(0, len(local_dict) + 31, 31))
+    keychunks = list(zip(keychunks[:-1],
+                    keychunks[1:-1] + [len(keys)]))
     kernel = kernel.ravel()
     for ch in keychunks:
         new_local = {k: local_dict[k] for k in keys[ch[0]: ch[1]]}
         expression = '+'.join(['{}*{}'.format(prod_1, prod_2)
-                               for prod_1, prod_2 in zip(new_local.keys(), kernel[ch[0]: ch[1]])])
+                               for prod_1, prod_2 in zip(list(new_local.keys()), kernel[ch[0]: ch[1]])])
         output += ne.evaluate(expression, local_dict=new_local)
 
     # Allocate output

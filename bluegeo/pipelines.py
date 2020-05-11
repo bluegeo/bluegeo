@@ -1,9 +1,9 @@
-from spatial import *
+from .spatial import *
 from ftplib import FTP
 import zipfile as zf
 import os
 import tempfile
-import urllib
+import urllib.request, urllib.parse, urllib.error
 import re
 from collections import defaultdict
 import pandas
@@ -11,7 +11,7 @@ import sys
 
 # for version compatibility
 if sys.version_info[0] < 3:
-    from urllib import urlretrieve  # Python 2.X
+    from urllib.request import urlretrieve  # Python 2.X
 else:
     from urllib.request import urlretrieve  # Python 3.X
 
@@ -34,7 +34,7 @@ def collect_nrcan_dem(nts, tmp_dir=None, ftp_address='ftp.geogratis.gc.ca',
         os.mkdir(tmp_dir)
 
     # Iterate NTS and collect rasters
-    for num, lets in nts.iteritems():
+    for num, lets in nts.items():
         num = str(num)
         if len(num) == 1:
             num = '00{}'.format(num)
@@ -49,7 +49,7 @@ def collect_nrcan_dem(nts, tmp_dir=None, ftp_address='ftp.geogratis.gc.ca',
         try:
             ftp.cwd(num)
         except:
-            print "Warning: cannot access {}".format(num)
+            print("Warning: cannot access {}".format(num))
             ftp.quit()
             continue
 
@@ -63,9 +63,9 @@ def collect_nrcan_dem(nts, tmp_dir=None, ftp_address='ftp.geogratis.gc.ca',
                    any([let.lower() in d.replace('cdem_dem_', '').replace('_tif', '').replace('.zip', '').lower()
                         for let in lets])]
         if len(inc) == 0:
-            print "Warning: None of the desired letters found in {}".format(num)
+            print("Warning: None of the desired letters found in {}".format(num))
         for d in inc:
-            print "Collecting {}".format(d)
+            print("Collecting {}".format(d))
             tmpfile = os.path.join(tmp_dir, d)
 
             with open(tmpfile, 'wb') as zipf:
@@ -74,17 +74,17 @@ def collect_nrcan_dem(nts, tmp_dir=None, ftp_address='ftp.geogratis.gc.ca',
                 ftp.login()
                 ftp.cwd(ftp_dir)
                 ftp.cwd(num)
-                print "    Downloading..."
+                print("    Downloading...")
                 ftp.retrbinary('RETR ' + d, zipf.write)
                 ftp.quit()
             z = zf.ZipFile(tmpfile, 'r')
-            print "    Extracting..."
+            print("    Extracting...")
             z.extractall(tmp_dir)
             del z
             os.remove(tmpfile)
 
     # Merge
-    print "Merging rasters"
+    print("Merging rasters")
     files = [os.path.join(tmp_dir, f) for f in os.listdir(tmp_dir) if f.split('.')[-1] == 'tif']
     outpath = os.path.join(tmp_dir, 'nrcan_dem.tif')
 
@@ -95,7 +95,7 @@ def collect_nrcan_dem(nts, tmp_dir=None, ftp_address='ftp.geogratis.gc.ca',
             r = Raster(f)
             _files.append(f)
         except:
-            print "Warning: cannot read file {}".format(f)
+            print("Warning: cannot read file {}".format(f))
 
     if len(_files) > 0:
         command = 'gdalwarp -r cubic -overwrite "{}" "{}"'.format('" "'.join(_files), outpath)
@@ -163,23 +163,23 @@ class Hydat(object):
         :return: dict
         """
         # First, iterate provinces and build url's
-        site = urllib.urlopen(self.base_url)
+        site = urllib.request.urlopen(self.base_url)
 
         # Check that the site is still valid or operating by collecting a list of provinces
-        print "Collecting provinces"
+        print("Collecting provinces")
         provinces = [s[9:11] for s in re.findall('<a href="../">../</a>', site.read())]
 
         # Iterate provinces and collect list of available times
-        print "Collecting time periods and station ID's"
+        print("Collecting time periods and station ID's")
         self.stations = defaultdict(dict)
         for prov in provinces:
-            site = urllib.urlopen(self.build_url(prov))
+            site = urllib.request.urlopen(self.build_url(prov))
             expression = '<a href="[hd][a-zA-Z]*/">[hd][a-zA-Z]*/</a>'
             times = [s.split('>')[1].split('<')[0].replace('/', '') for s in re.findall(expression, site.read())]
 
             # Iterate times and collect the station ID's
             for time in times:
-                site = urllib.urlopen(self.build_url(prov, time))
+                site = urllib.request.urlopen(self.build_url(prov, time))
                 expression = '<a href="{0}_[a-zA-Z0-9]*_{1}_hydrometric.csv">{0}_[a-zA-Z0-9]*_{1}_hydrometric.csv</a>'
                 expression = expression.format(prov.upper(), time.lower())
                 stations = [s.split('_')[1] for s in re.findall(expression, site.read())]
@@ -196,7 +196,7 @@ class Hydat(object):
         if not hasattr(self, 'stations'):
             self.collect_stations()
 
-        keys = self.stations.keys()
+        keys = list(self.stations.keys())
 
         index = numpy.where(
             [any([True for id in self.stations[prov][time] if id == station_id]) for prov in keys]

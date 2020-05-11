@@ -63,11 +63,11 @@ class Climate(object):
 
         self.h5file = os.path.join(output_directory, 'climate.h5')
         if not os.path.isfile(self.h5file):
-            print "PRISM and delta data must be loaded from the source.  This will take a while."
+            print("PRISM and delta data must be loaded from the source.  This will take a while.")
             f = h5py.File(self.h5file, mode='w', libver='latest')
             f.close()
             # Load PRISM data
-            print "Loading PRISM data"
+            print("Loading PRISM data")
             # Unsure why this is needed:
             # with open(os.path.join(os.path.join(self.wkdir, 'prismdat'), 'index.dat')) as f:
             #     lines = f.readlines()[0]
@@ -128,15 +128,15 @@ class Climate(object):
                         annual_gcms.append(gcm_or_dir)
 
             # Load all of the scenarios into the h5 file
-            print "Loading normal deltas..."
+            print("Loading normal deltas...")
             self.load_scenarios(periods, period_index)
-            print "Loading GCM deltas..."
+            print("Loading GCM deltas...")
             self.load_scenarios(gcms, gcm_index)
-            print "Loading annual GCM deltas..."
+            print("Loading annual GCM deltas...")
             self.load_scenarios(annual_gcms, gcm_index)
 
         else:
-            print "Using the existing climate file:\n{}".format(self.h5file)
+            print("Using the existing climate file:\n{}".format(self.h5file))
 
     def save_ds(self, a, name):
         with h5py.File(self.h5file, libver='latest') as f:
@@ -153,7 +153,7 @@ class Climate(object):
     @property
     def scenarios(self):
         with h5py.File(self.h5file, libver='latest') as f:
-            return f['scens'].keys()
+            return list(f['scens'].keys())
 
     @staticmethod
     def parse_input(data):
@@ -163,7 +163,7 @@ class Climate(object):
             with open(data, 'rU') as f:
                 data = [line for line in csv.reader(f)]
             data = numpy.array(
-                map(tuple, data[1:]),
+                list(map(tuple, data[1:])),
                 dtype=[(n, t)
                        for n, t in zip(data[0], ['S50' if any([i.isalpha() for i in e])
                                                  else 'float32' for e in data[1]])]
@@ -210,7 +210,7 @@ class Climate(object):
         if not os.path.isfile(index_path):
             raise Exception('Cannot find the index path {}'.format(index_path))
         with open(index_path, 'r') as f:
-            index = numpy.array(map(int, [line.strip() for line in f.readlines()[1:]]))
+            index = numpy.array(list(map(int, [line.strip() for line in f.readlines()[1:]])))
 
         if 'gcm' in os.path.basename(index_path).lower():
             scen_type = 'gcm'
@@ -263,14 +263,14 @@ class Climate(object):
                 col = col[0]
 
                 # Write the data to the h5 file
-                template[write_locations] = map(float, [line[col] for line in lines[1:]])
+                template[write_locations] = list(map(float, [line[col] for line in lines[1:]]))
 
                 self.save_ds(template, 'scens/{}^^^{}/{}'.format(scen_type, name, param))
 
             new_progress = '{:.0f}'.format(float(for_prog + 1) / len(paths) * 100.)
             if new_progress != progress and new_progress[-1] in ['5', '0']:
                 progress = new_progress
-                print progress + '%'
+                print(progress + '%')
 
     def write_csv(self, rows):
         """Write an output csv using point data generated during downscaling"""
@@ -287,7 +287,7 @@ class Climate(object):
             f.write(','.join(headings) + '\n')
             f.write('\n'.join([','.join(row) for row in rows]))
 
-        print 'Successfully wrote "{}"'.format(path)
+        print('Successfully wrote "{}"'.format(path))
 
     def downscale(self, input_data, only_include=None):
         """
@@ -323,7 +323,7 @@ class Climate(object):
                 import sys
                 p.close()
                 p.join()
-                raise e, None, sys.exc_info()[2]
+                raise e.with_traceback(sys.exc_info()[2])
             else:
                 p.close()
                 p.join()
@@ -334,7 +334,7 @@ class Climate(object):
 
             self.write_csv(rows)
 
-            print "Completed downscaling in {:.0f} seconds".format(time.time() - now)
+            print("Completed downscaling in {:.0f} seconds".format(time.time() - now))
 
     # def downscale_raster(self, data, scenarios, parameters):
     #     """
@@ -584,10 +584,10 @@ def downscale_point(args):
         try:
             assert dem[i, j] != -99990
         except:
-            print "Point ({}, {}) is outside of the PRISM data bounds".format(lon, lat)
+            print("Point ({}, {}) is outside of the PRISM data bounds".format(lon, lat))
             return []
 
-        print "Working on {}".format(name)
+        print("Working on {}".format(name))
 
         # Calculate index offsets to get the window
         i_fr, i_to = max(0, i - 1), min(prism_shape[0], i + 2)
@@ -596,7 +596,7 @@ def downscale_point(args):
         # Bilinear interpolation at point using prismDEM
         prism_elev = bilinear_point(lon, lat, prism_top, prism_left, prism_csx, prism_csy, dem, -99990)
         if prism_elev is None:
-            print "Point ({}, {}) is outside of the PRISM elevation data bounds".format(lon, lat)
+            print("Point ({}, {}) is outside of the PRISM elevation data bounds".format(lon, lat))
             return []
         prism_dem = dem[i_fr:i_to, j_fr:j_to]
 
@@ -614,7 +614,7 @@ def downscale_point(args):
             # Bilinear interpolation of prism parameter
             prism_value = bilinear_point(lon, lat, prism_top, prism_left, prism_csx, prism_csy, prism_data, -99990)
             if prism_value is None:
-                print "Point ({}, {}) is outside of the PRISM data bounds for {}".format(lon, lat, param)
+                print("Point ({}, {}) is outside of the PRISM data bounds for {}".format(lon, lat, param))
                 continue
 
             # Calculate the new prism parameter using the regression parameters and the elevation from the input file
@@ -649,8 +649,8 @@ def downscale_point(args):
                     climate_out = prism_value + delta
 
                 # Track output
-                rows.append(map(str, (name, lon, lat, elev, scen_name, param[-2:], param[:-2],
-                                      '{:.2f}'.format(climate_out))))
+                rows.append(list(map(str, (name, lon, lat, elev, scen_name, param[-2:], param[:-2],
+                                      '{:.2f}'.format(climate_out)))))
 
     os.remove(h5file)
     return rows
@@ -810,7 +810,7 @@ def avg_task(args):
     savePath = os.path.join(output_directory, savePath)
     savedParams.append(savePath)
     climRast.saveArray(savePath)
-    print "Saved {}".format(os.path.basename(savePath))
+    print("Saved {}".format(os.path.basename(savePath)))
 
 
 def derived_task(args):
@@ -837,7 +837,7 @@ def derived_task(args):
         savePath = '{}_{}_{}.pfa'.format(os.path.basename(elevation_path).split('.')[0], scenSaveName, param)
         savePath = os.path.join(output_directory, savePath)
         climRast.saveArray(savePath)
-        print "Saved {}".format(os.path.basename(savePath))
+        print("Saved {}".format(os.path.basename(savePath)))
 
     # Reference Evaporation
     if paramType == 'eref':
@@ -858,7 +858,7 @@ def derived_task(args):
         savePath = '{}_{}_{}.pfa'.format(os.path.basename(elevation_path).split('.')[0], scenSaveName, param)
         savePath = os.path.join(output_directory, savePath)
         climRast.saveArray(savePath)
-        print "Saved {}".format(os.path.basename(savePath))
+        print("Saved {}".format(os.path.basename(savePath)))
 
     # Degree days above 5
     if paramType == 'ddabvfive':
@@ -881,7 +881,7 @@ def derived_task(args):
         savePath = '{}_{}_{}.pfa'.format(os.path.basename(elevation_path).split('.')[0], scenSaveName, param)
         savePath = os.path.join(output_directory, savePath)
         climRast.saveArray(savePath)
-        print "Saved {}".format(os.path.basename(savePath))
+        print("Saved {}".format(os.path.basename(savePath)))
 
 
 def copy_raster(template_raster, data, nodata, temp_dir):
@@ -1081,7 +1081,7 @@ def downscale_task(args):
     templateRaster.array = numpy.round(clim, 1)
     templateRaster.saveArray(savePath)
     savedParams.append(savePath)
-    print "Saved {}: {}".format(os.path.basename(savePath), time.time() - now)
+    print("Saved {}: {}".format(os.path.basename(savePath), time.time() - now))
     return savedParams
 
 
@@ -1120,7 +1120,7 @@ def bilinear_point(x, y, top, left, csx, csy, grid, grid_nodata):
     y, x = (top - (csy * 0.5) - y) / csy, (x - (left + (csx * 0.5))) / csx
     # Check that the point is within the domain
     if any([x < 0, y < 0, x >= grid.shape[1], y >= grid.shape[0]]):
-        print "Coordinate ({}, {}) out of bounds".format(prvx, prvy)
+        print("Coordinate ({}, {}) out of bounds".format(prvx, prvy))
         return None
 
     # Convert the coordinates to grid indexes
@@ -1137,7 +1137,7 @@ def bilinear_point(x, y, top, left, csx, csy, grid, grid_nodata):
     Id = grid[y1, x1]
 
     if any([Ia == grid_nodata, Ib == grid_nodata, Ic == grid_nodata, Id == grid_nodata]):
-        print "No data present at point ({}, {})".format(prvx, prvy)
+        print("No data present at point ({}, {})".format(prvx, prvy))
         return None
 
     return (((x1 - x)*(y1 - y) * Ia) +

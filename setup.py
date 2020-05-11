@@ -21,16 +21,16 @@ def is_installed(name):
 
 
 requires = [
-    'networkx==2.2',
+    'networkx',
     'cython',
-    'matplotlib<3.0',
-    'numpy==1.16.4',
-    'scipy==1.2.0',
-    'scikit-image<0.15',
+    'matplotlib',
+    'numpy',
+    'scipy',
+    'scikit-image',
     'h5py',
     'numexpr',
     'shapely',
-    'pandas==0.23',
+    'pandas',
     'numba',
     'rtree'
 ]

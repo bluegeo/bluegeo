@@ -1,5 +1,4 @@
-bluegeo
-=======
+# bluegeo
 
 bluegeo is a library developed to assist in geospatial development where core scientific python libraries
 such as numpy, scipy, scikit-image and scikit-learn can be implemented easily over raster and vector geospatial
@@ -13,16 +12,26 @@ print np.mean(bg.Raster('elevation.tif')[:])
 784.91772
 ```
 
-INSTALLATION
-============
+# INSTALLATION
 
-bluegeo uses python 2.7 (minimal work is required for upgrade to 3+ as time permits)
+bluegeo requires python 3, and a system installation of GDAL and GRASS
 
-With Docker...
---------------
+## Installation of Python Package
+
+Clone the bluegeo repo
+
+`git clone https://github.com/bluegeo/bluegeo.git`
+
+## Install only Python requirements
+
+from the root:
+`pip install .`
+
+## With Docker
+
 Build the image (from the root dir)
 
-```docker build -t bluegeo .```
+`docker build -t bluegeo .`
 
 Start a session in the container
 
@@ -31,24 +40,19 @@ docker run --rm -v /home/ubuntu/bluegeo/scratch:/scratch -it bluegeo /bin/bash
 ```
 
 Note:
-* To preserve the container, do not use the `--rm` flag.
-* A `scratch` directory (absolute path) is mounted to share files - omit it if necessary.
 
-Using git...
-------------
-Clone the bluegeo repo
+- To preserve the container, do not use the `--rm` flag.
+- A `scratch` directory (absolute path) is mounted to share files - omit it if necessary.
 
-```git clone https://github.com/bluegeo/bluegeo.git```
+## Linux provisioning
 
-## Install only Python requirements
-from the root:
-```pip install .```
+The easiest way to use bluegeo is on Linux, using the bash script to install the dependencies
 
-## Install everything
 Minimum server requirements on linux can be met using `privision.sh`
-Run the script and wait
 
-```
+example
+
+```bash
 sudo chmod u+x bluegeo/provision.sh
 bluegeo/provision.sh
 ```

@@ -3,7 +3,7 @@ Library for segmentation and label measurement using rasters
 
 blueGeo 2017
 '''
-from spatial import *
+from .spatial import *
 from skimage.measure import label as sklabel
 from skimage.graph import MCP_Geometric
 from scipy.ndimage import distance_transform_edt
@@ -49,7 +49,7 @@ def label(data, return_map=False, raster_template=None):
         indices = numpy.argsort(a)
         bins = numpy.bincount(a)
         indices = numpy.split(indices, numpy.cumsum(bins[bins > 0][:-1]))
-        _map = dict(zip(numpy.unique(a), [numpy.unravel_index(ind, outrast.shape) for ind in indices]))
+        _map = dict(list(zip(numpy.unique(a), [numpy.unravel_index(ind, outrast.shape) for ind in indices])))
         try:
             del _map[0]
         except KeyError:

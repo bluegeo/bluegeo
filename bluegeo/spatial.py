@@ -26,9 +26,9 @@ try:
     from shapely import wkb as shpwkb
     from shapely import geometry, ops
 except ImportError:
-    print "Warning: Shapely is not installed and some operations will not be possible."
+    print("Warning: Shapely is not installed and some operations will not be possible.")
 
-from util import (parse_projection, generate_name, coords_to_indices, indices_to_coords, transform_points, isclose,
+from .util import (parse_projection, generate_name, coords_to_indices, indices_to_coords, transform_points, isclose,
                   compare_projections)
 
 gdal.PushErrorHandler('CPLQuietErrorHandler')
@@ -217,7 +217,7 @@ class Raster(object):
             raise RasterError('Unrecognized file mode "%s"' % mode)
 
         # Check if input_data is a string
-        if isinstance(input_data, basestring):
+        if isinstance(input_data, str):
             # If in 'w' mode, write a new file
             if self.mode == 'w':
                 self.build_new_raster(input_data, **kwargs)
@@ -315,7 +315,7 @@ class Raster(object):
     def load_from_hdf5(self, ds):
         """Load attributes from an HDF5 file"""
         self.__dict__.update({key: (None if not isinstance(val, numpy.ndarray) and val == 'None' else val)
-                              for key, val in dict(ds.attrs).iteritems()})
+                              for key, val in dict(ds.attrs).items()})
         self.nodataValues = [getattr(numpy, self.dtype)(d) for d in self.nodataValues]
         self.shape = tuple(self.shape)
         self.path = str(ds.filename)
@@ -341,7 +341,7 @@ class Raster(object):
                 chunks = (256, 256)
             # Add attributes to new file
             newfile.attrs.update({key: ('None' if not isinstance(val, numpy.ndarray) and val == None else val)
-                                  for key, val in self.__dict__.iteritems()
+                                  for key, val in self.__dict__.items()
                                   if key not in ['garbage', 'mode', 'path']})
             newfile.attrs.update({'format': 'HDF5', 'bottom': self.top - (self.csy * self.shape[0]),
                                   'right': self.left + (self.csx * self.shape[1])})
@@ -380,7 +380,7 @@ class Raster(object):
                     out_rast[:] = self.array
 
         # If GDAL:
-        elif extension in self.gdal_drivers.keys():
+        elif extension in list(self.gdal_drivers.keys()):
             # Create data source
             outraster = self.new_gdal_raster(output_path, self.shape,
                                              self.bandCount, self.dtype,
@@ -690,7 +690,7 @@ class Raster(object):
             chunks = self.chunks
         else:
             try:
-                chunks = map(int, custom_chunks)
+                chunks = list(map(int, custom_chunks))
                 assert len(custom_chunks) == 2
             except:
                 raise RasterError('Custom chunks must be a tuple or list of'
@@ -700,7 +700,7 @@ class Raster(object):
         if type(expand) in [int, float, numpy.ndarray]:
             i = j = int(expand)
         elif type(expand) == tuple or type(expand) == list:
-            i, j = map(int, expand)
+            i, j = list(map(int, expand))
         else:
             raise RasterError('Unable to interpret the expand argument "%s" of'
                               ' type %s' % (expand, type(expand).__name__))
@@ -737,14 +737,14 @@ class Raster(object):
         else:
             chunks_i, chunks_j = chunks
 
-        ychunks = range(0, self.shape[0], chunks_i) + [self.shape[0]]
-        xchunks = range(0, self.shape[1], chunks_j) + [self.shape[1]]
-        ychunks = zip(numpy.array(ychunks[:-1]) - ifr,
-                      numpy.array(ychunks[1:]) + ito)
+        ychunks = list(range(0, self.shape[0], chunks_i)) + [self.shape[0]]
+        xchunks = list(range(0, self.shape[1], chunks_j)) + [self.shape[1]]
+        ychunks = list(zip(numpy.array(ychunks[:-1]) - ifr,
+                      numpy.array(ychunks[1:]) + ito))
         ychunks[0] = (0, ychunks[0][1])
         ychunks[-1] = (ychunks[-1][0], self.shape[0])
-        xchunks = zip(numpy.array(xchunks[:-1]) - jfr,
-                      numpy.array(xchunks[1:]) + jto)
+        xchunks = list(zip(numpy.array(xchunks[:-1]) - jfr,
+                      numpy.array(xchunks[1:]) + jto))
         xchunks[0] = (0, xchunks[0][1])
         xchunks[-1] = (xchunks[-1][0], self.shape[1])
 
@@ -845,7 +845,7 @@ class Raster(object):
             return self.clip(inrast_bbox)
         else:
             # Transform required
-            print "Transforming to match rasters..."
+            print("Transforming to match rasters...")
             if samesrs:
                 return self.transform(csx=inrast.csx, csy=inrast.csy,
                                       extent=inrast_bbox,
@@ -862,7 +862,7 @@ class Raster(object):
         Returns slicer for self, another for an array the size of bbox, and
         the shape of the output array from bbox.
         """
-        top, bottom, left, right = map(float, bbox)
+        top, bottom, left, right = list(map(float, bbox))
         if any([top < bottom,
                 bottom > top,
                 right < left,
@@ -1221,7 +1221,7 @@ class Raster(object):
                         projection, chunks, compress=True):
         """Generate a new gdal Raster dataset"""
         extension = output_path.split('.')[-1].lower()
-        if extension not in self.gdal_drivers.keys():
+        if extension not in list(self.gdal_drivers.keys()):
             raise RasterError(
                 'Unknown file type, or file type not implemented yet: {}'.format(output_path.split('.')[-1])
             )
@@ -1326,7 +1326,7 @@ class Raster(object):
             m = a != self.nodata
             y, x = indices_to_coords(numpy.where(m), self.top, self.left, self.csx, self.csy)
 
-            return Vector([shpwkb.dumps(pnt) for pnt in geometry.MultiPoint(zip(x, y)).geoms],
+            return Vector([shpwkb.dumps(pnt) for pnt in geometry.MultiPoint(list(zip(x, y))).geoms],
                           fields=numpy.array(a[m], dtype=[('raster_val', self.dtype)]),
                           projection=self.projection)
 
@@ -1452,7 +1452,7 @@ class Raster(object):
                             xoff=0, yoff=0, win_xsize=1, win_ysize=1)
                     ds = None
                     if numpy.isclose(tlc, self.nodata) and tlc != self.nodata:
-                        print "Warning: No data values must be fixed."
+                        print("Warning: No data values must be fixed.")
                         self.ndchecked = True
                         self.fix_nodata()
                 self.activeBand = ab
@@ -1774,8 +1774,8 @@ class Raster(object):
                 try:
                     os.remove(self.garbage['path'])
                 except Exception as e:
-                    print "Unable to remove temporary file {} because:\n{}".format(
-                        self.garbage['path'], e)
+                    print("Unable to remove temporary file {} because:\n{}".format(
+                        self.garbage['path'], e))
 
 
 class mosaic(Raster):
@@ -1799,9 +1799,9 @@ class mosaic(Raster):
         self.fullyMerged = False
 
         # Dimensions of all
-        top, bottom, left, right = zip(*self.extents)
+        top, bottom, left, right = list(zip(*self.extents))
         top, bottom, left, right = max(top), min(bottom), min(left), max(right)
-        csx, csy = zip(*self.cellSizes)
+        csx, csy = list(zip(*self.cellSizes))
         csx, csy = min(csx), min(csy)
 
         # Calculate shape
@@ -2003,7 +2003,7 @@ class Vector(object):
         if self.mode not in ['r', 'w', 'r+']:
             raise VectorError('Unsupported file mode {}'.format(mode))
         populate_from_ogr = False
-        if isinstance(data, basestring):
+        if isinstance(data, str):
             if os.path.isfile(data) and mode != 'w':
                 # Open a Vector file or a table
                 self.driver = self.get_driver_by_path(data)
@@ -2076,7 +2076,7 @@ class Vector(object):
             if fields is None:
                 field_def = []
             else:
-                self.fieldTypes = zip(fields.dtype.names, (fields.dtype[i].name for i in range(len(fields.dtype))))
+                self.fieldTypes = list(zip(fields.dtype.names, (fields.dtype[i].name for i in range(len(fields.dtype)))))
                 field_def = self.fieldTypes
             outVect = self.empty(spatial_reference=projection, fields=field_def)
             outVect.garbage['num'] += 1  # Delay garbage by one delete
@@ -2346,7 +2346,7 @@ class Vector(object):
         :param data: list of lists to write to each new field
         :return: Vector instance
         """
-        if isinstance(name, basestring):
+        if isinstance(name, str):
             name, dtype = [name], [dtype]  # Need to be iterable (and not strings)
 
         if self.mode in ['r+', 'w']:
@@ -2364,7 +2364,7 @@ class Vector(object):
                     self.fieldCount += 1
                 if data is not None:
                     # Broadcast data to the necessary shape
-                    shape = 1 if isinstance(name, basestring) else len(name)
+                    shape = 1 if isinstance(name, str) else len(name)
                     shape = (shape, self.featureCount)
                     try:
                         data = numpy.broadcast_to(data, shape)
@@ -2390,7 +2390,7 @@ class Vector(object):
 
         else:
             # Create a new data source
-            new_fieldtypes = self.check_fields(self.fieldTypes + zip(name, dtype))
+            new_fieldtypes = self.check_fields(self.fieldTypes + list(zip(name, dtype)))
 
             # Gather data to write into fields
             fields = {field[0]: self.field_to_pyobj(self[field[0]], self.fieldWidth[field[0]],
@@ -2586,7 +2586,7 @@ class Vector(object):
 
             # A dissolve is redundant if all fields are unique
             if feat_values.size == self.featureCount:
-                print "Warning, no dissolve took place because the input field has entirely unique values"
+                print("Warning, no dissolve took place because the input field has entirely unique values")
                 return self
         else:
             feat_values = [None]
@@ -2613,7 +2613,7 @@ class Vector(object):
                     # Write output geometries
                     out_feature = ogr.Feature(outLyrDefn)
                     out_feature.SetGeometry(ogr.CreateGeometryFromWkb(out_geo))
-                    for name_tup, data in fields.iteritems():
+                    for name_tup, data in fields.items():
                         old_name, new_name = name_tup
                         if old_name == field:
                             write_data = feat_value
@@ -2667,7 +2667,7 @@ class Vector(object):
                     out_feature.SetGeometry(ogr.CreateGeometryFromWkb(self[i][0]))
 
                     # Write fields
-                    for name, data in fields.iteritems():
+                    for name, data in fields.items():
                         out_feature.SetField(name, data[field_i])
 
                     # Add to output layer and clean up
@@ -2699,7 +2699,7 @@ class Vector(object):
         field_data = {name: (self.field_to_pyobj(self[name], self.fieldWidth[name], self.fieldPrecision[name]), 'i')
                       for name, dtype in self.fieldTypes}  # Save the field data source for positioning
 
-        field_names = field_data.keys()
+        field_names = list(field_data.keys())
         for name, dtype in other_vector.fieldTypes:
             if name in field_names:
                 new_name = name[:8] + '_1'
@@ -2741,7 +2741,7 @@ class Vector(object):
                         try:
                             intersection = parent_geo.intersection(geos[j])
                         except Exception as e:
-                            print "Warning:\n{}".format(e)
+                            print("Warning:\n{}".format(e))
                             # Likely a topological error
                             continue
                         if intersection.is_empty:
@@ -2786,11 +2786,11 @@ class Vector(object):
                 out_name = self[name_field][i]
             else:
                 out_name = i
-            print "Extracting {}".format(out_name)
+            print("Extracting {}".format(out_name))
             try:
                 geo = self[i]
             except AttributeError:
-                print "Warning: Error with geometry, skipping the above"
+                print("Warning: Error with geometry, skipping the above")
                 continue
             dtype = [(field, self[field].dtype) for field in self.fieldNames]
             fields = numpy.array([tuple([self[field][i] for field in self.fieldNames])], dtype=dtype)
@@ -2848,9 +2848,9 @@ class Vector(object):
                         removed += 1
 
         if removed > 0:
-            print "Removed {} of {} geometries".format(removed, self.featureCount)
+            print("Removed {} of {} geometries".format(removed, self.featureCount))
         else:
-            print "All geometries passed test"
+            print("All geometries passed test")
 
         return Vector(out_vect)  # Re-read Vector to ensure meta up to date
 
@@ -2879,7 +2879,7 @@ class Vector(object):
                         data.append(shpwkb.dumps(getattr(geometry, self.geometryType)([])))
                     feature.Destroy()
 
-            elif isinstance(item, basestring):
+            elif isinstance(item, str):
                 # Check that the field exists
                 try:
                     _, dtype = [ft for ft in self.fieldTypes if ft[0] == str(item)][0]
@@ -2890,8 +2890,8 @@ class Vector(object):
                 try:
                     data = numpy.array(data, dtype=dtype)
                 except:
-                    print "Warning: could not read field {} as {}, and it has been cast to string".format(item, dtype)
-                    data = numpy.array(map(str, data))
+                    print("Warning: could not read field {} as {}, and it has been cast to string".format(item, dtype))
+                    data = numpy.array(list(map(str, data)))
 
             # TODO: Finish this- need to figure out how ogr.Layer.Clip works. Maybe through an in-memory ds
             elif isinstance(item, Extent):
@@ -2915,7 +2915,7 @@ class Vector(object):
             raise VectorError('Current Vector open as read-only')
 
         # Check the type of input
-        if isinstance(item, basestring):
+        if isinstance(item, str):
             # If the instance has no features, make them
             if self.featureCount == 0:
                 if hasattr(val, '__iter__'):
@@ -2975,7 +2975,7 @@ class Vector(object):
         if start > self.featureCount or stop > self.featureCount:
             raise VectorError('Input feature slice outside of current feature bounds')
         # Check for wkbs
-        if not isinstance(val[0], basestring):
+        if not isinstance(val[0], str):
             raise VectorError('Item to set must be a wkb geometry')
 
         # Update feature geometries using the val
@@ -3095,7 +3095,7 @@ class Vector(object):
             fmt = '{:d}'
 
         # return [None if obj == 'None' else obj for obj in map(_types[dtype], a)]
-        return map(fmt.format, a)
+        return list(map(fmt.format, a))
 
     @staticmethod
     def drivers():
@@ -3275,7 +3275,7 @@ class Vector(object):
                     unique_values, indices = numpy.unique(write_data, return_inverse=True)
                     values = numpy.arange(1, unique_values.size + 1)
                     write_data = values[indices]
-                    value_map = dict(zip(values, unique_values))
+                    value_map = dict(list(zip(values, unique_values)))
                     dtype = 'uint32'
 
             nodata = numpy.array(r.nodata).astype(dtype)
@@ -3306,7 +3306,7 @@ class Vector(object):
 
         def _rasterize(vertices, geom_type):
             """Rasterize a list of vertices within the containing envelope"""
-            pixels = coords_to_indices(zip(*vertices), top, left, csx, csy, r.shape)
+            pixels = coords_to_indices(list(zip(*vertices)), top, left, csx, csy, r.shape)
 
             # Remove duplicates in sequence if the geometry is not a point
             if 'Point' not in geom_type:
@@ -3334,10 +3334,10 @@ class Vector(object):
             window_image = ImageDraw.Draw(window)  # Create imagedraw instance
             if 'Polygon' in geom_type or 'LinearRing' in geom_type:
                 # Create a polygon mask (1) with the outline filled
-                window_image.polygon(zip(col_inds, row_inds), outline=1, fill=1)
+                window_image.polygon(list(zip(col_inds, row_inds)), outline=1, fill=1)
             elif 'Line' in geom_type:
                 # Draw a line mask (1)
-                window_image.line(zip(col_inds, row_inds), 1)
+                window_image.line(list(zip(col_inds, row_inds)), 1)
 
             # Return output image as array (which needs to be reshaped) and the insertion location
             return numpy.array(window, dtype='bool').reshape(nrows, ncols), i_insert, j_insert
@@ -3439,7 +3439,7 @@ def assert_type(data):
         # An iterable that is expected to be a bounding box
         return Extent
 
-    if isinstance(data, basestring):
+    if isinstance(data, str):
         # Check if gdal Raster
         ds = gdal.Open(data)
         if ds is not None:
@@ -3449,7 +3449,7 @@ def assert_type(data):
         if data.split('.')[-1].lower() == 'h5':
             with h5py.File(data, libver='latest') as ds:
                 # Just check for the format attribute
-                if 'format' in dict(ds.attrs).keys():
+                if 'format' in list(dict(ds.attrs).keys()):
                     return Raster
 
         # Check if a Vector

@@ -1,4 +1,4 @@
-from spatial import *
+from .spatial import *
 import tempfile
 
 

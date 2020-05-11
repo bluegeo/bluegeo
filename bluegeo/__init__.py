@@ -1,7 +1,7 @@
-from spatial import *
-import terrain
-import water
-import measurement
-import bluegrass
-import filters
-import util
+from .spatial import *
+from . import terrain
+from . import water
+from . import measurement
+from . import bluegrass
+from . import filters
+from . import util

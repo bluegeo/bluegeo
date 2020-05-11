@@ -4,16 +4,16 @@ Terrain and Hydrologic routing analysis
 Blue Geosimulation, 2017
 '''
 
-from spatial import *
-import util
+from .spatial import *
+from . import util
 import math
 from numba.decorators import jit
 from scipy import ndimage, interpolate
 
 try:
-    from bluegrass import GrassSession
+    from .bluegrass import GrassSession
 except ImportError:
-    print "Warning: Grass functions not available"
+    print("Warning: Grass functions not available")
 
 
 class TopoError(Exception):
@@ -60,7 +60,7 @@ class topo(Raster):
                                'pi': math.pi})
 
             # Compute slope
-            bool_exp = '&'.join([key for key in local_dict.keys()
+            bool_exp = '&'.join([key for key in list(local_dict.keys())
                                  if 'm' in key])
             if units == 'degrees':
                 calc_exp = '''
@@ -126,7 +126,7 @@ class topo(Raster):
                                'pi': math.pi})
 
             # Compute slope
-            bool_exp = '&'.join([key for key in local_dict.keys()
+            bool_exp = '&'.join([key for key in list(local_dict.keys())
                                  if 'm' in key])
             calc_exp = '''
                 arctan2((((a0_0+(2*a1_0)+a2_0)-
@@ -236,7 +236,7 @@ class topo(Raster):
         :param input_raster: Raster to align with self
         :return: Aligned dataset with coverage from self, and input_raster
         """
-        print "Matching rasters"
+        print("Matching rasters")
         # Get Extent of both rasters
         inrast = Raster(input_raster)
 
@@ -255,7 +255,7 @@ class topo(Raster):
 
         # Match both rasters
         with topo(input_raster).match_raster(selfChangeExtent) as inrast:
-            print "Reading data and generating masks"
+            print("Reading data and generating masks")
             selfData = selfChangeExtent.array
             targetData = inrast.array
             targetDataMask = targetData != inrast.nodata
@@ -296,7 +296,7 @@ class topo(Raster):
                 chunkSize = int(round(xGrid.shape[0] / (cpu_count() * 4)))
                 if chunkSize < 1:
                     chunkSize = 1
-                chunkRange = range(0, xGrid.shape[0] + chunkSize, chunkSize)
+                chunkRange = list(range(0, xGrid.shape[0] + chunkSize, chunkSize))
 
                 iterator = []
                 totalCalcs = 0
@@ -306,11 +306,11 @@ class topo(Raster):
                     iterator.append(
                         (pointGrid, xChunk, values, numpy.zeros(shape=(to - fr,), dtype='float32'), (fr, to))
                     )
-                print "Requires {} calculations".format(totalCalcs)
+                print("Requires {} calculations".format(totalCalcs))
 
                 import time
                 now = time.time()
-                print "Interpolating"
+                print("Interpolating")
                 p = Pool(cpu_count())
                 try:
                     iterator = list(p.imap_unordered(idw, iterator))
@@ -318,11 +318,11 @@ class topo(Raster):
                     import sys
                     p.close()
                     p.join()
-                    raise e, None, sys.exc_info()[2]
+                    raise e.with_traceback(sys.exc_info()[2])
                 else:
                     p.close()
                     p.join()
-                print "Completed interpolation in %s minutes" % (round((time.time() - now) / 60, 3))
+                print("Completed interpolation in %s minutes" % (round((time.time() - now) / 60, 3)))
                 return iterator
 
             if interpolation == 'nearest':
@@ -332,7 +332,7 @@ class topo(Raster):
                 selfData[xi] = targetData[xi] + grad
 
             elif interpolation == 'idw':
-                print "Creating grids"
+                print("Creating grids")
                 # Only include regions on the edge
                 points = numpy.where(
                     ~ndimage.binary_erosion(points, structure=numpy.ones(shape=(3, 3), dtype='bool')) & points
@@ -378,7 +378,7 @@ class topo(Raster):
                                        'diag': numpy.sqrt((selfChangeExtent.csx**2) + (selfChangeExtent.csy**2))})
 
                     # Compute mean filter
-                    bool_exp = '&'.join([key for key in local_dict.keys()
+                    bool_exp = '&'.join([key for key in list(local_dict.keys())
                                          if 'm' in key])
                     calc_exp = '(a0_0+a0_1+a0_2+a1_0+a1_2+a2_0+a2_1+a2_2)/8'
                     return ne.evaluate('where(%s,%s,a1_1)' % (bool_exp.replace(' ', ''),
@@ -394,7 +394,7 @@ class topo(Raster):
                         targetDataMask)
                 resid = tolerance + 1
                 cnt = 0
-                print "Iteratively filtering gradient"
+                print("Iteratively filtering gradient")
                 completed = True
                 while resid > tolerance:
                     cnt += 1
@@ -403,11 +403,11 @@ class topo(Raster):
                     grad[points] = pointReplace
                     resid = numpy.abs(grad - prv).max()
                     if cnt == max_iter:
-                        print "Maximum iterations reached with a tolerance of %s" % (resid)
+                        print("Maximum iterations reached with a tolerance of %s" % (resid))
                         completed = False
                         break
                 if completed:
-                    print "Completed iterative filter in %s iterations with a residual of %s" % (cnt, resid)
+                    print("Completed iterative filter in %s iterations with a residual of %s" % (cnt, resid))
 
                 selfData[xi] = targetData[xi] + grad[xi]
 
@@ -440,7 +440,7 @@ def inverse_distance(pointGrid, xGrid, values):
     chunkSize = int(round(xGrid.shape[0] / (cpu_count() * 4)))
     if chunkSize < 1:
         chunkSize = 1
-    chunkRange = range(0, xGrid.shape[0] + chunkSize, chunkSize)
+    chunkRange = list(range(0, xGrid.shape[0] + chunkSize, chunkSize))
 
     iterator = []
     totalCalcs = 0
@@ -450,11 +450,11 @@ def inverse_distance(pointGrid, xGrid, values):
         iterator.append(
             (pointGrid, xChunk, values, numpy.zeros(shape=(to - fr,), dtype='float32'), (fr, to))
         )
-    print "Requires {} calculations".format(totalCalcs)
+    print("Requires {} calculations".format(totalCalcs))
 
     import time
     now = time.time()
-    print "Interpolating"
+    print("Interpolating")
     p = Pool(cpu_count())
     try:
         iterator = list(p.imap_unordered(idw, iterator))
@@ -462,11 +462,11 @@ def inverse_distance(pointGrid, xGrid, values):
         import sys
         p.close()
         p.join()
-        raise e, None, sys.exc_info()[2]
+        raise e.with_traceback(sys.exc_info()[2])
     else:
         p.close()
         p.join()
-    print "Completed interpolation in %s minutes" % (round((time.time() - now) / 60, 3))
+    print("Completed interpolation in %s minutes" % (round((time.time() - now) / 60, 3)))
     return iterator
 
 
@@ -522,7 +522,7 @@ def bare_earth(surface, max_area=65., slope_threshold=50.):
     """
     # Create slope surface to work with
     surface = topo(surface)
-    print "Computing gradients and identifying objects"
+    print("Computing gradients and identifying objects")
     with surface.slope() as slopeData:
         # Reclassify high-slope regions
         slopeArray = slopeData.array
@@ -542,10 +542,10 @@ def bare_earth(surface, max_area=65., slope_threshold=50.):
     steep_index = steep_labels.ravel()
     indices = numpy.argsort(steep_index)
     bins = numpy.bincount(steep_index)
-    steep_index = dict(zip(numpy.unique(steep_index), numpy.split(indices, numpy.cumsum(bins[bins > 0][:-1]))))
+    steep_index = dict(list(zip(numpy.unique(steep_index), numpy.split(indices, numpy.cumsum(bins[bins > 0][:-1])))))
 
     #  Filter labels by area
-    print "Filtering objects"
+    print("Filtering objects")
     regions.fill(0)
     regions = regions.ravel()
     for inds in bench_labels:
@@ -554,7 +554,7 @@ def bare_earth(surface, max_area=65., slope_threshold=50.):
     regions = regions.reshape(surface.shape)
 
     # Dilate benches to intersect steep regions
-    print "Indexing objects"
+    print("Indexing objects")
     steep_intersect = numpy.unique(steep_labels[
         ~regions & ndimage.binary_dilation(regions, numpy.ones(shape=(3, 3), dtype='bool'))
     ])
@@ -567,7 +567,7 @@ def bare_earth(surface, max_area=65., slope_threshold=50.):
     regions = regions.reshape(surface.shape)
 
     # Relabel regions and interpolate grid
-    print "Interpolating over objects"
+    print("Interpolating over objects")
     labels, _ = ndimage.measurements.label(regions, numpy.ones(shape=(3, 3), dtype='bool'))
     labels = labels.ravel()
     indices = numpy.argsort(labels)
@@ -614,12 +614,12 @@ def bare_earth(surface, max_area=65., slope_threshold=50.):
         import sys
         p.close()
         p.join()
-        raise e, None, sys.exc_info()[2]
+        raise e.with_traceback(sys.exc_info()[2])
     else:
         p.close()
         p.join()
 
-    print "Applying changes to output Raster"
+    print("Applying changes to output Raster")
     for values, inds in ret:
         new_surface[inds[0]:inds[1], inds[2]:inds[3]][reinsert[inds[4]]] = values
 

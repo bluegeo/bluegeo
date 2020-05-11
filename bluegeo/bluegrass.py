@@ -4,8 +4,8 @@ import subprocess
 import sys
 import tempfile
 import time
-import util
-from spatial import *
+from . import util
+from .spatial import *
 
 
 GRASSBIN = 'grass'
@@ -322,7 +322,7 @@ def water_outlet(coordinates, dem, direction=None,  basin_path=None, id=None, ve
     :return: Raster instance with enumerated basins
     """
     # Check coordinates
-    if isinstance(coordinates, basestring) or isinstance(coordinates, Vector):
+    if isinstance(coordinates, str) or isinstance(coordinates, Vector):
         input_vect = Vector(coordinates).transform(Raster(dem).projection)
         coordinates = input_vect.vertices[:, [0, 1]]
         if id is not None:
@@ -369,7 +369,7 @@ def water_outlet(coordinates, dem, direction=None,  basin_path=None, id=None, ve
             m = numpy.where(a == 1)
             area = m[0].shape[0] * (csx * csy)
             areas.append(area)
-            print "Basin {} area: {}".format(i, area)
+            print("Basin {} area: {}".format(i, area))
             index.append(m)
 
     # Allocate output

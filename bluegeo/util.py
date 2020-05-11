@@ -35,7 +35,7 @@ def parse_projection(projection):
     def raise_re():
         raise BlueUtilError('Unable to determine projection from %s' %
                             projection)
-    if isinstance(projection, basestring):
+    if isinstance(projection, str):
         sr = osr.SpatialReference()
         sr.ImportFromWkt(projection)
         outwkt = sr.ExportToWkt()
@@ -235,9 +235,9 @@ def stride_hood(a, window=(3, 3)):
 
     def rolling_window_lastaxis(a, window):
         if window < 1:
-            raise ValueError, "window must be at least 1."
+            raise ValueError("window must be at least 1.")
         if window > a.shape[-1]:
-            raise ValueError, "window is too long."
+            raise ValueError("window is too long.")
         shape = a.shape[:-1] + (a.shape[-1] - window + 1, window)
         strides = a.strides + (a.strides[-1],)
         return numpy.lib.stride_tricks.as_strided(a, shape=shape, strides=strides)
@@ -261,7 +261,7 @@ def mode(ndarray, axis=0):
     elif ndarray.size == 0:
         raise BlueUtilError('Cannot compute mode on empty array')
     try:
-        axis = range(ndarray.ndim)[axis]
+        axis = list(range(ndarray.ndim))[axis]
     except:
         raise BlueUtilError('Axis "{}" incompatible with the {}-dimension array'.format(axis, ndim))
 

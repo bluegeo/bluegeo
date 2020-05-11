@@ -3,10 +3,10 @@ Hydrologic analysis library
 
 Blue Geosimulation, 2018
 '''
-from terrain import *
-from filters import *
-from measurement import *
-import bluegrass
+from .terrain import *
+from .filters import *
+from .measurement import *
+from . import bluegrass
 from scipy.ndimage import binary_dilation, distance_transform_edt
 from scipy.ndimage import label as ndi_label
 from scipy.interpolate import griddata
@@ -47,7 +47,7 @@ def delineate_watersheds(points, dem=None, fd=None, fa=None, as_vector=True, sna
         points = snap_pour_points(points, fd, fa, snap_tolerance)
 
     else:
-        if isinstance(points, basestring) or isinstance(points, Vector):
+        if isinstance(points, str) or isinstance(points, Vector):
             # Convert the vector to a list of coordinates in the raster map projection
             points = Vector(points).transform(Raster(fd).projection).vertices[:, [0, 1]]
 
@@ -269,7 +269,7 @@ def aggradation(stream_slope, slope_thresh=6, stream_slope_thresh=5):
         s_i, s_j = numpy.where(mask)
         s_i = s_i + s[0].start
         s_j = s_j + s[1].start
-        seeds.update(zip(s_i, s_j))
+        seeds.update(list(zip(s_i, s_j)))
 
     alluv_out = self.astype('uint8')
     alluv_out[:] = track
@@ -293,7 +293,7 @@ def channel_density(streams, sample_distance=50):
     j = numpy.ceil(sample_distance / streams.csx)
     if j < 1:
         j = 1
-    shape = map(int, (i, j))
+    shape = list(map(int, (i, j)))
     weights = numpy.ones(shape=shape, dtype='float32') / (shape[0] * shape[1])
 
     # Streams must be a mask
@@ -389,7 +389,7 @@ def sinuosity(dem, stream_order, sample_distance=100):
     sinuosity_raster = stream_order.astype('float32')
     outa = outa.astype('float32')
     cnt = 0
-    for region, indices in stream_map.iteritems():
+    for region, indices in stream_map.items():
         cnt += 1
         # Create slices using index
         i, j = indices
@@ -457,8 +457,8 @@ def eca(tree_height, disturbance, curve, basins):
 
     # Calculate linear regression constants for each node in the curve
     curve = numpy.array(curve).T
-    x = zip(curve[0][:-1], curve[0][1:])
-    y = zip(curve[1][:-1], curve[1][1:])
+    x = list(zip(curve[0][:-1], curve[0][1:]))
+    y = list(zip(curve[1][:-1], curve[1][1:]))
     curve = numpy.array([(x[0], x[1]) + numpy.linalg.solve([[x, 1.], [x[1], 1]], [y[0], y[1]]) for x, y in zip(x, y)])
 
     # Calculate ECA from area and hydrologic recovery (derived from tree height and the curve)
@@ -484,7 +484,7 @@ def eca(tree_height, disturbance, curve, basins):
         eca_perc = []
         basins['ID'] = numpy.arange(1, basins.featureCount + 1)
         basins, basin_map = label(basins.rasterize(tree_height, 'ID'), True)
-        for basin, inds in basin_map.iteritems():
+        for basin, inds in basin_map.items():
             eca_perc.append(output_eca[inds].sum() / (inds[0].size * A))
     else:
         # Calculate hydrologic recovery at each polygon
@@ -505,7 +505,7 @@ def eca(tree_height, disturbance, curve, basins):
 
         eca_perc = []
         for basin_num, basin in enumerate(basins[:]):
-            print "Working on basin {}".format(basin_num)
+            print("Working on basin {}".format(basin_num))
             # Start with an ECA of 0, and gradually increase it using intersections
             ECA = 0
             basin_geo = shpwkb.loads(basin)
@@ -571,12 +571,12 @@ def snap_pour_points(points, sfd, fa, min_contrib_area=1E7):
     if not sfd.aligns(fa):
         raise WaterError('Input flow accumulation and single flow direction rasters must align spatially')
 
-    if isinstance(points, basestring) or isinstance(points, Vector):
+    if isinstance(points, str) or isinstance(points, Vector):
         # Convert the vector to a list of coordinates in the raster map projection
         points = Vector(points).transform(Raster(sfd).projection).vertices[:, [0, 1]]
 
     # Convert the coordinates to raster map indices
-    points = map(tuple, [[p[0] for p in points], [p[1] for p in points]])
+    points = list(map(tuple, [[p[0] for p in points], [p[1] for p in points]]))
     indices = util.coords_to_indices(points, sfd.top, sfd.left, sfd.csx, sfd.csy, sfd.shape)
 
     # Collect the area as a unit of number of cells
@@ -594,17 +594,17 @@ def snap_pour_points(points, sfd, fa, min_contrib_area=1E7):
                 j += o_j
             except KeyError:
                 # except (KeyError, IndexError):  Commented out for testing- revert if you see this
-                print "Warning: unable to snap point at index {}".format(point_index)
+                print("Warning: unable to snap point at index {}".format(point_index))
                 snapped = False
                 break
 
         if snapped:
             snapped_points.append((i, j))
 
-    snapped_points = map(tuple, [[pt[0] for pt in snapped_points], [pt[1] for pt in snapped_points]])
+    snapped_points = list(map(tuple, [[pt[0] for pt in snapped_points], [pt[1] for pt in snapped_points]]))
     y, x = indices_to_coords(snapped_points, sfd.top, sfd.left, sfd.csx, sfd.csy)
 
-    return zip(x, y)
+    return list(zip(x, y))
 
 
 class HRU(object):
@@ -758,10 +758,10 @@ class HRU(object):
             raise HruError("Invalid summary method {}".format(summary_method))
 
         # Add to spatial datasets and add original to zonal datasets
-        if name in self.spatialData.keys():
-            print "Warning: Existing spatial dataset {} will be overwritten".format(name)
-        if name in self.zonalData.keys():
-            print "Warning: Existing zonal dataset {} will be overwritten".format(name)
+        if name in list(self.spatialData.keys()):
+            print("Warning: Existing spatial dataset {} will be overwritten".format(name))
+        if name in list(self.zonalData.keys()):
+            print("Warning: Existing zonal dataset {} will be overwritten".format(name))
 
         ds, new_c_dict = self.collect_input_data(dataset, vector_attribute, dataset_interpolation)
         if correlation_dict is None:
@@ -809,7 +809,7 @@ class HRU(object):
         self.regen_spatial = True
         self.regen_zonal = True
 
-        print "Successfully added {} to spatial data".format(name)
+        print("Successfully added {} to spatial data".format(name))
 
     def add_zonal_data(self, dataset, name, summary_method='mean',
                        dataset_interpolation='bilinear', vector_attribute=None, correlation_dict=None):
@@ -830,8 +830,8 @@ class HRU(object):
         if name in ['Area', 'Centroid']:
             raise HruError("Name cannot be 'Area' or 'Centroid', as these are used when writing HRU's.")
 
-        if name in self.zonalData.keys():
-            print "Warning: Existing zonal dataset {} will be overwritten".format(name)
+        if name in list(self.zonalData.keys()):
+            print("Warning: Existing zonal dataset {} will be overwritten".format(name))
 
         ds, new_c_dict = self.collect_input_data(dataset, vector_attribute, dataset_interpolation)
         if correlation_dict is None:
@@ -846,7 +846,7 @@ class HRU(object):
 
         self.regen_zonal = True
 
-        print "Successfully added {} to zonal data".format(name)
+        print("Successfully added {} to zonal data".format(name))
 
     def build_spatial_hrus(self):
         """
@@ -857,10 +857,10 @@ class HRU(object):
             raise HruError('No spatial datasets have been added yet')
 
         # Iterate spatial datasets and create HRUs
-        names = self.spatialData.keys()
+        names = list(self.spatialData.keys())
         hrua = numpy.zeros(shape=self.hrus.shape, dtype='uint64')
         for name in names[:-1]:
-            print "Splitting by {}".format(name)
+            print("Splitting by {}".format(name))
             a = self.spatialData[name].array
             m = a != 0
             hrua[m] = hrua[m] + a[m] + hrua.max()
@@ -868,13 +868,13 @@ class HRU(object):
 
         # Add last dataset separately in order to create map
         name = names[-1]
-        print "Splitting by {}".format(name)
+        print("Splitting by {}".format(name))
         a = self.spatialData[name].array
         m = a != 0
         hrua[m] = hrua[m] + a[m] + hrua.max()
         self.hrus[:], self.hru_map = label(hrua, return_map=True)
 
-        print "{} spatial HRU's built".format(len(self.hru_map))
+        print("{} spatial HRU's built".format(len(self.hru_map)))
 
         self.regen_spatial = False
         self.regen_zonal = True
@@ -904,7 +904,7 @@ class HRU(object):
         if self.regen_zonal:
             self.compute_zonal_data()  # Only self.hru_attributes are used
 
-        print "Creating additional HRU's based on {}...".format(name)
+        print("Creating additional HRU's based on {}...".format(name))
 
         ds, new_c_dict = self.collect_input_data(dataset, vector_attribute, dataset_interpolation)
         if correlation_dict is None:
@@ -916,14 +916,14 @@ class HRU(object):
         new_hrus = {}
         cnt = -1
 
-        for id, ind in self.hru_map.iteritems():
+        for id, ind in self.hru_map.items():
             data = a[ind]
             data = data[(data != nd) & ~numpy.isinf(data) & ~numpy.isnan(data)]
 
             # No data here, simply record an HRU with [None] for this attribute
             if data.size == 0:
                 cnt += 1
-                new_hrus[cnt] = {key: val for key, val in self.hru_attributes[id].iteritems()}
+                new_hrus[cnt] = {key: val for key, val in self.hru_attributes[id].items()}
                 new_hrus[cnt].update({name: '[None]', 'MAP_HRU': id})
                 continue
 
@@ -953,14 +953,14 @@ class HRU(object):
             # Create additional HRU's
             for d, area_prop in zip(data, areas):
                 cnt += 1
-                new_hrus[cnt] = {key: val for key, val in self.hru_attributes[id].iteritems()}
+                new_hrus[cnt] = {key: val for key, val in self.hru_attributes[id].items()}
                 if correlation_dict is not None:
                     d = collect_name_attr(d)
                 new_hrus[cnt].update({name: d, 'AREA': current_area * area_prop, 'MAP_HRU': id})
 
-        print "...Created {} additional HRU's based on {}".format(
+        print("...Created {} additional HRU's based on {}".format(
             len(new_hrus) - len(self.hru_attributes), name
-            )
+            ))
         self.hru_attributes = new_hrus
 
     def compute_zonal_data(self):
@@ -979,20 +979,20 @@ class HRU(object):
                    'std': numpy.std}  # Add more as needed...
 
         # Rebuild HRU attributes
-        self.hru_attributes = {id: {} for id in self.hru_map.keys()}
+        self.hru_attributes = {id: {} for id in list(self.hru_map.keys())}
 
-        print "Computing LONGITUDE and LATITUDE"
+        print("Computing LONGITUDE and LATITUDE")
         self.compute_centroids()
-        print "Computing AREA"
+        print("Computing AREA")
         self.compute_area()
 
-        for name, zoneData in self.zonalData.iteritems():
-            print "Computing {}".format(name)
+        for name, zoneData in self.zonalData.items():
+            print("Computing {}".format(name))
             rast, method, corr_dict = zoneData
             a = rast.array
             nd = rast.nodata
             method = methods[method]
-            for id in self.hru_map.keys():
+            for id in list(self.hru_map.keys()):
                 data = a[self.hru_map[id]]
                 data = data[(data != nd) & ~numpy.isinf(data) & ~numpy.isnan(data)]
                 if data.size == 0:
@@ -1040,8 +1040,8 @@ class HRU(object):
                     w = True
                     continue
                 if w:
-                    keys = self.hru_attributes[self.hru_attributes.keys()[0]].keys()
-                    write = ['  :Attributes,ID'] + map(str, keys)
+                    keys = list(self.hru_attributes[list(self.hru_attributes.keys())[0]].keys())
+                    write = ['  :Attributes,ID'] + list(map(str, keys))
                     out.write(','.join(write) + '\n')
                     out.write('  :Units <-- manually enter units -->\n')
                     for hru in range(1, max(self.hru_attributes.keys()) + 1):
@@ -1052,7 +1052,7 @@ class HRU(object):
                 else:
                     out.write(line)
 
-        print "Successfully wrote output file {}".format(output_name)
+        print("Successfully wrote output file {}".format(output_name))
 
     def write_csv(self, output_name):
         """
@@ -1065,14 +1065,14 @@ class HRU(object):
         if self.regen_zonal:
             self.compute_zonal_data()
 
-        keys = self.hru_attributes[self.hru_attributes.keys()[0]].keys()
+        keys = list(self.hru_attributes[list(self.hru_attributes.keys())[0]].keys())
         with open(output_name, 'wb') as f:
             f.write(','.join(['HRU_ID'] + keys) + '\n')
             for hru in range(1, max(self.hru_attributes.keys()) + 1):
                 write = ','.join(map(str, [hru] + [self.hru_attributes[hru][key] for key in keys]))
                 f.write(write + '\n')
 
-        print "Successfully wrote output csv {}".format(output_name)
+        print("Successfully wrote output csv {}".format(output_name))
 
     def add_elevation(self, interval=100, number=0, bins=[], only_zonal=False):
         """
@@ -1128,7 +1128,7 @@ class HRU(object):
 
         a = self.hrus.array
         cnt = 0
-        for id, inds in self.hru_map.iteritems():
+        for id, inds in self.hru_map.items():
             area = inds[0].size * self.dem.csx * self.dem.csy
 
             if area < min_area:
@@ -1145,7 +1145,7 @@ class HRU(object):
         a[~self.mask] = self.hrus.nodata
         self.hrus[:], self.hru_map = label(a, return_map=True)
 
-        print "{} HRU's below {} [units] removed".format(cnt, min_area)
+        print("{} HRU's below {} [units] removed".format(cnt, min_area))
 
     def simplify_by_filter(self, iterations):
         """
@@ -1159,12 +1159,12 @@ class HRU(object):
         previous = max(self.hru_map.keys())
 
         for i in range(iterations):
-            print "Performing filter {} of {}".format(i + 1, iterations)
+            print("Performing filter {} of {}".format(i + 1, iterations))
             self.hrus = most_common(self.hrus)
 
         self.hrus[:], self.hru_map = label(self.hrus.array, return_map=True)
 
-        print "HRU count reduced from {} to {}".format(previous, max(self.hru_map.keys()))
+        print("HRU count reduced from {} to {}".format(previous, max(self.hru_map.keys())))
 
     def compute_centroids(self):
         """
@@ -1178,7 +1178,7 @@ class HRU(object):
         outsr = osr.SpatialReference()
         outsr.ImportFromEPSG(self.srid)
         coordTransform = osr.CoordinateTransformation(insr, outsr)
-        for id, inds in self.hru_map.iteritems():
+        for id, inds in self.hru_map.items():
             # Centre of mass in spatial reference of dem
             y = self.dem.top - ((numpy.mean(inds[0]) + 0.5) * self.dem.csy)
             x = self.dem.left + ((numpy.mean(inds[1]) + 0.5) * self.dem.csx)
@@ -1192,7 +1192,7 @@ class HRU(object):
         :param id: HRU index
         :return: None
         """
-        for id, inds in self.hru_map.iteritems():
+        for id, inds in self.hru_map.items():
             self.hru_attributes[id]['AREA'] = inds[0].size * self.dem.csx * self.dem.csy
 
     def save_hru_raster(self, output_name):
@@ -1212,13 +1212,13 @@ class HRU(object):
     def __repr__(self):
         if self.regen_spatial:
             write = 'Uncomputed HRU instance comprised of the following spatial datasets:\n'
-            write += '\n'.join(self.spatialData.keys()) + '\n'
+            write += '\n'.join(list(self.spatialData.keys())) + '\n'
             write += 'And the following zonal datasets:\n'
         else:
             write = "HRU instance with {} spatial HRU's, and the following zonal datasets (which have {}" \
                     "been computed):\n".format(max(self.hru_map.keys()), 'not ' if self.regen_zonal else '')
         write += '\n'.join(['{} of {}'.format(method[1], name)
-                            for name, method in self.zonalData.iteritems()])
+                            for name, method in self.zonalData.items()])
         return write
 
 
@@ -1240,7 +1240,7 @@ class riparian(object):
         if minimum_contributing_area is None:
             minimum_contributing_area = 1E6  # Default is 1km2
         if not hasattr(self, 'fa'):
-            print "Calculating flow accumulation"
+            print("Calculating flow accumulation")
             self.fa = bluegrass.watershed(self.dem, flow_direction='MFD', positive_fd=False, change_nodata=False)[1]
 
         self.streams = bluegrass.stream_extract(self.dem, minimum_contributing_area=minimum_contributing_area,
@@ -1255,7 +1255,7 @@ class riparian(object):
             self.delineate_using_topo()
 
         # Calculate distance to streams
-        print "Creating distance transform"
+        print("Creating distance transform")
         d = distance(self.streams)
 
         # Update to include only values on outer edges
@@ -1282,25 +1282,25 @@ class riparian(object):
         if streams is not None:
             streams = assert_type(streams)(streams)
             if isinstance(streams, Vector):
-                print "Rasterizing streams"
+                print("Rasterizing streams")
                 self.streams = streams.rasterize(self.dem)
             else:
-                print "Matching stream Raster to study area"
+                print("Matching stream Raster to study area")
                 self.streams = streams.match_raster(self.dem)
         elif not hasattr(self, 'streams'):
-            print "Delineating streams"
+            print("Delineating streams")
             self.generate_streams(minimum_contributing_area)
 
         if not hasattr(self, 'cost'):
-            print "Calculating cost surface"
+            print("Calculating cost surface")
             self.cost = normalize(cost_surface(self.streams, topo(self.dem).slope()))
 
         if scale_by_area:
             if not hasattr(self, 'fa'):
-                print "Calculating flow accumulation"
+                print("Calculating flow accumulation")
                 self.fa = bluegrass.watershed(self.dem, flow_direction='MFD', positive_fd=False, memory_manage=True)[1]
 
-            print "Scaling cost using contributing area"
+            print("Scaling cost using contributing area")
 
             # Get rid of nans
             fa = self.fa.copy()
@@ -1317,7 +1317,7 @@ class riparian(object):
         else:
             cost = self.cost
 
-        print "Clipping to region"
+        print("Clipping to region")
         a = cost.array
         m = a != cost.nodata
         p = numpy.percentile(a[m], reclass_percentile)
@@ -1370,15 +1370,15 @@ class riparian(object):
             self.delineate_using_topo()
 
         if not hasattr(self, 'sinuosity') or self.update_region:
-            print "Calculating sinuosity"
+            print("Calculating sinuosity")
             self.sinuosity = interpolate_mask(channel_density(self.streams), self.region, 'idw')
 
         if not hasattr(self, 'channel_slope') or self.update_region:
-            print "Calculating channel slope"
+            print("Calculating channel slope")
             self.channel_slope = interpolate_mask(stream_slope(self.dem, self.streams), self.region, 'idw')
 
         if not hasattr(self, 'contributing_area') or self.update_region:
-            print "Calculating contributing area"
+            print("Calculating contributing area")
             if not hasattr(self, 'fa'):
                 self.fa = bluegrass.watershed(self.dem, memory_manage=True)[1]
             a = self.fa.array
@@ -1393,7 +1393,7 @@ class riparian(object):
         # TODO: Add land cover analysis here (coarsewood recruitment, shade, litter, root strength, etc.)
         # i.e. cumulative_effectiveness(canopy, landcover)
 
-        print "Aggregating sensitivity parameters"
+        print("Aggregating sensitivity parameters")
         region = self.region.array
 
         # Create sensitivity from region and cost
@@ -1430,7 +1430,7 @@ class riparian(object):
         m = (a != width_ratio.nodata) & region
         a = a[m]
         a[a > 1] = 1
-        print "Min width ratio: {}\nMax width ratio: {}\nMean width ratio: {}".format(a.min(), a.max(), a.mean())
+        print("Min width ratio: {}\nMax width ratio: {}\nMean width ratio: {}".format(a.min(), a.max(), a.mean()))
         sensitivity[m] += a
         modals += m
 
@@ -1492,7 +1492,7 @@ class riparian(object):
         if os.path.isdir(dir_path):
             raise Exception("The directory {} already exists".format(dir_path))
         os.mkdir(dir_path)
-        for key, attr in self.__dict__.iteritems():
+        for key, attr in self.__dict__.items():
             if isinstance(attr, Raster):
                 attr.save(os.path.join(dir_path), '{}.h5'.format(key))
 
@@ -1501,7 +1501,7 @@ class riparian(object):
         self.__dict__.update({os.path.basename(f).split('.')[0]: Raster(f) for f in files})
 
     def __repr__(self):
-        return "Riparian delineation and sensitivity instance with:\n" + '\n'.join(self.__dict__.keys())
+        return "Riparian delineation and sensitivity instance with:\n" + '\n'.join(list(self.__dict__.keys()))
 
 
 def segment_water(dem, slope_threshold=0, slope=None):
@@ -1524,13 +1524,13 @@ def segment_water(dem, slope_threshold=0, slope=None):
     outa = numpy.zeros(shape=water.shape, dtype='bool')
 
     # Iterate labels and isolate sinks
-    print "Identified {} potential waterbodies".format(len(labels))
+    print("Identified {} potential waterbodies".format(len(labels)))
     cnt = 0
-    for id, inds in labels.iteritems():
+    for id, inds in labels.items():
         cnt += 1
         outa[inds] = 1
 
-    print "Filtered to {} waterbodies".format(cnt)
+    print("Filtered to {} waterbodies".format(cnt))
     water[:] = outa
 
     return water
@@ -1580,13 +1580,16 @@ def bankfull(dem, average_annual_precip=250, contributing_area=None, flood_facto
     # Calculate bankfull depth
     bankfull = (contrib ** 0.280) * 0.196
     bankfull = bankfull * precip
-    bankfull = bankfull ** 0.607 * 0.145
-    bankfull *= flood_factor
+    # bankfull = bankfull ** 0.607 * 0.145
+    # bankfull *= flood_factor
 
     # Add the dem to the bankfull depth where streams exists, and extrapolate outwards
     bnkfl = bankfull.array
     bnkfl[~streams] = bankfull.nodata
     bankfull[:] = bnkfl
+
+    return bankfull
+
     bankfull += dem
     bnkfl = bankfull.array
 
@@ -1642,7 +1645,7 @@ def valley_confinement(dem, min_stream_area, cost_threshold=2500, streams=None, 
     moving_mask = numpy.zeros(shape=dem.shape, dtype='bool')
 
     # Calculate slope
-    print "Calculating topographic slope"
+    print("Calculating topographic slope")
     slope = topo(dem).slope('percent_rise')
 
     # Add slope to the mask
@@ -1671,7 +1674,7 @@ def valley_confinement(dem, min_stream_area, cost_threshold=2500, streams=None, 
         streams[:] = a
 
     # Calculate a cost surface using slope and streams, and create a mask using specified percentile
-    print "Calculating cost"
+    print("Calculating cost")
     cost = cost_surface(streams, slope)
     moving_mask = moving_mask & (cost < cost_threshold).array
 
@@ -1682,7 +1685,7 @@ def valley_confinement(dem, min_stream_area, cost_threshold=2500, streams=None, 
 
     # Flood calculation
     if use_flood_option:
-        print "Calculating bankfull"
+        print("Calculating bankfull")
         flood = bankfull(dem, streams=streams, average_annual_precip=average_annual_precip,
                          contributing_area=fa, flood_factor=flood_factor).mask
         if save_bankfull is not None:
@@ -1691,7 +1694,7 @@ def valley_confinement(dem, min_stream_area, cost_threshold=2500, streams=None, 
 
     # Remove waterbodies
     # Segment water bodies from the DEM if they are not specified in the input
-    print "Removing waterbodies"
+    print("Removing waterbodies")
     if waterbodies is not None:
         waterbodies = assert_type(waterbodies)(waterbodies)
         if isinstance(waterbodies, Vector):
@@ -1703,26 +1706,26 @@ def valley_confinement(dem, min_stream_area, cost_threshold=2500, streams=None, 
     moving_mask[waterbodies.array] = 0
 
     # Create a Raster from the moving mask and run a mode filter
-    print "Applying a mode filter"
+    print("Applying a mode filter")
     valleys = dem.astype('bool')
     valleys[:] = moving_mask
     valleys.nodataValues = [0]
     valleys = most_common(valleys)
 
     # Label the valleys and remove those below the specified area or where stream lenght is too small
-    print "Filtering by area and stream length"
+    print("Filtering by area and stream length")
     stream_segment = numpy.mean([dem.csx, dem.csy, numpy.sqrt(dem.csx**2 + dem.csy**2)])
     valley_map = label(valleys, True)[1]
     a = numpy.zeros(shape=valleys.shape, dtype='bool')
     sa = streams.array
-    for _, inds in valley_map.iteritems():
+    for _, inds in valley_map.items():
         length = (sa[inds] != streams.nodata).sum() * stream_segment
         if inds[0].size * dem.csx * dem.csy >= min_valley_bottom_area and length >= min_stream_length:
             a[inds] = 1
 
     # Write to output and return a Raster instance
     valleys[:] = a
-    print "Completed successfully"
+    print("Completed successfully")
     return valleys
 
 
@@ -1738,11 +1741,11 @@ def valley_width_transform(valleys):
     mask = valleys.array != valleys.nodata
 
     # Calculate distance to the bank over all valleys
-    print "Calculating a distance transform"
+    print("Calculating a distance transform")
     distances = distance_transform_edt(mask, sampling=(valleys.csy, valleys.csx))
 
     # Calculate local maxima
-    print "Calculating local maxima"
+    print("Calculating local maxima")
     local_maxi = peak_local_max(distances, indices=False, footprint=numpy.ones((3, 3)), labels=mask)
 
     # Use a watershed segmentation algorithm to produce labeled width breaks
@@ -1752,22 +1755,22 @@ def valley_width_transform(valleys):
         indices = numpy.argsort(a)
         bins = numpy.bincount(a)
         indices = numpy.split(indices, numpy.cumsum(bins[bins > 0][:-1]))
-        return dict(zip(numpy.unique(a), [numpy.unravel_index(ind, shape) for ind in indices]))
+        return dict(list(zip(numpy.unique(a), [numpy.unravel_index(ind, shape) for ind in indices])))
 
-    print "Labeling maxima"
+    print("Labeling maxima")
     breaks = ndi_label(local_maxi)[0]
     distance_map = {brk: dist for brk, dist in zip(breaks[local_maxi], distances[local_maxi])}
 
-    print "Performing Watershed Segmentation"
+    print("Performing Watershed Segmentation")
     labels = watershed(-distances, breaks, mask=mask)
 
-    print "Assigning distances to labels"
-    for label, inds in label_map(labels).items():
+    print("Assigning distances to labels")
+    for label, inds in list(label_map(labels).items()):
         if label == 0:
             continue
         distances[inds] = distance_map[label]
 
-    print "Doubling dimensions"
+    print("Doubling dimensions")
     max_distance = numpy.sqrt(valleys.csy**2 + valleys.csx**2) * 2
     distances[distances > max_distance] *= 2
 
