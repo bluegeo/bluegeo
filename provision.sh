@@ -17,5 +17,5 @@ sudo apt-get update
 sudo apt-get -y install grass
 sudo apt-get -y install grass-dev
 
-# Install bluegeo
-cd bluegeo && pip install .
+# Install bluegeo (ignoring dependencies)
+cd bluegeo && pip install --no-deps .
