@@ -1407,7 +1407,7 @@ class Raster(object):
             else:
                 stop = s.stop
             win_ysize = stop - yoff
-        return xoff, yoff, win_xsize, win_ysize
+        return int(xoff), int(yoff), int(win_xsize), int(win_ysize)
 
     def max(self):
         """
