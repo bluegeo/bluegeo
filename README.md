@@ -62,10 +62,11 @@ The easiest way to use bluegeo is on Linux, using the `privision.sh` script to i
 bluegeo/provision.sh
 ```
 
-You may need to re-initialize conda after this
+Re-initialize conda & activate the environment:
 
 ```bash
 eval "$(~/miniconda/bin/conda shell.bash hook)"
+conda activate bluegeo
 ```
 
 Test the installation

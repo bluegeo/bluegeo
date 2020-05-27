@@ -730,9 +730,9 @@ class Raster(object):
             #   more time, and occupy some of the y-dimension
             if resid > 0:
                 chunks_j = self.shape[1]
-                chunks_i = chunks[0] * ((resid / x_chunks) + 1)
+                chunks_i = int(chunks[0] * ((resid / x_chunks) + 1))
             else:
-                chunks_j = chunks[1] * cache_chunks
+                chunks_j = int(chunks[1] * cache_chunks)
                 chunks_i = chunks[0]
         else:
             chunks_i, chunks_j = chunks
