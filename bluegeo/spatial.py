@@ -294,7 +294,7 @@ class Raster(object):
         self.shape = (ds.RasterYSize, ds.RasterXSize)
         self.bottom = self.top - (self.csy * self.shape[0])
         self.right = self.left + (self.csx * self.shape[1])
-        self.bandCount = ds.RasterCount
+        self.bandCount = int(ds.RasterCount)
         band = ds.GetRasterBand(1)
         dtype = gdal.GetDataTypeName(band.DataType)
         if dtype.lower() == 'byte':
@@ -1247,7 +1247,7 @@ class Raster(object):
             bigtiff = 'BIGTIFF=NO'
         parszOptions = [tiled, blockysize, blockxsize, comp, bigtiff]
         ds = driver.Create(output_path, int(shape[1]), int(shape[0]),
-                           bands, Raster.get_gdal_dtype(dtype),
+                           int(bands), Raster.get_gdal_dtype(dtype),
                            parszOptions)
         if ds is None:
             raise RasterError('GDAL error trying to create new Raster.')

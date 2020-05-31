@@ -52,14 +52,14 @@ class GrassSession(object):
                                  " the start script ({})\nCheck the system path to the GRASS installation,"
                                  " or install grass and grass-dev.  Note, bluegrass is not supported on "
                                  "Windows.\nMore information:\n{}".format(startcmd, err))
-        self.gisbase = out.strip('\n')
+        self.gisbase = out.strip(b'\n')
 
         self.gisdb = os.path.join(self.tempdir, 'mowerdb')
         self.location = "loc_{}".format(str(time.time()).replace(".","_"))
         self.mapset = "PERMANENT"
 
-        os.environ['GISBASE'] = self.gisbase
-        os.environ['GISDBASE'] = self.gisdb
+        os.environ['GISBASE'] = str(self.gisbase)
+        os.environ['GISDBASE'] = str(self.gisdb)
 
     def gsetup(self):
         path = os.path.join(self.gisbase, 'etc', 'python')
