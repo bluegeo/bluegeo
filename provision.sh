@@ -10,10 +10,7 @@ sudo add-apt-repository -y ppa:ubuntugis/ubuntugis-unstable
 sudo apt-get update
 
 # Install gdal, grass, and python dependencies
-sudo apt-get -y install gdal-bin
-sudo apt-get -y install python3-gdal
-sudo apt-get -y install grass
-sudo apt-get -y install grass-dev
+sudo apt-get -y install python3-rtree gdal-bin python3-gdal grass grass-dev
 sudo apt-get update
 
 # Install pip

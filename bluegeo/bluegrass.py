@@ -2,14 +2,13 @@
 
 import subprocess
 import sys
-import tempfile
+from tempfile import gettempdir
 from grass_session import Session
-from grass.script import core as gcore
+from grass.pygrass.modules.shortcuts import raster as graster
+from grass.script import core as grass
+import grass.script.array as garray
 from . import util
 from .spatial import *
-
-
-GRASSBIN = 'grass'
 
 
 # Global temporary directory
@@ -61,9 +60,7 @@ def watershed(dem, flow_direction='SFD', accumulation_path=None, direction_path=
             dirpath = direction_path
 
     # Run grass command
-    with Session(create_opts=dem):
-        from grass.pygrass.modules.shortcuts import raster as graster
-        from grass.script import core as grass
+    with Session(gisdb=TEMP_DIR or gettempdir(), location="location", create_opts=dem):
         graster.external(input=dem, output='surface')
         grass.run_command('r.watershed', elevation='surface', drainage='fd', accumulation='fa', flags=flags)
         graster.out_gdal('fd', format="GTiff", output=dirpath)
@@ -113,9 +110,7 @@ def stream_extract(dem, minimum_contributing_area, stream_length=0, accumulation
     stream_path = util.generate_name(dem, 'streams', 'tif')
 
     # Run grass command
-    with Session(create_opts=dem):
-        from grass.pygrass.modules.shortcuts import raster as graster
-        from grass.script import core as grass
+    with Session(gisdb=TEMP_DIR or gettempdir(), location="location", create_opts=dem):
         graster.external(input=dem, output='dem')
 
         if accumulation is not None:
@@ -172,9 +167,7 @@ def stream_order(dem, minimum_contributing_area, stream_order_path=None, method=
             orderpath = stream_order_path
 
     # Run grass command
-    with Session(create_opts=dem):
-        from grass.pygrass.modules.shortcuts import raster as graster
-        from grass.script import core as grass
+    with Session(gisdb=TEMP_DIR or gettempdir(), location="location", create_opts=dem):
         graster.external(input=dem, output='dem')
 
         grass.run_command('r.stream.extract', elevation='dem',
@@ -247,10 +240,7 @@ def water_outlet(coordinates, dem, direction=None,  basin_path=None, id=None, ve
 
     csx, csy = fd.csx, fd.csy
 
-    with Session(create_opts=fd.path):
-        from grass.pygrass.modules.shortcuts import raster as graster
-        from grass.script import core as grass
-        import grass.script.array as garray
+    with Session(gisdb=TEMP_DIR or gettempdir(), location="location", create_opts=fd.path):
         graster.external(input=fd.path, output="fd")
         # Iterate points and populate output rasters
         areas = []
@@ -340,10 +330,7 @@ def watershed_basin(dem, basin_area, basin_path=None, flow_direction='SFD', half
         else:
             basinpath = basin_path
 
-    with Session(create_opts=dem):
-        from grass.pygrass.modules.shortcuts import raster as graster
-        from grass.script import core as grass
-        import grass.script.array as garray
+    with Session(gisdb=TEMP_DIR or gettempdir(), location="location", create_opts=dem):
         graster.external(input=dem, output="dem")
         if half_basins:
             grass.run_command('r.watershed', elevation="dem",
@@ -397,9 +384,7 @@ def gwflow(phead, status, hc_x, hc_y, s, top, bottom, **kwargs):
         else:
             out_budget = output_budget
 
-    with Session(create_opts=phead) as gs:
-        from grass.pygrass.modules.shortcuts import raster as graster
-        from grass.script import core as grass
+    with Session(gisdb=TEMP_DIR or gettempdir(), location="location", create_opts=phead) as gs:
         for name, rast in zip(['phead', 'status', 'hc_x', 'hc_y', 's', 'top', 'bottom'],
                               [phead, status, hc_x, hc_y, s, top, bottom]):
             graster.external(input=rast, output=name)
@@ -423,9 +408,7 @@ def slope_aspect(elevation):
     slope = util.generate_name(elevation, 'slope', 'tif')
     aspect = util.generate_name(elevation, 'aspect', 'tif')
 
-    with Session(create_opts=dem) as gs:
-        from grass.pygrass.modules.shortcuts import raster as graster
-        from grass.script import core as grass
+    with Session(gisdb=TEMP_DIR or gettempdir(), location="location", create_opts=dem) as gs:
         graster.external(dem, output='dem')
         # Calculate slope and aspect
         grass.run_command('r.slope.aspect', elevation='dem', aspect='aspect', slope='slope')
@@ -463,9 +446,7 @@ def sun(elevation, day, step=1, slope=None, aspect=None):
     if aspect is not None:
         aspect, aspect_garbage = force_gdal(aspect)
 
-    with Session(create_opts=dem) as gs:
-        from grass.pygrass.modules.shortcuts import raster as graster
-        from grass.script import core as grass
+    with Session(gisdb=TEMP_DIR or gettempdir(), location="location", create_opts=dem) as gs:
         graster.external(dem, output='dem')
         # Calculate slope and aspect first
         if slope is None or aspect is None:
@@ -502,9 +483,7 @@ def lidar(las_file, las_srs_epsg, output_raster, resolution=1, return_type='min'
         return_filter = 'last'  # DTM
     else:
         return_filter = 'first'  # DSM
-    with Session(create_opts=las_srs_epsg) as gs:
-        from grass.pygrass.modules.shortcuts import raster as graster
-        from grass.script import core as grass
+    with Session(gisdb=TEMP_DIR or gettempdir(), location="location", create_opts=las_srs_epsg) as gs:
         grass.run_command('r.in.lidar', input=las_file, output='outrast',
                           method=return_type, resolution=resolution, return_filter=return_filter, flags='e')
         graster.out_gdal('outrast', format="GTiff", output=output_raster)
