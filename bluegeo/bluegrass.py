@@ -3,7 +3,8 @@
 import subprocess
 import sys
 import tempfile
-import time
+from grass_session import Session
+from grass.script import core as gcore
 from . import util
 from .spatial import *
 
@@ -17,112 +18,6 @@ TEMP_DIR = None
 
 class BlueGrassError(Exception):
     pass
-
-
-class GrassSession(object):
-    def __init__(self, src=None, persist=False):
-
-        # If temp is specified, use a different temporary directory
-        if TEMP_DIR is not None:
-            self.tempdir = TEMP_DIR
-        else:
-            self.tempdir = tempfile.gettempdir()
-        self.persist = persist
-
-        # if src
-        if type(src) == int:
-            # Assume epsg code
-            self.location_seed = "EPSG:{}".format(src)
-        else:
-            # Assume georeferenced Vector or Raster
-            self.spatial_data = assert_type(src)(src)
-            self.location_seed = src
-
-        self.grassbin = GRASSBIN
-
-        startcmd = "{} --config path".format(GRASSBIN)
-
-        # Adapted from
-        # http://grasswiki.osgeo.org/wiki/Working_with_GRASS_without_starting_it_explicitly#Python:_GRASS_GIS_7_without_existing_location_using_metadata_only
-        p = subprocess.Popen(startcmd, shell=True,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        out, err = p.communicate()
-        if p.returncode != 0:
-            raise BlueGrassError("It appears that GRASS is not installed, or bluegrass cannot execute"
-                                 " the start script ({})\nCheck the system path to the GRASS installation,"
-                                 " or install grass and grass-dev.  Note, bluegrass is not supported on "
-                                 "Windows.\nMore information:\n{}".format(startcmd, err))
-        self.gisbase = out.strip(b'\n')
-
-        self.gisdb = os.path.join(self.tempdir, 'mowerdb')
-        self.location = "loc_{}".format(str(time.time()).replace(".","_"))
-        self.mapset = "PERMANENT"
-
-        os.environ['GISBASE'] = str(self.gisbase)
-        os.environ['GISDBASE'] = str(self.gisdb)
-
-    def gsetup(self):
-        path = os.path.join(self.gisbase, 'etc', 'python')
-        sys.path.append(path)
-        os.environ['PYTHONPATH'] = ':'.join(sys.path)
-
-        import grass.script.setup as gsetup
-        gsetup.init(self.gisbase, self.gisdb, self.location, self.mapset)
-
-
-
-    def create_location(self):
-        try:
-            os.stat(self.gisdb)
-        except OSError:
-            os.mkdir(self.gisdb)
-
-        createcmd = "{0} -c {1} -e {2} -text".format(
-            self.grassbin,
-            self.location_seed,
-            self.location_path)
-
-        p = subprocess.Popen(createcmd, shell=True,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        out, err = p.communicate()
-        if p.returncode != 0:
-            raise Exception("ERROR: GRASS GIS 7 start script ({}) because:\n{}".format(createcmd, err))
-
-    @property
-    def location_path(self):
-        return os.path.join(self.gisdb, self.location)
-
-    def cleanup(self):
-        if os.path.exists(self.location_path) and not self.persist:
-            try:
-                shutil.rmtree(self.location_path)
-            except:
-                pass
-        if 'GISRC' in os.environ:
-            del os.environ['GISRC']
-
-    def set_region(self):
-        if hasattr(self, 'spatial_data'):
-            from grass.script import core as grass
-            if isinstance(self.spatial_data, Raster):
-                grass.run_command('g.region', n=self.spatial_data.top, s=self.spatial_data.bottom,
-                                  e=self.spatial_data.right, w=self.spatial_data.left,
-                                  rows=self.spatial_data.shape[0], cols=self.spatial_data.shape[1])
-            else:
-                grass.run_command('g.region', n=self.spatial_data.top, s=self.spatial_data.bottom,
-                                  e=self.spatial_data.right, w=self.spatial_data.left)
-
-    def __enter__(self):
-        self.create_location()
-        self.gsetup()
-
-        # If a spatial dataset is the input source, run g.region to make sure the region is correct
-        self.set_region()
-
-        return self
-
-    def __exit__(self, type, value, traceback):
-        self.cleanup()
 
 
 # r. functions
@@ -166,7 +61,7 @@ def watershed(dem, flow_direction='SFD', accumulation_path=None, direction_path=
             dirpath = direction_path
 
     # Run grass command
-    with GrassSession(dem):
+    with Session(create_opts=dem):
         from grass.pygrass.modules.shortcuts import raster as graster
         from grass.script import core as grass
         graster.external(input=dem, output='surface')
@@ -218,7 +113,7 @@ def stream_extract(dem, minimum_contributing_area, stream_length=0, accumulation
     stream_path = util.generate_name(dem, 'streams', 'tif')
 
     # Run grass command
-    with GrassSession(dem):
+    with Session(create_opts=dem):
         from grass.pygrass.modules.shortcuts import raster as graster
         from grass.script import core as grass
         graster.external(input=dem, output='dem')
@@ -277,7 +172,7 @@ def stream_order(dem, minimum_contributing_area, stream_order_path=None, method=
             orderpath = stream_order_path
 
     # Run grass command
-    with GrassSession(dem):
+    with Session(create_opts=dem):
         from grass.pygrass.modules.shortcuts import raster as graster
         from grass.script import core as grass
         graster.external(input=dem, output='dem')
@@ -352,7 +247,7 @@ def water_outlet(coordinates, dem, direction=None,  basin_path=None, id=None, ve
 
     csx, csy = fd.csx, fd.csy
 
-    with GrassSession(fd.path):
+    with Session(create_opts=fd.path):
         from grass.pygrass.modules.shortcuts import raster as graster
         from grass.script import core as grass
         import grass.script.array as garray
@@ -445,7 +340,7 @@ def watershed_basin(dem, basin_area, basin_path=None, flow_direction='SFD', half
         else:
             basinpath = basin_path
 
-    with GrassSession(dem):
+    with Session(create_opts=dem):
         from grass.pygrass.modules.shortcuts import raster as graster
         from grass.script import core as grass
         import grass.script.array as garray
@@ -477,7 +372,7 @@ def gwflow(phead, status, hc_x, hc_y, s, top, bottom, **kwargs):
     type = kwargs.get('type', 'confined')
     dtime = kwargs.get('dtime', 1)
     output_head = kwargs.get('output_head', None)
-    output_budget =kwargs.get('output_budget', None)
+    output_budget = kwargs.get('output_budget', None)
     maxit = kwargs.get('maxit', 10000)
 
     # Ensure all input rasters match
@@ -502,7 +397,7 @@ def gwflow(phead, status, hc_x, hc_y, s, top, bottom, **kwargs):
         else:
             out_budget = output_budget
 
-    with GrassSession(phead) as gs:
+    with Session(create_opts=phead) as gs:
         from grass.pygrass.modules.shortcuts import raster as graster
         from grass.script import core as grass
         for name, rast in zip(['phead', 'status', 'hc_x', 'hc_y', 's', 'top', 'bottom'],
@@ -528,7 +423,7 @@ def slope_aspect(elevation):
     slope = util.generate_name(elevation, 'slope', 'tif')
     aspect = util.generate_name(elevation, 'aspect', 'tif')
 
-    with GrassSession(dem) as gs:
+    with Session(create_opts=dem) as gs:
         from grass.pygrass.modules.shortcuts import raster as graster
         from grass.script import core as grass
         graster.external(dem, output='dem')
@@ -568,7 +463,7 @@ def sun(elevation, day, step=1, slope=None, aspect=None):
     if aspect is not None:
         aspect, aspect_garbage = force_gdal(aspect)
 
-    with GrassSession(dem) as gs:
+    with Session(create_opts=dem) as gs:
         from grass.pygrass.modules.shortcuts import raster as graster
         from grass.script import core as grass
         graster.external(dem, output='dem')
@@ -604,10 +499,10 @@ def sun(elevation, day, step=1, slope=None, aspect=None):
 
 def lidar(las_file, las_srs_epsg, output_raster, resolution=1, return_type='min'):
     if return_type == 'min':
-        return_filter='last'  # DTM
+        return_filter = 'last'  # DTM
     else:
-        return_filter='first'  #DSM
-    with GrassSession(las_srs_epsg) as gs:
+        return_filter = 'first'  # DSM
+    with Session(create_opts=las_srs_epsg) as gs:
         from grass.pygrass.modules.shortcuts import raster as graster
         from grass.script import core as grass
         grass.run_command('r.in.lidar', input=las_file, output='outrast',

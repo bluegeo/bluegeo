@@ -10,3 +10,4 @@ shapely
 pandas
 numba
 rtree
+grass-session

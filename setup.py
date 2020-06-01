@@ -32,7 +32,8 @@ requires = [
     'shapely',
     'pandas',
     'numba',
-    'rtree'
+    'rtree',
+    'grass-session'
 ]
 
 setup(name='bluegeo',
