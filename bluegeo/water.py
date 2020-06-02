@@ -3,6 +3,12 @@ Hydrologic analysis library
 
 Blue Geosimulation, 2018
 '''
+import os
+from tempfile import gettempdir
+from shutil import rmtree
+from grass_session import Session
+from grass.pygrass.modules.shortcuts import raster as graster
+from grass.script import core as grass
 from .terrain import *
 from .filters import *
 from .measurement import *
@@ -43,7 +49,7 @@ def delineate_watersheds(points, dem=None, fd=None, fa=None, as_vector=True, sna
             if dem is None:
                 raise WaterError('Either flow accumulation or a DEM must be specified if snapping pour points')
             fd, fa = bluegrass.watershed(dem)
-
+        # Points are transformed here if necessary
         points = snap_pour_points(points, fd, fa, snap_tolerance)
 
     else:
@@ -55,8 +61,25 @@ def delineate_watersheds(points, dem=None, fd=None, fa=None, as_vector=True, sna
         return bluegrass.water_outlet(points, direction=fd)
 
     basins = []
-    for point in points:
-        basins += bluegrass.water_outlet([point], dem, direction=fd).polygonize()[:]
+    with Session(gisdb=gettempdir(), location="location", create_opts=Raster(fd).path):
+        graster.external(input=fd.path, output="fd")
+        # Iterate points and populate output rasters
+        areas = []
+        index = []
+        for _i, coord in enumerate(points):
+            i = _i + 1
+            grass.run_command('r.water.outlet', input="fd",
+                              output="b%i" % (i), coordinates=tuple(coord))
+            grass.run_command('r.to.vect', input="b%i" % (i), output="b%i_v" % (i), type="area", flags="st")
+
+            basinpath = os.path.join(gettempdir(), "b%i.shp" % (i))
+            grass.run_command('v.out.ogr', input="b%i_v" % (i), output=basinpath, format='ESRI_Shapefile')
+
+            basins += Vector(basinpath)[:]
+            os.remove(basinpath)
+            for ext in ['shx', 'prj', 'dbf']:
+                os.remove(basinpath.replace('shp', ext))
+    rmtree(os.path.join(gettempdir(), 'location'))
 
     # Sort basins by area (largest to smallest)
     srt = numpy.argsort([ogr.CreateGeometryFromWkb(b).Area() for b in basins])[::-1]
@@ -331,7 +354,7 @@ def sinuosity(dem, stream_order, sample_distance=100):
     kernel = util.kernel_from_distance(radius, stream_order.csx, stream_order.csy)
 
     # Iterate stream orders and calculate sinuosity
-    @jit(nopython=True)
+    @ jit(nopython=True)
     def calc_distance(a, csx, csy, output):
         """Brute force outer min distance"""
         diag = numpy.sqrt((csx ** 2) + (csy ** 2))
@@ -437,7 +460,7 @@ def eca(tree_height, disturbance, curve, basins):
         Basin boundaries  (enumerated raster or vector) used to summarize ECA into a percentage
     :return: Basin vector with an ECA percentage attribute
     """
-    @jit(nopython=True)
+    @ jit(nopython=True)
     def eca_curve(data):
         for i in range(data.shape[0]):
             for j in range(curve.shape[0]):
@@ -1216,7 +1239,7 @@ class HRU(object):
             write += 'And the following zonal datasets:\n'
         else:
             write = "HRU instance with {} spatial HRU's, and the following zonal datasets (which have {}" \
-                    "been computed):\n".format(max(self.hru_map.keys()), 'not ' if self.regen_zonal else '')
+                "been computed):\n".format(max(self.hru_map.keys()), 'not ' if self.regen_zonal else '')
         write += '\n'.join(['{} of {}'.format(method[1], name)
                             for name, method in self.zonalData.items()])
         return write
