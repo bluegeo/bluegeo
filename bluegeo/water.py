@@ -61,8 +61,8 @@ def delineate_watersheds(points, dem=None, fd=None, fa=None, as_vector=True, sna
         return bluegrass.water_outlet(points, direction=fd)
 
     basins = []
-    with Session(gisdb=gettempdir(), location="location", create_opts=Raster(fd).path):
-        graster.external(input=fd.path, output="fd")
+    with Session(gisdb=gettempdir(), location="location_water", create_opts=Raster(fd).path):
+        graster.external(input=Raster(fd).path, output="fd")
         # Iterate points and populate output rasters
         areas = []
         index = []
@@ -79,7 +79,7 @@ def delineate_watersheds(points, dem=None, fd=None, fa=None, as_vector=True, sna
             os.remove(basinpath)
             for ext in ['shx', 'prj', 'dbf']:
                 os.remove(basinpath.replace('shp', ext))
-    rmtree(os.path.join(gettempdir(), 'location'))
+    rmtree(os.path.join(gettempdir(), 'location_water'))
 
     # Sort basins by area (largest to smallest)
     srt = numpy.argsort([ogr.CreateGeometryFromWkb(b).Area() for b in basins])[::-1]
