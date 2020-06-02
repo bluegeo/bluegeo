@@ -1014,7 +1014,6 @@ class Raster(object):
         In Args
 
         "projection": output projection argument
-        "projection": output projection argument
             (wkt, epsg, osr.SpatialReference, Raster instance)
 
         "csx": output cell size in the x-direction

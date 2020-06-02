@@ -10,11 +10,6 @@ import math
 from numba.core.decorators import jit
 from scipy import ndimage, interpolate
 
-try:
-    from .bluegrass import GrassSession
-except ImportError:
-    print("Warning: Grass functions not available")
-
 
 class TopoError(Exception):
     pass
