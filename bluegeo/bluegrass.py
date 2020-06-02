@@ -2,7 +2,9 @@
 
 import subprocess
 import sys
+import os
 from tempfile import gettempdir
+from shutil import rmtree
 from grass_session import Session
 from grass.pygrass.modules.shortcuts import raster as graster
 from grass.script import core as grass
@@ -65,6 +67,7 @@ def watershed(dem, flow_direction='SFD', accumulation_path=None, direction_path=
         grass.run_command('r.watershed', elevation='surface', drainage='fd', accumulation='fa', flags=flags)
         graster.out_gdal('fd', format="GTiff", output=dirpath)
         graster.out_gdal('fa', format="GTiff", output=accupath)
+    rmtree(os.path.join(TEMP_DIR, 'location'))
 
     if garbage:
         try:
@@ -122,6 +125,7 @@ def stream_extract(dem, minimum_contributing_area, stream_length=0, accumulation
             grass.run_command('r.stream.extract', elevation='dem',
                               threshold=threshold, stream_raster='streams', stream_length=stream_length)
         graster.out_gdal('streams', format="GTiff", output=stream_path)
+    rmtree(os.path.join(TEMP_DIR, 'location'))
 
     if dem_garbage:
         try:
@@ -187,6 +191,7 @@ def stream_order(dem, minimum_contributing_area, stream_order_path=None, method=
             grass.run_command('r.stream.order', stream_rast='streams',
                               direction='fd', hack="order")
         graster.out_gdal('order', format="GTiff", output=orderpath)
+    rmtree(os.path.join(TEMP_DIR, 'location'))
 
     if garbage:
         try:
@@ -256,6 +261,7 @@ def water_outlet(coordinates, dem, direction=None,  basin_path=None, id=None, ve
             areas.append(area)
             print("Basin {} area: {}".format(i, area))
             index.append(m)
+    rmtree(os.path.join(TEMP_DIR, 'location'))
 
     # Allocate output
     outrast = fd.astype('uint16')
@@ -341,6 +347,7 @@ def watershed_basin(dem, basin_area, basin_path=None, flow_direction='SFD', half
                               threshold=minarea, basin="b0",
                               flags=flags)
         graster.out_gdal('b0', format="GTiff", output=basinpath)
+    rmtree(os.path.join(TEMP_DIR, 'location'))
 
     if garbage:
         try:
@@ -393,6 +400,7 @@ def gwflow(phead, status, hc_x, hc_y, s, top, bottom, **kwargs):
                           budget='budget', maxit=maxit)
         graster.out_gdal('head', format="GTiff", output=out_head)
         graster.out_gdal('budget', format='GTiff', output=out_budget)
+    rmtree(os.path.join(TEMP_DIR, 'location'))
 
     return Raster(out_head), Raster(out_budget)
 
@@ -414,6 +422,7 @@ def slope_aspect(elevation):
         grass.run_command('r.slope.aspect', elevation='dem', aspect='aspect', slope='slope')
         graster.out_gdal('slope', format="GTiff", output=slope)
         graster.out_gdal('aspect', format="GTiff", output=aspect)
+    rmtree(os.path.join(TEMP_DIR, 'location'))
 
     if dem_garbage:
         try:
@@ -456,6 +465,7 @@ def sun(elevation, day, step=1, slope=None, aspect=None):
             graster.external(slope, output='slope')
         grass.run_command('r.sun', aspect='aspect', slope='slope', elevation='dem', glob_rad='rad', day=day, step=step)
         graster.out_gdal('rad', format="GTiff", output=out_sun)
+    rmtree(os.path.join(TEMP_DIR, 'location'))
 
     if dem_garbage:
         try:
@@ -487,6 +497,7 @@ def lidar(las_file, las_srs_epsg, output_raster, resolution=1, return_type='min'
         grass.run_command('r.in.lidar', input=las_file, output='outrast',
                           method=return_type, resolution=resolution, return_filter=return_filter, flags='e')
         graster.out_gdal('outrast', format="GTiff", output=output_raster)
+    rmtree(os.path.join(TEMP_DIR, 'location'))
 
     elev = Raster(output_raster)
     elev.garbage = {'path': output_raster, 'num': 1}
