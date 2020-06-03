@@ -29,11 +29,13 @@ except ImportError:
     print("Warning: Shapely is not installed and some operations will not be possible.")
 
 from .util import (parse_projection, generate_name, coords_to_indices, indices_to_coords, transform_points, isclose,
-                  compare_projections)
+                   compare_projections)
 
 gdal.PushErrorHandler('CPLQuietErrorHandler')
 
 """Custom Exceptions"""
+
+
 class RasterError(Exception):
     pass
 
@@ -209,6 +211,7 @@ class Raster(object):
     create a copy of the Raster for writing if
     a function that requires modification is called.
     """
+
     def __init__(self, input_data, mode='r', **kwargs):
         # Record mode
         if mode in ['r', 'r+', 'w']:
@@ -408,7 +411,7 @@ class Raster(object):
         else:
             raise RasterError(
                 'Unknown file type, or file type not implemented yet: {}'.format(output_path.split('.')[-1])
-            )
+                )
 
     def build_new_raster(self, path, **kwargs):
         """
@@ -662,7 +665,7 @@ class Raster(object):
             'lanczos': gdalconst.GRA_Lanczos,
             'mean': gdalconst.GRA_Average,
             'mode': gdalconst.GRA_Mode
-        }
+            }
         try:
             return interp_methods[self.interpolationMethod]
         except KeyError:
@@ -740,11 +743,11 @@ class Raster(object):
         ychunks = list(range(0, self.shape[0], chunks_i)) + [self.shape[0]]
         xchunks = list(range(0, self.shape[1], chunks_j)) + [self.shape[1]]
         ychunks = list(zip(numpy.array(ychunks[:-1]) - ifr,
-                      numpy.array(ychunks[1:]) + ito))
+                           numpy.array(ychunks[1:]) + ito))
         ychunks[0] = (0, ychunks[0][1])
         ychunks[-1] = (ychunks[-1][0], self.shape[0])
         xchunks = list(zip(numpy.array(xchunks[:-1]) - jfr,
-                      numpy.array(xchunks[1:]) + jto))
+                           numpy.array(xchunks[1:]) + jto))
         xchunks[0] = (0, xchunks[0][1])
         xchunks[-1] = (xchunks[-1][0], self.shape[1])
 
@@ -769,7 +772,7 @@ class Raster(object):
             'float32': 'Float32',
             'float64': 'Float64',
             'int64': 'Int32'
-        }
+            }
         try:
             return gdal.GetDataTypeByName(datatypes[dtype])
         except KeyError:
@@ -867,9 +870,9 @@ class Raster(object):
                 bottom > top,
                 right < left,
                 left > right]):
-                raise RasterError('Bounding box is invalid, check that the'
-                                  ' coordinate positions are (top, bottom,'
-                                  ' left, right)')
+            raise RasterError('Bounding box is invalid, check that the'
+                              ' coordinate positions are (top, bottom,'
+                              ' left, right)')
         # Snap to the nearest cell boundary
         resid = (self.top - top) / self.csy
         top += (resid - int(round(resid))) * self.csy
@@ -977,7 +980,7 @@ class Raster(object):
             'nodata': self.nodata,
             'interpolationMethod': self.interpolationMethod,
             'useChunks': self.useChunks
-        }
+            }
         outds = Raster(path, mode='w', **kwargs)
         # If a Vector or Raster is specified, use it to create a mask
         if isinstance(clipper, Vector):
@@ -1053,7 +1056,7 @@ class Raster(object):
             else:
                 insrs, outsrs = None, None
             if all([i is None for i in [insrs, outsrs, csx, csy]] + [bbox == Extent(self)]):
-                print ("Warning: No transformation operation was necessary")
+                print("Warning: No transformation operation was necessary")
                 return self.copy('transform')
 
             # Recalculate the Extent and calculate potential new cell sizes if a coordinate system change is necessary
@@ -1223,7 +1226,7 @@ class Raster(object):
         if extension not in list(self.gdal_drivers.keys()):
             raise RasterError(
                 'Unknown file type, or file type not implemented yet: {}'.format(output_path.split('.')[-1])
-            )
+                )
         driver = gdal.GetDriverByName(self.gdal_drivers[extension])
         # Only tif currently set up, so these are the hard-coded compression and writing parameters
         if compress:
@@ -1241,7 +1244,7 @@ class Raster(object):
             tiled = 'TILED=YES'
         size = (shape[0] * shape[1] * float(numpy.dtype(dtype).itemsize)) / 1E09
         if size > 4.:
-            bigtiff='BIGTIFF=YES'
+            bigtiff = 'BIGTIFF=YES'
         else:
             bigtiff = 'BIGTIFF=NO'
         parszOptions = [tiled, blockysize, blockxsize, comp, bigtiff]
@@ -1468,7 +1471,7 @@ class Raster(object):
                 a = ds.GetRasterBand(self.band).ReadAsArray(
                     xoff=xoff, yoff=yoff, win_xsize=win_xsize,
                     win_ysize=win_ysize
-                )
+                    )
             ds = None
         else:
             with self.dataset as ds:
@@ -1722,7 +1725,7 @@ class Raster(object):
         methods = {
             'ne': 'numexpr',
             'np': 'numpy'
-        }
+            }
         if os.path.isfile(self.path):
             prestr = ('A happy Raster named %s of house %s\n' %
                       (os.path.basename(self.path), self.format.upper()))
@@ -1779,6 +1782,7 @@ class Raster(object):
 
 class mosaic(Raster):
     """Handle a mosaic of rasters"""
+
     def __init__(self, raster_list):
         self.rasterList = []
         self.extents = []
@@ -1915,6 +1919,7 @@ def unique(input_raster):
     else:
         return numpy.unique(r.array[r.array != r.nodata])
 
+
 def rastmin(input_raster):
     """
     Calculate the minimum value
@@ -1939,6 +1944,7 @@ def rastmin(input_raster):
         except ValueError:
             raise ValueError('Cannot collect minimum: No data in Raster')
 
+
 def rastmax(input_raster):
     """
     Calculate the maximum value
@@ -1962,7 +1968,6 @@ def rastmax(input_raster):
             return numpy.max(r.array[r.array != r.nodata])
         except ValueError:
             raise ValueError('Cannot collect maximum: No data in Raster')
-
 
 
 class Vector(object):
@@ -2025,7 +2030,7 @@ class Vector(object):
                     raise VectorError(
                         'Geometry type {} not understood while creating new Vector data source.  '
                         'Use one of: {}'.format(geotype, ', '.join(geotypes))
-                    )
+                        )
 
                 # Create some attributes so Vector.empty can be called
                 self.geometryType = geotype
@@ -2075,7 +2080,8 @@ class Vector(object):
             if fields is None:
                 field_def = []
             else:
-                self.fieldTypes = list(zip(fields.dtype.names, (fields.dtype[i].name for i in range(len(fields.dtype)))))
+                self.fieldTypes = list(
+                    zip(fields.dtype.names, (fields.dtype[i].name for i in range(len(fields.dtype)))))
                 field_def = self.fieldTypes
             outVect = self.empty(spatial_reference=projection, fields=field_def)
             outVect.garbage['num'] += 1  # Delay garbage by one delete
@@ -2164,6 +2170,19 @@ class Vector(object):
     def right(self):
         with self.layer() as inlyr:
             return inlyr.GetExtent()[1]
+
+    @property
+    def field_data(self):
+        """
+        Return all fields in a numpy structured array
+        """
+        fields = [(value,) for value in self[self.fieldTypes[0][0]]]
+
+        for field in self.fieldTypes[1:]:
+            for i, value in enumerate(self[field[0]]):
+                fields[i] += (value,)
+
+        return numpy.array(fields, dtype=self.fieldTypes)
 
     def geo_from_wellknown(self, wk_):
         """Try and load strings as either a wkb or wkt"""
@@ -2508,7 +2527,7 @@ class Vector(object):
                 for i in range(count):
                     get_next(geo.GetGeometryRef(i), vertices)
             else:
-                vertices += [[geo.GetX(i),geo.GetY(i), geo.GetZ(i)] for i in range(geo.GetPointCount())]
+                vertices += [[geo.GetX(i), geo.GetY(i), geo.GetZ(i)] for i in range(geo.GetPointCount())]
 
         vertices = []
         for wkb in self[:]:
@@ -2518,6 +2537,69 @@ class Vector(object):
                 pass
 
         return numpy.array(vertices)
+
+    def round(self, precision=2):
+        """Round vertices of features to a specified precision
+
+        Keyword Arguments:
+            precision {int} -- Precision for rounding (default: {2})
+        """
+        precision = int(precision)
+
+        output = self.empty()
+
+        geos = []
+        for geo in self[:]:
+            geo = shpwkb.loads(geo)
+            if 'Multi' not in geo.geom_type:
+                geo = [geo]
+
+            rounded = []
+            for g in geo:
+                try:
+                    coords = g.coords
+                except NotImplementedError:
+                    coords = g.boundary.coords
+                coords = [tuple(numpy.round(c, precision)) for c in coords]
+                rounded.append(getattr(geometry, g.geom_type)(coords))
+
+            if len(rounded) == 1:
+                geos.append(shpwkb.dumps(rounded[0]))
+            else:
+                geos.append(shpwkb.dumps(getattr(geometry, 'Multi{}'.format(rounded[0].geom_type))(rounded)))
+
+        output[:] = geos
+        field_data = []
+        for field, _ in self.fieldTypes:
+            field_data.append(self[field])
+        output.add_fields([f[0] for f in self.fieldTypes], [f[1] for f in self.fieldTypes], field_data)
+
+        return output
+
+    def spatially_unique(self, round=None):
+        """
+        Remove spatially-redundant features
+        Attributes from the first feature will be preserved when redundancy occurs
+
+        :param round: Round vertices to a tolerance when evaluating uniqueness
+        """
+        if self.geometryType != 'Point':
+            raise VectorError('Only point geometries are supported for this operation')
+
+        if round is not None:
+            geos = self.round(round)[:]
+        else:
+            geos = self[:]
+        un, ind = numpy.unique(geos, return_index=True)
+
+        output = self.empty()
+        output[:] = [geos[i] for i in ind]
+        field_data = []
+        for field, _ in self.fieldTypes:
+            field_data.append(self[field][ind])
+        output.add_fields([f[0] for f in self.fieldTypes], [f[1] for f in self.fieldTypes], field_data)
+
+        return output
 
     def buffer(self, distance):
         """
@@ -2575,7 +2657,7 @@ class Vector(object):
 
         newFields = out_vect.fieldTypes
         fields = {(oldField[0], newField[0]): self.field_to_pyobj(self[oldField[0]], self.fieldWidth[oldField[0]],
-                                                   self.fieldPrecision[oldField[0]])
+                                                                  self.fieldPrecision[oldField[0]])
                   for oldField, newField in zip(self.fieldTypes, newFields)}
 
         # Collect the input features
@@ -2753,7 +2835,7 @@ class Vector(object):
                                             _geo.type.replace('Multi', '') == out_vect.geometryType.replace('Multi', '')]
                             intersection = getattr(
                                 geometry, 'Multi' + out_vect.geometryType.replace('Multi', '')
-                            )(intersection)
+                                )(intersection)
 
                         # Write output geometry
                         out_feature = ogr.Feature(outLyrDefn)
@@ -2951,7 +3033,10 @@ class Vector(object):
             if not isinstance(start, int):
                 start = 0
             if not isinstance(stop, int):
-                stop = self.featureCount
+                if self.featureCount == 0:
+                    stop = len(val) if hasattr(val, '__iter__') else 1
+                else:
+                    stop = self.featureCount
         elif isinstance(item, int):
             start, stop = item, item + 1
 
@@ -2974,7 +3059,7 @@ class Vector(object):
         if start > self.featureCount or stop > self.featureCount:
             raise VectorError('Input feature slice outside of current feature bounds')
         # Check for wkbs
-        if not isinstance(val[0], str):
+        if not isinstance(val[0], (str, bytes)):
             raise VectorError('Item to set must be a wkb geometry')
 
         # Update feature geometries using the val
@@ -3075,17 +3160,12 @@ class Vector(object):
         :param a: input numpy array
         :return: list
         """
-        _types = {'uint8': int, 'int8': int,
-                  'uint16': int, 'int16': int,
-                  'uint32': int, 'int32': int,
-                  'uint64': int, 'int64': int,
-                  'float32': float, 'float64': float,
-                  's': str,
-                  'object': str
-        }
-
         dtype = a.dtype.name
-        if dtype[0].lower() == 's' or width is None or prec is None or 'datetime' in dtype.lower():
+        if any([dtype[:5].lower() == 'bytes',
+                dtype[0].lower() == 's',
+                width is None,
+                prec is None,
+                'datetime' in dtype.lower()]):
             dtype = 's'
             fmt = '{}'
         elif 'float' in dtype.lower():
@@ -3093,7 +3173,6 @@ class Vector(object):
         else:
             fmt = '{:d}'
 
-        # return [None if obj == 'None' else obj for obj in map(_types[dtype], a)]
         return list(map(fmt.format, a))
 
     @staticmethod
@@ -3146,11 +3225,14 @@ class Vector(object):
                   'uint8': ogr.OFTInteger,
                   'bool': ogr.OFTInteger,
                   'datetime64': ogr.OFTDate,
-                  's': ogr.OFTString
+                  's': ogr.OFTString,
+                  'bytes': ogr.OFTBinary
                   }
 
         if dtype[0].lower() == 's':
             dtype = 's'
+        elif dtype[:5].lower() == 'bytes':
+            dtype = 'bytes'
 
         return _types[dtype]
 
@@ -3230,7 +3312,6 @@ class Vector(object):
             return _types[code]
         except KeyError:
             raise VectorError('Unrecognized Geometry type OGRwkbGeometryType: {}'.format(code))
-
 
     def rasterize(self, template_raster, attribute_field=None):
         """
@@ -3405,6 +3486,61 @@ class Vector(object):
                             os.remove(p)
                         except:
                             pass
+
+
+def merge_vectors(vectors, projection=None):
+    """
+    Merge a list of vectors of the same geometry type
+
+    Arguments:
+        vectors {iterable} -- datasets compatible with the Vector class
+    """
+    if len(vectors) == 1:
+        return Vector(vectors[0])
+
+    vectors = [Vector(v) for v in vectors]
+    if not all([v.geometryType == vectors[0].geometryType for v in vectors[1:]]):
+        raise VectorError('All input geometries must be alike')
+
+    if projection is None:
+        projection = vectors[0].projection
+
+    vectors = [v.transform(projection) for v in vectors]
+    field_keys = []
+    for v in vectors:
+        field_keys += [f[0] for f in v.fieldTypes]
+    field_keys = numpy.unique(field_keys)
+
+    output = vectors[0].empty()
+    geos = []
+    fields = dict(zip(field_keys, [[] for i in range(len(field_keys))]))
+
+    for v in vectors:
+        geos += v[:]
+        for field in field_keys:
+            try:
+                data = list(v[field])
+            except VectorError:
+                data = [None for i in range(v.featureCount)]
+            fields[field] += data
+
+    output[:] = geos
+    field_data = []
+    for f in field_keys:
+        dtype = numpy.array([i for i in fields[f] if i is not None]).dtype.name
+        if 'bytes' in dtype:
+            dtype = 'bytes'
+        elif 'str' in dtype:
+            dtype = 'str'
+        if 'float' in dtype or 'int' in dtype:
+            replace_val = 0
+        else:
+            replace_val = ''
+        field_data.append(numpy.array([i if i is not None else replace_val for i in fields[f]], dtype=dtype))
+    field_types = [f.dtype.name for f in field_data]
+    output.add_fields(field_keys, field_types, field_data)
+
+    return output
 
 
 def force_gdal(input_raster):

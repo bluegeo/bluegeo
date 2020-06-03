@@ -18,6 +18,8 @@ from scipy.ndimage import label as ndi_label
 from scipy.interpolate import griddata
 from skimage.feature import peak_local_max
 from skimage.segmentation import watershed
+from shapely import geometry
+from shapely import wkb as shpwkb
 
 
 class WaterError(Exception):
@@ -28,10 +30,10 @@ class HruError(Exception):
     pass
 
 
-def delineate_watersheds(points, dem=None, fd=None, fa=None, as_vector=True, snap_tolerance=1E6):
+def delineate_watersheds(points, dem=None, fd=None, fa=None, as_vector=True, snap_tolerance=1E6, **kwargs):
     """
     Delineate watersheds from pour points
-    :param points: Vector or list of coordinate tuples in the form [(x1, y1), (x2, y2),...(xn, yn)]
+    :param points: Vector
     :param dem: digital elevation model Raster (if no flow direction surface is available)
     :param fd: Flow direction surface (if available)
     :param fa: Flow accumulation surface (if available). This will only be used for snapping pour points
@@ -55,7 +57,15 @@ def delineate_watersheds(points, dem=None, fd=None, fa=None, as_vector=True, sna
     else:
         if isinstance(points, str) or isinstance(points, Vector):
             # Convert the vector to a list of coordinates in the raster map projection
-            points = Vector(points).transform(Raster(fd).projection).vertices[:, [0, 1]]
+            points = Vector(points).transform(Raster(fd).projection)
+
+    field_names = [f[0] for f in points.fieldTypes]
+    field_types = [f[1] for f in points.fieldTypes]
+    field_data = []
+    for f in points.fieldTypes:
+        field_data.append(points[f[0]])
+
+    points = points.vertices[:, [0, 1]]
 
     if not as_vector:
         return bluegrass.water_outlet(points, direction=fd)
@@ -75,9 +85,13 @@ def delineate_watersheds(points, dem=None, fd=None, fa=None, as_vector=True, sna
             basinpath = os.path.join(gettempdir(), "b%i.shp" % (i))
             grass.run_command('v.out.ogr', input="b%i_v" % (i), output=basinpath, format='ESRI_Shapefile')
 
-            basins += Vector(basinpath)[:]
-            os.remove(basinpath)
-            for ext in ['shx', 'prj', 'dbf']:
+            data = Vector(basinpath)[:]
+            if len(data) == 1:
+                basins.append(data[0])
+            else:
+                basins.append(shpwkb.dumps(geometry.MultiPolygon([shpwkb.loads(geometry) for geo in data])))
+
+            for ext in ['shp', 'shx', 'prj', 'dbf']:
                 os.remove(basinpath.replace('shp', ext))
     rmtree(os.path.join(gettempdir(), 'location_water'))
 
@@ -85,7 +99,10 @@ def delineate_watersheds(points, dem=None, fd=None, fa=None, as_vector=True, sna
     srt = numpy.argsort([ogr.CreateGeometryFromWkb(b).Area() for b in basins])[::-1]
     basins = [basins[i] for i in srt]
 
-    return Vector(basins, mode='w', projection=Raster(fd).projection)
+    out_vect = Vector(basins, mode='w', projection=Raster(fd).projection)
+    out_vect.add_fields(field_names, field_types, [data[srt] for data in field_data])
+
+    return out_vect
 
 
 def wetness(dem, minimum_area):
@@ -596,7 +613,16 @@ def snap_pour_points(points, sfd, fa, min_contrib_area=1E7):
 
     if isinstance(points, str) or isinstance(points, Vector):
         # Convert the vector to a list of coordinates in the raster map projection
-        points = Vector(points).transform(Raster(sfd).projection).vertices[:, [0, 1]]
+        points = Vector(points).transform(Raster(sfd).projection)
+        output_vect = points.empty()
+        field_data = []
+        for f in points.fieldTypes:
+            field_data.append(points[f[0]])
+        output_vect.add_fields([f[0] for f in points.fieldTypes], [f[1] for f in points.fieldTypes], field_data)
+
+        points = points.vertices[:, [0, 1]]
+    else:
+        output_vect = Vector([shpwkb.dumps(geometry.Point(p)) for p in points])
 
     # Convert the coordinates to raster map indices
     points = list(map(tuple, [[p[0] for p in points], [p[1] for p in points]]))
@@ -627,7 +653,9 @@ def snap_pour_points(points, sfd, fa, min_contrib_area=1E7):
     snapped_points = list(map(tuple, [[pt[0] for pt in snapped_points], [pt[1] for pt in snapped_points]]))
     y, x = indices_to_coords(snapped_points, sfd.top, sfd.left, sfd.csx, sfd.csy)
 
-    return list(zip(x, y))
+    output_vect[:] = [shpwkb.dumps(geometry.Point(p)) for p in zip(x, y)]
+
+    return output_vect
 
 
 class HRU(object):
