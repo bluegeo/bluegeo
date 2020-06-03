@@ -30,7 +30,7 @@ class HruError(Exception):
     pass
 
 
-def delineate_watersheds(points, dem=None, fd=None, fa=None, as_vector=True, snap_tolerance=1E6, **kwargs):
+def delineate_watersheds(points, dem=None, fd=None, fa=None, as_vector=True, snap_tolerance=1E6):
     """
     Delineate watersheds from pour points
     :param points: Vector
@@ -618,7 +618,8 @@ def snap_pour_points(points, sfd, fa, min_contrib_area=1E7):
         field_data = []
         for f in points.fieldTypes:
             field_data.append(points[f[0]])
-        output_vect.add_fields([f[0] for f in points.fieldTypes], [f[1] for f in points.fieldTypes], field_data)
+        field_names = [f[0] for f in points.fieldTypes]
+        field_types = [f[1] for f in points.fieldTypes]
 
         points = points.vertices[:, [0, 1]]
     else:
@@ -654,6 +655,7 @@ def snap_pour_points(points, sfd, fa, min_contrib_area=1E7):
     y, x = indices_to_coords(snapped_points, sfd.top, sfd.left, sfd.csx, sfd.csy)
 
     output_vect[:] = [shpwkb.dumps(geometry.Point(p)) for p in zip(x, y)]
+    output_vect.add_fields(field_names, field_types, field_data)
 
     return output_vect
 
