@@ -227,7 +227,7 @@ class Raster(object):
             else:
                 # Try an HDF5 input_data source
                 try:
-                    with h5py.File(input_data, libver='latest') as ds:
+                    with h5py.File(input_data, libver='latest', mode='r') as ds:
                         self.load_from_hdf5(ds)
                         self.format = 'HDF5'
                 except Exception as e:
@@ -1817,7 +1817,7 @@ class mosaic(Raster):
         super(mosaic, self).__init__(path, mode='w', csx=csx, csy=csy, top=top, left=left,
                                      shape=shape, projection=projection, dtype=dtype)
         # Create a mask to track where data are merged
-        with h5py.File(self.path, libver='latest') as f:
+        with h5py.File(self.path, libver='latest', mode='a') as f:
             f.create_dataset('mosaic', data=numpy.zeros(shape=self.shape, dtype='bool'),
                              compression='lzf')
 
@@ -3446,7 +3446,7 @@ def assert_type(data):
 
         # Check if a bluegeo Raster
         if data.split('.')[-1].lower() == 'h5':
-            with h5py.File(data, libver='latest') as ds:
+            with h5py.File(data, libver='latest', mode='r') as ds:
                 # Just check for the format attribute
                 if 'format' in list(dict(ds.attrs).keys()):
                     return Raster
