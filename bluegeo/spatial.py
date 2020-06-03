@@ -3543,6 +3543,23 @@ def merge_vectors(vectors, projection=None):
     return output
 
 
+def vector_stats(polygons, datasets):
+    """
+    Peform summary statistics on a list of datasets within specified polygons
+
+    Arguments:
+        polygons {Vector} -- Vector Polygon dataset
+        datasets {iterable} -- Iterable of Rasters and Vectors
+    """
+    zones = Vector(polygons)
+    if zones.geometryType != 'Polygon':
+        raise VectorError('Only Polygon geometries are supported for vector stats')
+
+    for data in datasets:
+        data = assert_type(data)(data)
+        
+
+
 def force_gdal(input_raster):
     r = Raster(input_raster)
     if r.format == 'HDF5':

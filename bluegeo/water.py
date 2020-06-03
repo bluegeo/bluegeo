@@ -89,7 +89,7 @@ def delineate_watersheds(points, dem=None, fd=None, fa=None, as_vector=True, sna
             if len(data) == 1:
                 basins.append(data[0])
             else:
-                basins.append(shpwkb.dumps(geometry.MultiPolygon([shpwkb.loads(geometry) for geo in data])))
+                basins.append(shpwkb.dumps(geometry.MultiPolygon([shpwkb.loads(geo) for geo in data])))
 
             for ext in ['shp', 'shx', 'prj', 'dbf']:
                 os.remove(basinpath.replace('shp', ext))
