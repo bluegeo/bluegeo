@@ -623,11 +623,12 @@ def snap_pour_points(points, sfd, fa, min_contrib_area=1E7):
 
         points = points.vertices[:, [0, 1]]
     else:
+        field_data = None
         output_vect = Vector([shpwkb.dumps(geometry.Point(p)) for p in points])
 
     # Convert the coordinates to raster map indices
     points = list(map(tuple, [[p[0] for p in points], [p[1] for p in points]]))
-    indices = util.coords_to_indices(points, sfd.top, sfd.left, sfd.csx, sfd.csy, sfd.shape)
+    indices = util.coords_to_indices(points, sfd.top, sfd.left, sfd.csx, sfd.csy, sfd.shape, True)
 
     # Collect the area as a unit of number of cells
     num_cells = min_contrib_area / (sfd.csx * sfd.csy)
@@ -637,6 +638,9 @@ def snap_pour_points(points, sfd, fa, min_contrib_area=1E7):
     point_index = -1
     for i, j in zip(indices[0], indices[1]):
         point_index += 1
+        if (i < 0) | (j < 0) | (i >= sfd.shape[0]) | (j >= sfd.shape[1]):
+            missed_points.append(point_index)
+            continue
         snapped = True
         while fa[i, j] < num_cells:
             try:
@@ -652,15 +656,18 @@ def snap_pour_points(points, sfd, fa, min_contrib_area=1E7):
             snapped_points.append((i, j))
 
     snapped_points = list(map(tuple, [[pt[0] for pt in snapped_points], [pt[1] for pt in snapped_points]]))
+
     y, x = indices_to_coords(snapped_points, sfd.top, sfd.left, sfd.csx, sfd.csy)
 
     output_vect[:] = [shpwkb.dumps(geometry.Point(p)) for p in zip(x, y)]
-    if len(missed_points) > 0:
-        missed_points.sort()
-        for pt in missed_points[::-1]:
-            for i, data in enumerate(field_data):
-                field_data[i] = numpy.concatenate([data[:pt], data[pt + 1:]])
-    output_vect.add_fields(field_names, field_types, field_data)
+
+    if field_data is not None:
+        if len(missed_points) > 0:
+            missed_points.sort()
+            for pt in missed_points[::-1]:
+                for i, data in enumerate(field_data):
+                    field_data[i] = numpy.concatenate([data[:pt], data[pt + 1:]])
+        output_vect.add_fields(field_names, field_types, field_data)
 
     return output_vect
 

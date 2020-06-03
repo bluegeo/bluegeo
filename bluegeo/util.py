@@ -187,7 +187,7 @@ def intersect_mask(coords, top, left, csx, csy, shape):
     return (i > 0) & (j > 0) & (i < shape[0]) & (j < shape[1])
 
 
-def coords_to_indices(coords, top, left, csx, csy, shape):
+def coords_to_indices(coords, top, left, csx, csy, shape, preserve_out_of_bounds=False):
     """
     Convert coordinates to array indices using the given specs.
     Coordinates outside of the shape are not returned.
@@ -202,8 +202,11 @@ def coords_to_indices(coords, top, left, csx, csy, shape):
     x, y = numpy.asarray(coords[0]), numpy.asarray(coords[1])
     i = numpy.int64((top - y) / csy)
     j = numpy.int64((x - left) / csx)
-    m = (i >= 0) & (j >= 0) & (i < shape[0]) & (j < shape[1])
-    return i[m], j[m]
+    if preserve_out_of_bounds:
+        return i, j
+    else:
+        m = (i >= 0) & (j >= 0) & (i < shape[0]) & (j < shape[1])
+        return i[m], j[m]
 
 
 def kernel_from_distance(distance, csx, csy):
