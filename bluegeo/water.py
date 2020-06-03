@@ -633,7 +633,8 @@ def snap_pour_points(points, sfd, fa, min_contrib_area=1E7):
     num_cells = min_contrib_area / (sfd.csx * sfd.csy)
 
     snapped_points = []
-    point_index = -1  # For warning prints
+    missed_points = []
+    point_index = -1
     for i, j in zip(indices[0], indices[1]):
         point_index += 1
         snapped = True
@@ -642,10 +643,9 @@ def snap_pour_points(points, sfd, fa, min_contrib_area=1E7):
                 o_i, o_j = downstream[int(numpy.squeeze(sfd[i, j]))]
                 i += o_i
                 j += o_j
-            except KeyError:
-                # except (KeyError, IndexError):  Commented out for testing- revert if you see this
-                print("Warning: unable to snap point at index {}".format(point_index))
+            except (KeyError, IndexError):
                 snapped = False
+                missed_points.append(point_index)
                 break
 
         if snapped:
@@ -655,6 +655,11 @@ def snap_pour_points(points, sfd, fa, min_contrib_area=1E7):
     y, x = indices_to_coords(snapped_points, sfd.top, sfd.left, sfd.csx, sfd.csy)
 
     output_vect[:] = [shpwkb.dumps(geometry.Point(p)) for p in zip(x, y)]
+    if len(missed_points) > 0:
+        missed_points.sort()
+        for pt in missed_points[::-1]:
+            for i, data in enumerate(field_data):
+                field_data[i] = numpy.concatenate([data[:pt], data[pt + 1:]])
     output_vect.add_fields(field_names, field_types, field_data)
 
     return output_vect
