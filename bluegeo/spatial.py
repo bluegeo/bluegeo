@@ -3543,7 +3543,7 @@ def merge_vectors(vectors, projection=None):
     return output
 
 
-def vector_stats(polygons, datasets):
+def vector_stats(polygons, datasets, out_csv):
     """
     Peform summary statistics on a list of datasets within specified polygons
 
@@ -3555,20 +3555,33 @@ def vector_stats(polygons, datasets):
     if zones.geometryType != 'Polygon':
         raise VectorError('Only Polygon geometries are supported for vector stats')
 
+    stats = ['min', 'max', 'mean', 'sum', 'std', 'var']
+
+    with open(out_csv, 'w') as f:
+        f.write('Dataset,{}\n'.format(','.join(stats)))
     for data in datasets:
         data = assert_type(data)(data)
-        
+        if isinstance(data, Raster):
+            r = data.clip(zones)
+            a = numpy.ma.masked_equal(r[:], r.nodata)
+            with open(out_csv, 'a') as f:
+                f.write('{}\n'.format(','.join([data.path] + [getattr(numpy, stat)(a) for stat in stats])))
+        else:
+            v = data.intersect(zones)
+            for field, _ in data.fieldTypes:
+                f.write('{}\n'.format(','.join(['{}: {}'.format(data.path, field)] +
+                        [getattr(numpy, stat)(v[field]) for stat in stats])))
 
 
 def force_gdal(input_raster):
-    r = Raster(input_raster)
+    r=Raster(input_raster)
     if r.format == 'HDF5':
-        path = generate_name(r.path, 'copy', 'tif')
+        path=generate_name(r.path, 'copy', 'tif')
         r.save(path)
-        tmp = True
+        tmp=True
     else:
-        path = r.path
-        tmp = False
+        path=r.path
+        tmp=False
     return path, tmp
 
 
@@ -3593,7 +3606,7 @@ def assert_type(data):
 
     if isinstance(data, str):
         # Check if gdal Raster
-        ds = gdal.Open(data)
+        ds=gdal.Open(data)
         if ds is not None:
             return Raster
 
@@ -3606,15 +3619,15 @@ def assert_type(data):
 
         # Check if a Vector
         try:
-            driver = Vector.get_driver_by_path(data)
+            driver=Vector.get_driver_by_path(data)
         except:
             raise_type_error()
         if driver == 'table':
             return Vector
         else:
             # Try to open dataset
-            driver = ogr.GetDriverByName(driver)
-            _data = driver.Open(data)
+            driver=ogr.GetDriverByName(driver)
+            _data=driver.Open(data)
             if _data is None:
                 raise_type_error()
             else:
