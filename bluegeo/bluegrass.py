@@ -5,12 +5,16 @@ import sys
 import os
 from tempfile import gettempdir
 from shutil import rmtree
-from grass_session import Session
-from grass.pygrass.modules.shortcuts import raster as graster
-from grass.script import core as grass
-import grass.script.array as garray
 from . import util
 from .spatial import *
+
+try:
+    from grass_session import Session
+    from grass.pygrass.modules.shortcuts import raster as graster
+    from grass.script import core as grass
+    import grass.script.array as garray
+except (ImportError, RuntimeError):
+    print("No grass functions available")
 
 
 # Global temporary directory

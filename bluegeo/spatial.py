@@ -2371,14 +2371,14 @@ class Vector(object):
             # Iterate features and insert data
             with self.layer() as inlyr:
                 outLyrDefn = inlyr.GetLayerDefn()
-                for _name, _dtype in zip(name, dtype):
+                for _i, (_name, _dtype) in enumerate(zip(name, dtype)):
                     # Modify the current Vector with the field
                     fieldDefn = ogr.FieldDefn(_name, self.numpy_dtype_to_ogr(_dtype))
                     # Create field
                     inlyr.CreateField(fieldDefn)
                     self.fieldTypes.append((_name, _dtype))
-                    self.fieldPrecision[_name] = fieldDefn.GetPrecision()
-                    self.fieldWidth[_name] = fieldDefn.GetWidth()
+                    self.fieldPrecision[_name] = self._get_precision(_dtype)
+                    self.fieldWidth[_name] = self._get_width(_dtype, data[_i] if data is not None else [' ' * 254])
                     self.fieldCount += 1
                 if data is not None:
                     # Broadcast data to the necessary shape
@@ -2495,6 +2495,22 @@ class Vector(object):
                     outlyr.CreateFeature(outFeat)
                     outFeat.Destroy()
         return Vector(outVect)  # Re-read Vector to ensure meta up to date
+
+    @staticmethod
+    def _get_precision(dtype):
+        if 'float' in dtype.lower():
+            return 6
+        else:
+            return 0
+
+    @staticmethod
+    def _get_width(dtype, data):
+        if 'float' in dtype.lower():
+            return 15
+        elif 'int' in dtype.lower():
+            return 9
+        else:
+            return max([len(e) for e in data])
 
     @staticmethod
     def check_fields(fields):
@@ -3570,18 +3586,18 @@ def vector_stats(polygons, datasets, out_csv):
             v = data.intersect(zones)
             for field, _ in data.fieldTypes:
                 f.write('{}\n'.format(','.join(['{}: {}'.format(data.path, field)] +
-                        [getattr(numpy, stat)(v[field]) for stat in stats])))
+                                               [getattr(numpy, stat)(v[field]) for stat in stats])))
 
 
 def force_gdal(input_raster):
-    r=Raster(input_raster)
+    r = Raster(input_raster)
     if r.format == 'HDF5':
-        path=generate_name(r.path, 'copy', 'tif')
+        path = generate_name(r.path, 'copy', 'tif')
         r.save(path)
-        tmp=True
+        tmp = True
     else:
-        path=r.path
-        tmp=False
+        path = r.path
+        tmp = False
     return path, tmp
 
 
@@ -3606,7 +3622,7 @@ def assert_type(data):
 
     if isinstance(data, str):
         # Check if gdal Raster
-        ds=gdal.Open(data)
+        ds = gdal.Open(data)
         if ds is not None:
             return Raster
 
@@ -3619,15 +3635,15 @@ def assert_type(data):
 
         # Check if a Vector
         try:
-            driver=Vector.get_driver_by_path(data)
+            driver = Vector.get_driver_by_path(data)
         except:
             raise_type_error()
         if driver == 'table':
             return Vector
         else:
             # Try to open dataset
-            driver=ogr.GetDriverByName(driver)
-            _data=driver.Open(data)
+            driver = ogr.GetDriverByName(driver)
+            _data = driver.Open(data)
             if _data is None:
                 raise_type_error()
             else:

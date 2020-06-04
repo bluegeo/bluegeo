@@ -60,7 +60,7 @@ def delineate_watersheds(points, dem=None, fd=None, fa=None, as_vector=True, sna
 
     field_names = ['snapped_x', 'snapped_y'] + [f[0] for f in points.fieldTypes]
     field_types = ['float32', 'float32'] + [f[1] for f in points.fieldTypes]
-    field_data = [[p[0] for p in point_coords], [p[1] for p in point_coords]]
+    field_data = [numpy.array([p[0] for p in point_coords]), numpy.array([p[1] for p in point_coords])]
     for f in points.fieldTypes:
         field_data.append(points[f[0]])
 
