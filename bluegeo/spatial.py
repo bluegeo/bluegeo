@@ -2897,61 +2897,6 @@ class Vector(object):
             out_path = os.path.join(os.path.dirname(self.path), base_path)
             Vector(geo, fields=fields, projection=self.projection).save(out_path)
 
-    def fix(self):
-        """
-        Remove null and invalid features to ensure smooth sailing
-        :return: Vector instance
-        """
-        # Create empty output
-        out_vect = self.empty(self.projection, self.fieldTypes, prestr='fixed')
-
-        # Transform geometries and populate output
-        with self.layer() as inlyr:
-            with out_vect.layer() as outlyr:
-                # Output layer definition
-                outLyrDefn = outlyr.GetLayerDefn()
-                # Gather field values to write to output
-                new_fields = self.check_fields(self.fieldTypes)
-                fields = {newField[0]: self.field_to_pyobj(self[oldField[0]], self.fieldWidth[oldField[0]],
-                                                           self.fieldPrecision[oldField[0]])
-                          for oldField, newField in zip(self.fieldTypes, new_fields)}
-
-                # Iterate geometries and populate where valid or not null
-                removed = 0
-                for i in range(self.featureCount):
-                    # Gather and transform geometry
-                    inFeat = inlyr.GetFeature(i)
-                    geo = inFeat.GetGeometryRef()
-
-                    # Do the test
-                    passed = True
-                    try:
-                        _wkb = geo.ExportToWkb()
-                        shp_geo = shpwkb.loads(_wkb)
-                        if any([_wkb is None, not shp_geo.is_valid, shp_geo.is_empty]):
-                            passed = False
-                    except:
-                        passed = False
-
-                    if passed:
-                        out_feature = ogr.Feature(outLyrDefn)
-                        for name, dtype in new_fields:
-                            out_feature.SetField(name, fields[name][i])
-                        out_feature.SetGeometry(ogr.CreateGeometryFromWkb(_wkb))
-
-                        # Add to output layer and clean up
-                        outlyr.CreateFeature(out_feature)
-                        out_feature.Destroy()
-                    else:
-                        removed += 1
-
-        if removed > 0:
-            print("Removed {} of {} geometries".format(removed, self.featureCount))
-        else:
-            print("All geometries passed test")
-
-        return Vector(out_vect)  # Re-read Vector to ensure meta up to date
-
     def __getitem__(self, item):
         """
         :param item: If an index or slice is used, geometry wkb's are returned.f
@@ -3502,6 +3447,98 @@ class Vector(object):
                             os.remove(p)
                         except:
                             pass
+
+
+def clean_vector(vector_dataset):
+    """Attempt to fix or remove invalid geometries
+
+    Arguments:
+        vector_dataset {str} -- Dataset path
+    """
+    feature_cnt = 0
+    fix_cnt = 0
+    null_cnt = 0
+
+    layer_data = []
+    field_data = []
+    projections = []
+
+    # Open the dataset
+    ds = ogr.Open(vector_dataset)
+    if ds is None:
+        raise TypeError('Unable to open {}'.format(vector_dataset))
+
+    # Read the layer, field types, and projection
+    for li in range(ds.GetLayerCount()):
+        out_geos = []
+        fields = []
+
+        layer = ds.GetLayerByIndex(li)
+        layer_defn = layer.GetLayerDefn()
+        try:
+            insr = layer.GetSpatialRef()
+            projection = insr.ExportToWkt()
+            if len(projection) == 0:
+                projection = None
+            else:
+                projection = str(projection)
+        except:
+            projection = None
+        projections.append(projection)
+
+        field_types = []
+        for i in range(layer_defn.GetFieldCount()):
+            field_defn = layer_defn.GetFieldDefn(i)
+            name = field_defn.GetName()
+            dtype = Vector.ogr_dtype_to_numpy(field_defn.GetFieldTypeName(field_defn.GetType()),
+                                      name, field_defn.GetWidth())
+            field_types.append((name, dtype))
+
+        # Iterate features and evaluate geometries
+        for i in range(layer.GetFeatureCount()):
+            feature_cnt += 1
+            feature = layer[i]
+            # Proceed with caution here...
+            try:
+                geo = feature.GetGeometryRef()
+            except:
+                null_cnt += 1
+                continue
+            if geo is None:
+                null_cnt += 1
+                continue
+            try:
+                shp_geo = shpwkb.loads(geo.ExportToWkb())
+            except:
+                null_cnt += 1
+                continue
+            if not shp_geo.is_valid:
+                fix_cnt += 1
+                shp_geo = shp_geo.buffer(0)
+                if not shp_geo.is_valid:
+                    null_cnt += 1
+                    continue
+            out_geos.append(shpwkb.dumps(shp_geo))
+            field_values = []
+            for name, dt in field_types:
+                field_value = feature.GetField(name)
+                if field_value is None and 's' not in dt.lower():
+                    field_value = 0
+                field_values.append(field_value)
+            fields.append(tuple(field_values))
+
+        layer_data.append(out_geos)
+        field_data.append(numpy.array(fields, field_types))
+
+    print('Vector clean report:\n    Evaluated {} features\n    Fixed: {}\n    Removed: {}'.format(
+        feature_cnt, fix_cnt, null_cnt
+        ))
+
+    out_vectors = []
+    for lyr, fields, projection in zip(layer_data, field_data, projections):
+        out_vectors.append(Vector(lyr, fields=fields, projection=projection))
+
+    return out_vectors
 
 
 def merge_vectors(vectors, projection=None):
