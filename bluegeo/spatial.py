@@ -2388,7 +2388,8 @@ class Vector(object):
                         data = numpy.broadcast_to(data, shape)
                     except:
                         raise VectorError("Unable to fit the data to the number of fields/features")
-                    data = [self.field_to_pyobj(a, 19, 11) for a in data]
+                    data = [self.field_to_pyobj(a, self.fieldWidth[name[i]], self.fieldPrecision[name[i]])
+                            for i, a in enumerate(data)]
                     # Iterate features
                     for _name, _data in zip(name, data):
                         for i in range(self.featureCount):
@@ -3176,20 +3177,19 @@ class Vector(object):
         :param a: input numpy array
         :return: list
         """
-        dtype = a.dtype.name
-        if any([dtype[:5].lower() == 'bytes',
-                dtype[0].lower() == 's',
-                width is None,
-                prec is None,
-                'datetime' in dtype.lower()]):
-            dtype = 's'
-            fmt = '{}'
-        elif 'float' in dtype.lower():
-            fmt = '{' + ':{}.{}f'.format(width, prec) + '}'
-        else:
-            fmt = '{:d}'
+        dtype = a.dtype.name.lower()
 
-        return list(map(fmt.format, a))
+        if dtype[:5] == 'bytes':
+            return [s.decode("utf-8") for s in a.tolist()]
+        elif any([dtype[0].lower() == 's',
+                  width is None,
+                  prec is None,
+                  'datetime' in dtype]):
+            return list(map(str, a.tolist()))
+        elif 'float' in dtype:
+            return list(map(float, a.tolist()))
+        else:
+            return list(map(int, a.tolist()))
 
     @staticmethod
     def drivers():
