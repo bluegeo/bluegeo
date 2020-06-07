@@ -3622,21 +3622,22 @@ def vector_stats(polygons, datasets, out_csv, polyfields=[]):
         data = assert_type(data)(data)
 
         for idx, poly in enumerate(zones[:]):
+            zone = Vector(poly, projection=zones.projection)
             if isinstance(data, Raster):
-                r = data.clip(zones)
+                r = data.clip(zone)
                 a = numpy.ma.masked_equal(r[:], r.nodata)
                 with open(out_csv, 'a') as f:
                     f.write('{}\n'.format(','.join([data.path] + [getattr(numpy, stat)(a) for stat in stats])))
             else:
-                v = data.intersect(zones)
-                for field, _ in data.fieldTypes:
+                v = zone.intersect(data)
+                for field, _ in v.fieldTypes:
                     field_data = v[field]
                     try:
                         field_data = field_data.astype('float64')
                     except ValueError:
                         continue
 
-                    field_data = field_data[~np.isnan(field_data) & ~np.isinf(field)data)]
+                    field_data = field_data[~np.isnan(field_data) & ~np.isinf(field_data)]
 
                     if field_data.size == 0:
                         continue
