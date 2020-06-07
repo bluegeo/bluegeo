@@ -3644,7 +3644,7 @@ def vector_stats(polygons, datasets, out_csv, polyfields=[]):
 
                     f.write('{}: {},{},{}\n'.format(
                         data.path, field,
-                        ','.join([str(poly_data[i][idx]) for i in range(len(polyfields))),
+                        ','.join([str(poly_data[i][idx]) for i in range(len(polyfields))]),
                         ','.join([str(getattr(numpy, stat)(field_data)) for stat in stats]))
                         )
 
