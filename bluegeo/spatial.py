@@ -3491,7 +3491,7 @@ def clean_vector(vector_dataset):
             field_defn = layer_defn.GetFieldDefn(i)
             name = field_defn.GetName()
             dtype = Vector.ogr_dtype_to_numpy(field_defn.GetFieldTypeName(field_defn.GetType()),
-                                      name, field_defn.GetWidth())
+                                              name, field_defn.GetWidth())
             field_types.append((name, dtype))
 
         # Iterate features and evaluate geometries
@@ -3596,34 +3596,53 @@ def merge_vectors(vectors, projection=None):
     return output
 
 
-def vector_stats(polygons, datasets, out_csv):
+def vector_stats(polygons, datasets, out_csv, polyfields=[]):
     """
     Peform summary statistics on a list of datasets within specified polygons
 
     Arguments:
         polygons {Vector} -- Vector Polygon dataset
         datasets {iterable} -- Iterable of Rasters and Vectors
+        out_csv {str} -- Path for an output .csv file
+        polyfields {list} -- Iterable of fields from the polygon data to include in the output
     """
     zones = Vector(polygons)
     if zones.geometryType != 'Polygon':
         raise VectorError('Only Polygon geometries are supported for vector stats')
 
+    poly_data = [zones[field] for field in polyfields]
+
     stats = ['min', 'max', 'mean', 'sum', 'std', 'var']
 
     with open(out_csv, 'w') as f:
-        f.write('Dataset,{}\n'.format(','.join(stats)))
+        f.write('Dataset,{},{}\n'.format(','.join(polyfields), ','.join(stats)))
+
     for data in datasets:
+        print('Adding {}'.format(data))
         data = assert_type(data)(data)
-        if isinstance(data, Raster):
-            r = data.clip(zones)
-            a = numpy.ma.masked_equal(r[:], r.nodata)
-            with open(out_csv, 'a') as f:
-                f.write('{}\n'.format(','.join([data.path] + [getattr(numpy, stat)(a) for stat in stats])))
-        else:
-            v = data.intersect(zones)
-            for field, _ in data.fieldTypes:
-                f.write('{}\n'.format(','.join(['{}: {}'.format(data.path, field)] +
-                                               [getattr(numpy, stat)(v[field]) for stat in stats])))
+
+        for idx, poly in enumerate(zones[:]):
+            if isinstance(data, Raster):
+                r = data.clip(zones)
+                a = numpy.ma.masked_equal(r[:], r.nodata)
+                with open(out_csv, 'a') as f:
+                    f.write('{}\n'.format(','.join([data.path] + [getattr(numpy, stat)(a) for stat in stats])))
+            else:
+                v = data.intersect(zones)
+                for field, _ in data.fieldTypes:
+                    field_data = v[field]
+                    try:
+                        field_data = field_data.astype('float64')
+                    except ValueError:
+                        continue
+                    if field_data.size == 0:
+                        continue
+
+                    f.write('{}: {},{},{}\n'.format(
+                        data.path, field,
+                        ','.join([poly_data[i][idx] for i in range(len(polyfields))),
+                        ','.join([getattr(numpy, stat)(field_data) for stat in stats]))
+                        )
 
 
 def force_gdal(input_raster):
