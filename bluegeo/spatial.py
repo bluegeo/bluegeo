@@ -3635,13 +3635,16 @@ def vector_stats(polygons, datasets, out_csv, polyfields=[]):
                         field_data = field_data.astype('float64')
                     except ValueError:
                         continue
+
+                    field_data = field_data[~np.isnan(field_data) & ~np.isinf(field)data)]
+
                     if field_data.size == 0:
                         continue
 
                     f.write('{}: {},{},{}\n'.format(
                         data.path, field,
-                        ','.join([poly_data[i][idx] for i in range(len(polyfields))),
-                        ','.join([getattr(numpy, stat)(field_data) for stat in stats]))
+                        ','.join([str(poly_data[i][idx]) for i in range(len(polyfields))),
+                        ','.join([str(getattr(numpy, stat)(field_data)) for stat in stats]))
                         )
 
 
