@@ -2555,6 +2555,21 @@ class Vector(object):
 
         return numpy.array(vertices)
 
+    def add_geo_field(self):
+        """
+        Add a field called "geometry" with length or area
+        """
+        if self.geometryType == 'Point':
+            raise ValueError('Only line and polygon geometries can be quantified')
+
+        # Calculate geometry
+        if 'Line' in self.geometryType:
+            data = [ogr.CreateGeometryFromWkb(geo).Length() for geo in self[:]]
+        else:
+            data = [ogr.CreateGeometryFromWkb(geo).Area() for geo in self[:]]
+        # Add to self
+        self.add_fields(['geometry'], ['float64'], data=[data])
+
     def round(self, precision=2):
         """Round vertices of features to a specified precision
 
