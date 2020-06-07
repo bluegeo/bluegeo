@@ -3637,7 +3637,7 @@ def vector_stats(polygons, datasets, out_csv, polyfields=[]):
         data = assert_type(data)(data)
 
         for idx, poly in enumerate(zones[:]):
-            zone = Vector(poly, projection=zones.projection)
+            zone = Vector([poly], projection=zones.projection)
             if isinstance(data, Raster):
                 r = data.clip(zone)
                 a = numpy.ma.masked_equal(r[:], r.nodata)
