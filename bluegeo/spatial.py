@@ -3637,7 +3637,7 @@ def vector_stats(polygons, datasets, out_csv, polyfields=[]):
                     except ValueError:
                         continue
 
-                    field_data = field_data[~np.isnan(field_data) & ~np.isinf(field_data)]
+                    field_data = field_data[~numpy.isnan(field_data) & ~numpy.isinf(field_data)]
 
                     if field_data.size == 0:
                         continue
