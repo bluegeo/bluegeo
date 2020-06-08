@@ -3636,7 +3636,7 @@ def vector_stats(polygons, datasets, out_csv, polyfields=[]):
     zone_data = zones[:]
 
     def perform_stats(args):
-        data, out_csv, zone_data, projection, stats
+        data, out_csv, zone_data, projection, stats = args
         print('Adding {}'.format(data))
         data = assert_type(data)(data)
 
