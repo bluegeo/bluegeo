@@ -3616,7 +3616,7 @@ def perform_stats(args):
     """
     Async task for vector_stats
     """
-    data, out_csv, zone_data, projection, stats = args
+    data, out_csv, zone_data, polyfields, poly_data, projection, stats = args
     print('Adding {}'.format(data))
     data = assert_type(data)(data)
 
@@ -3675,7 +3675,9 @@ def vector_stats(polygons, datasets, out_csv, polyfields=[]):
     p = Pool(cpu_count())
     try:
         _ = list(p.imap_unordered(
-            perform_stats, [(data, out_csv, zone_data, zones.projection, stats) for data in datasets]))
+            perform_stats, [
+                (data, out_csv, zone_data, polyfields, poly_data, zones.projection, stats) for data in datasets
+                ]))
     except Exception as e:
         import sys
         p.close()
