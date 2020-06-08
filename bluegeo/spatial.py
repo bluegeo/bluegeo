@@ -3612,6 +3612,43 @@ def merge_vectors(vectors, projection=None):
     return output
 
 
+def perform_stats(args):
+    """
+    Async task for vector_stats
+    """
+    data, out_csv, zone_data, projection, stats = args
+    print('Adding {}'.format(data))
+    data = assert_type(data)(data)
+
+    for idx, poly in enumerate(zone_data):
+        zone = Vector([poly], projection=projection)
+        if isinstance(data, Raster):
+            r = data.clip(zone)
+            a = numpy.ma.masked_equal(r[:], r.nodata)
+            with open(out_csv, 'a') as f:
+                f.write('{}\n'.format(','.join([data.path] + [getattr(numpy, stat)(a) for stat in stats])))
+        else:
+            v = zone.intersect(data)
+            for field, _ in v.fieldTypes:
+                field_data = v[field]
+                try:
+                    field_data = field_data.astype('float64')
+                except ValueError:
+                    continue
+
+                field_data = field_data[~numpy.isnan(field_data) & ~numpy.isinf(field_data)]
+
+                if field_data.size == 0:
+                    continue
+
+                with open(out_csv, 'a') as f:
+                    f.write('{}: {},{},{}\n'.format(
+                        data.path, field,
+                        ','.join([str(poly_data[i][idx]) for i in range(len(polyfields))]),
+                        ','.join([str(getattr(numpy, stat)(field_data)) for stat in stats]))
+                        )
+
+
 def vector_stats(polygons, datasets, out_csv, polyfields=[]):
     """
     Peform summary statistics on a list of datasets within specified polygons
@@ -3634,39 +3671,6 @@ def vector_stats(polygons, datasets, out_csv, polyfields=[]):
         f.write('Dataset,{},{}\n'.format(','.join(polyfields), ','.join(stats)))
 
     zone_data = zones[:]
-
-    def perform_stats(args):
-        data, out_csv, zone_data, projection, stats = args
-        print('Adding {}'.format(data))
-        data = assert_type(data)(data)
-
-        for idx, poly in enumerate(zone_data):
-            zone = Vector([poly], projection=projection)
-            if isinstance(data, Raster):
-                r = data.clip(zone)
-                a = numpy.ma.masked_equal(r[:], r.nodata)
-                with open(out_csv, 'a') as f:
-                    f.write('{}\n'.format(','.join([data.path] + [getattr(numpy, stat)(a) for stat in stats])))
-            else:
-                v = zone.intersect(data)
-                for field, _ in v.fieldTypes:
-                    field_data = v[field]
-                    try:
-                        field_data = field_data.astype('float64')
-                    except ValueError:
-                        continue
-
-                    field_data = field_data[~numpy.isnan(field_data) & ~numpy.isinf(field_data)]
-
-                    if field_data.size == 0:
-                        continue
-
-                    with open(out_csv, 'a') as f:
-                        f.write('{}: {},{},{}\n'.format(
-                            data.path, field,
-                            ','.join([str(poly_data[i][idx]) for i in range(len(polyfields))]),
-                            ','.join([str(getattr(numpy, stat)(field_data)) for stat in stats]))
-                            )
 
     p = Pool(cpu_count())
     try:
