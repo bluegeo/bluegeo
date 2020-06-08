@@ -4,6 +4,7 @@ Custom vector analysis library
 import os
 import shutil
 import numbers
+from subprocess import Pool, cpu_count
 from contextlib import contextmanager
 import numpy
 from osgeo import gdal, ogr, osr, gdalconst
@@ -3632,12 +3633,15 @@ def vector_stats(polygons, datasets, out_csv, polyfields=[]):
     with open(out_csv, 'w') as f:
         f.write('Dataset,{},{}\n'.format(','.join(polyfields), ','.join(stats)))
 
-    for data in datasets:
+    zone_data = zones[:]
+
+    def perform_stats(args):
+        data, out_csv, zone_data, projection, stats
         print('Adding {}'.format(data))
         data = assert_type(data)(data)
 
-        for idx, poly in enumerate(zones[:]):
-            zone = Vector([poly], projection=zones.projection)
+        for idx, poly in enumerate(zone_data):
+            zone = Vector([poly], projection=projection)
             if isinstance(data, Raster):
                 r = data.clip(zone)
                 a = numpy.ma.masked_equal(r[:], r.nodata)
@@ -3663,6 +3667,19 @@ def vector_stats(polygons, datasets, out_csv, polyfields=[]):
                             ','.join([str(poly_data[i][idx]) for i in range(len(polyfields))]),
                             ','.join([str(getattr(numpy, stat)(field_data)) for stat in stats]))
                             )
+
+    p = Pool(cpu_count())
+    try:
+        _ = list(p.imap_unordered(
+            perform_stats, [(data, out_csv, zone_data, zones.projection, stats) for data in datasets]))
+    except Exception as e:
+        import sys
+        p.close()
+        p.join()
+        raise e.with_traceback(sys.exc_info()[2])
+    else:
+        p.close()
+        p.join()
 
 
 def force_gdal(input_raster):
