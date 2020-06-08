@@ -3657,11 +3657,12 @@ def vector_stats(polygons, datasets, out_csv, polyfields=[]):
                     if field_data.size == 0:
                         continue
 
-                    f.write('{}: {},{},{}\n'.format(
-                        data.path, field,
-                        ','.join([str(poly_data[i][idx]) for i in range(len(polyfields))]),
-                        ','.join([str(getattr(numpy, stat)(field_data)) for stat in stats]))
-                        )
+                    with open(out_csv, 'a') as f:
+                        f.write('{}: {},{},{}\n'.format(
+                            data.path, field,
+                            ','.join([str(poly_data[i][idx]) for i in range(len(polyfields))]),
+                            ','.join([str(getattr(numpy, stat)(field_data)) for stat in stats]))
+                            )
 
 
 def force_gdal(input_raster):
