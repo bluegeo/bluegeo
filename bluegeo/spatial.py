@@ -4,7 +4,7 @@ Custom vector analysis library
 import os
 import shutil
 import numbers
-from subprocess import Pool, cpu_count
+from muiltiprocessing import Pool, cpu_count
 from contextlib import contextmanager
 import numpy
 from osgeo import gdal, ogr, osr, gdalconst
