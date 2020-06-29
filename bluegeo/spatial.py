@@ -3597,9 +3597,7 @@ def merge_vectors(vectors, projection=None):
     field_data = []
     for f in field_keys:
         dtype = numpy.array([i for i in fields[f] if i is not None]).dtype.name
-        if 'bytes' in dtype:
-            dtype = 'bytes'
-        elif 'str' in dtype:
+        if 'bytes' in dtype or 'str' in dtype:
             dtype = 'str'
         if 'float' in dtype or 'int' in dtype:
             replace_val = 0
@@ -3671,13 +3669,14 @@ def vector_stats(polygons, datasets, out_csv, polyfields=[]):
         f.write('Dataset,{},{}\n'.format(','.join(polyfields), ','.join(stats)))
 
     zone_data = zones[:]
+    print('Performing stats on {} datasets'.format(len(datasets)))
 
     p = Pool(cpu_count())
     try:
-        _ = list(p.imap_unordered(
+        _ = p.imap_unordered(
             perform_stats, [
                 (data, out_csv, zone_data, polyfields, poly_data, zones.projection, stats) for data in datasets
-                ]))
+                ])
     except Exception as e:
         import sys
         p.close()
