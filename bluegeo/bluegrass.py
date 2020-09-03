@@ -9,7 +9,7 @@ from . import util
 from .spatial import *
 
 try:
-    from grass_session import Session
+    from bluegeo.grass_session import Session
     from grass.pygrass.modules.shortcuts import raster as graster
     from grass.script import core as grass
     import grass.script.array as garray

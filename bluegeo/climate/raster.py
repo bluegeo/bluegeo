@@ -294,7 +294,15 @@ def bilinear(in_raster, spec_raster, output=None):
             'resampleAlg': 'bilinear'
             }
 
-        ds = gdal.Warp(out_path, in_raster, **warp_options)
+        safety = 0
+        while True:
+            if safety == 5:
+                raise SyntaxError('Unable to warp dataset')
+            try:
+                ds = gdal.Warp(out_path, in_raster, **warp_options)
+                break
+            except SystemError:
+                safety += 1
 
     if output is None:
         a = ds.ReadAsArray()

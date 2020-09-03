@@ -4,6 +4,9 @@ Hydrologic analysis library
 Blue Geosimulation, 2018
 '''
 import os
+import pickle
+from multiprocessing import cpu_count
+from multiprocessing.dummy import Pool
 from tempfile import gettempdir, _get_candidate_names
 from shutil import rmtree
 from .terrain import *
@@ -136,7 +139,6 @@ def delineate_watershed(fd, i, j):
 
     stack = [(i, j)]
     watershed = numpy.zeros(fd.shape, numpy.bool_)
-    it = 0
     while len(stack) > 0:
         try:
             i, j = stack[0]
@@ -154,9 +156,237 @@ def delineate_watershed(fd, i, j):
     return watershed
 
 
+class WatershedIndex(object):
+    """
+    Build and cache an index of contributing area for every location on a stream grid
+
+    To initiate with an index:
+    ```
+    import bluegeo as bg;wi = bg.water.WatershedIndex('fd.tif', 'fa.tif');wi.create_index();fa = bg.Raster('fa.tif');fa = (fa != fa.nodata).astype('int8');r = wi.calculate_stats(fa);r.save('test.tif')
+    ```
+    """
+
+    def __init__(self, fd, fa, minimum_area=1E6):
+        """Initiate datasets used to build the index
+
+        Args:
+            fd (str or Raster): Input flow direction (SFD) dataset generated using GRASS r.watershed
+            fa (str or Raster): Input flow accumulation dataset generated using GRASS r.watershed
+            minimum_area (float, optional): Minimum watershed area to constrain streams
+        """
+        self.fd = Raster(fd)
+        self.fa = Raster(fa)
+        if any([self.fd.shape != self.fa.shape,
+                self.fd.top != self.fa.top,
+                self.fd.left != self.fa.left]):
+            raise ValueError('Input flow direction and flow accumulation grids must spatially match')
+
+        self.streams = self.fa >= (minimum_area / (self.fa.csx * self.fa.csy))
+
+    def create_index(self):
+        """
+        Create a spatial index of all contributing grid cells
+
+        The index is carried in the form:
+
+            _watersheds_
+            `contributing_index` holds all watersheds in the first dimension. The second dimensions includes all
+            contributing cells to a point on a stream in the form:
+            `contributing_index = [ stream point 0: [[i1, j1], [i2, j2]...[in, jn]],...stream point n: [[]] ]`
+            where i and j are coordinates of contributing cells.
+
+            _Nesting of watersheds_
+            `nested_index = [ stream point 0: [i1, i2, i3...in],...stream point n: []]`
+            where i is the index of the stream point that falls within the stream point index
+        """
+        contributing_index = []
+        nested_index = []
+        streams = self.streams.array
+        visited = numpy.zeros(streams.shape, 'bool')
+
+        fd = self.fd.array
+        fa = self.fa.array
+
+        def next_fa():
+            candidates = numpy.where(streams & ~visited)
+            try:
+                i = numpy.argmax(fa[candidates])
+                return candidates[0][i], candidates[1][i]
+            except ValueError:
+                return
+
+        @jit(nopython=True)
+        def delineate(fd, streams, i, j, visited):
+            directions = [[7, 6, 5],
+                          [8, 0, 4],
+                          [1, 2, 3]]
+
+            ci = [[(i, j)]]  # Elements contributing to each coordinate
+            ci_e = [0]  # Used to track elements still requiring evaluation of neighbours
+            ni = [[-1]]  # Contributing indexes to ni. Use -1 to initiate the list with a type
+
+            cursor = 0
+            while True:
+                # Collect a new element to test
+                if ci_e[cursor] < len(ci[cursor]):
+                    i, j = ci[cursor][ci_e[cursor]]
+                    ci_e[cursor] += 1
+                else:
+                    # Backtrack or break out of the algo
+                    cursor -= 1
+                    if cursor < 0:
+                        break
+                    continue
+
+                # Mark as visited
+                visited[i, j] = True
+
+                # Test the current element at location (i, j)
+                stream_elems = []
+                for row_offset in range(-1, 2):
+                    for col_offset in range(-1, 2):
+                        if visited[i + row_offset, j + col_offset]:
+                            continue
+                        if fd[i + row_offset, j + col_offset] == directions[row_offset + 1][col_offset + 1]:
+                            # The element at this offset contributes to the element being tested
+                            if streams[i + row_offset, j + col_offset]:
+                                # This element comprises a stream - add as a nested element
+                                stream_elems.append((i + row_offset, j + col_offset))
+                            else:
+                                # Add to contributing stack, and the testing queue
+                                ci[cursor].append((i + row_offset, j + col_offset))
+
+                # Add nested locations and propagate past any stream elements
+                this_index = cursor
+                for se in stream_elems:
+                    # Add nested to current
+                    cursor = len(ci_e)
+                    ni[this_index].append(cursor)
+                    # New list item
+                    ci.append([se])
+                    ci_e.append(0)
+                    ni.append([-1])
+
+            return ci, ni
+
+        # Run the alg
+        coord = next_fa()
+        while coord is not None:
+            i, j = coord
+            ci, ni = delineate(fd, streams, i, j, visited)
+
+            # Combine ci and ni into single arrays
+            contributing_index.append(ci)
+            nested_index.append(ni)
+
+            coord = next_fa()
+
+        self.contributing_index = contributing_index
+        self.nested_index = nested_index
+
+    def save(self, path):
+        """Pickle and save the index to a file
+
+        Args:
+            path (path): Path to a local file
+        """
+        with open(path, 'wb') as f:
+            pickle.dump([self.contributing_index, self.nested_index], f)
+
+    def load(self, path):
+        """Load a saved watershed index
+
+        Args:
+            path (str): Path to a saved file
+        """
+        with open(path, 'rb') as f:
+            self.contributing_index, self.nested_index = pickle.load(f)
+
+    def calculate_stats(self, dataset, method='sum', output='raster'):
+        """Use a generated index to calculate stats at stream locations
+
+        Args:
+            dataset (str): A path to a raster dataset
+        """
+        if not hasattr(self, 'contributing_index'):
+            raise ValueError('An index must first be created or loaded before running stats')
+
+        r = Raster(dataset)
+        if any([r.shape != self.fa.shape,
+                r.top != self.fa.top,
+                r.left != self.fa.left]):
+            raise ValueError('Input data must spatially match grids used to initialize this instance')
+        data = r.array
+        m = data != r.nodata
+
+        @jit(nopython=True, nogil=True)
+        def summarize(index):
+            ci, ni = index
+            ni_track = [[j for j in i if j != -1] for i in ni]
+
+            res = numpy.zeros(len(ci), numpy.float32)
+
+            cursor = 0
+            tree = [0]
+            while len(tree) > 0:
+                if len(ni_track[cursor]) > 0:
+                    cursor = ni_track[cursor].pop()
+                    tree.append(cursor)
+                else:
+                    # Accumulate
+                    prv_cursor = -1
+                    while True:
+                        for i, j in ci[cursor]:
+                            if m[i, j]:
+                                res[cursor] += data[i, j]
+                        if prv_cursor != -1:
+                            res[cursor] += res[prv_cursor]
+                        prv_cursor = cursor
+                        if len(tree) == 0:
+                            break
+                        cursor = tree.pop()
+                        if len(ni_track[cursor]) > 0:
+                            res[cursor] += res[prv_cursor]
+                            break
+
+            return res
+
+        res = []
+        for i in range(len(self.contributing_index)):
+            res.append(summarize((self.contributing_index[i], self.nested_index[i])).tolist())
+
+        # p = Pool(cpu_count())
+        # res = p.map(
+        #     summarize,
+        #     [(self.contributing_index[i], self.nested_index[i]) for i in range(len(self.contributing_index))]
+        #     )
+        # p.close()
+        # p.join()
+        # res = [_res.tolist() for _res in res]
+
+        if output == 'table':
+            table = []
+            for ws_i, ws in enumerate(self.contributing_index):
+                table += list(zip([coords[0][0] for coords in ws], [coords[0][1] for coords in ws], res[ws_i]))
+            return table
+        elif output == 'raster':
+            r = r.astype('float32')
+            r.nodataValues = [-9999]
+            a = numpy.full(r.shape, r.nodata, 'float32')
+            i, j, values = [], [], []
+            for ws_i, ws in enumerate(self.contributing_index):
+                i += [coords[0][0] for coords in ws]
+                j += [coords[0][1] for coords in ws]
+                values += res[ws_i]
+            a[(i, j)] = values
+            r[:] = a
+            return r
+
+
 def wetness(dem, minimum_area):
     """
     Calculate a wetness index using streams of a minimum contributing area
+
     :param dem: dem (Raster)
     :param minimum_area: area in units^2
     :return: Raster instance
@@ -166,6 +396,8 @@ def wetness(dem, minimum_area):
 
 def convergence(size=(11, 11), fd=None):
     """
+    ! Not functional- was removed from a class and needs work !
+
     Compute the relative convergence of flow vectors (uses directions 1 to
     8, which are derived from flow direction)
 
@@ -287,6 +519,8 @@ def stream_slope(dem, streams, units='degrees'):
 
 def aggradation(stream_slope, slope_thresh=6, stream_slope_thresh=5):
     """
+    ! Not functional- was removed from a class and needs work !
+
     Use the derivative of stream slope to determine regions of
     aggradation to predict alluvium deposition.  The input slope threshold
     is used as a cutoff for region delineation, which the stream slope

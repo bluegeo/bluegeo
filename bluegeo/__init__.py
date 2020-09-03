@@ -6,3 +6,7 @@ from . import bluegrass
 from . import filters
 from . import util
 from . import climate
+try:
+    from . import grass_session
+except:
+    pass

@@ -20,6 +20,13 @@ def is_installed(name):
         return False
 
 
+packages = [
+    'bluegeo',
+    'bluegeo.climate',
+    'bluegeo.grass_session'
+]
+
+
 requires = [
     'networkx',
     'cython',
@@ -31,9 +38,12 @@ requires = [
     'numexpr',
     'shapely',
     'pandas',
-    'numba',
+    'llvmlite==0.32.0',  # Once LLVM 9+ works, remove (installed implicitly with numba)
+    'numba==0.49.1',  # Once LLVM 9+ works, remove version
     'rtree',
-    'grass-session'
+    'gdal',
+    'dask[complete]',
+    # 'grass-session'  Add once PR approved
 ]
 
 setup(name='bluegeo',
@@ -44,10 +54,6 @@ setup(name='bluegeo',
       author='Blue Geosimulation',
       install_requires=requires,
       author_email='info@bluegeo.ca',
-      license='',
-      packages=['bluegeo'],
+      license='MIT',
+      packages=packages,
       zip_safe=False)
-
-print("Installation Complete.  Additional dependencies are required to use certain functionality.  These include:\n"
-      "GDAL (including python-gdal): http://www.gdal.org/\n"
-      "GRASS (including grass-dev): https://grass.osgeo.org/\n")

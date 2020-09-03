@@ -541,7 +541,7 @@ def load_scenarios(paths, index_path, output_dir, top, left, csx, csy):
             col = col[0]
 
             # Write the data
-            template[write_locations] = map(float, [line[col] for line in lines[1:]])
+            template[write_locations] = list(map(float, [line[col] for line in lines[1:]]))
 
             save_array(os.path.join(output_dir, 'scens_{}_{}_{}'.format(
                 scen_type.lower(), name.replace(' ', '_').lower(), param.lower()
