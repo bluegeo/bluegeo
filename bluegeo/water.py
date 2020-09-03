@@ -162,7 +162,7 @@ class WatershedIndex(object):
 
     To initiate with an index:
     ```
-    import bluegeo as bg;wi = bg.water.WatershedIndex('fd.tif', 'fa.tif');wi.create_index();fa = bg.Raster('fa.tif');fa = (fa != fa.nodata).astype('int8');r = wi.calculate_stats(fa);r.save('test.tif')
+    import bluegeo as bg;wi = bg.water.WatershedIndex('fd.tif', 'fa.tif');wi.create_index();r = wi.calculate_stats('basin.tif', method='mean');r.save('test.tif')
     ```
     """
 
@@ -326,6 +326,9 @@ class WatershedIndex(object):
 
             res = numpy.zeros(len(ci), numpy.float32)
 
+            if method == 'mean':
+                modals = numpy.zeros(len(ci), numpy.float32)
+
             cursor = 0
             tree = [0]
             while len(tree) > 0:
@@ -333,21 +336,35 @@ class WatershedIndex(object):
                     cursor = ni_track[cursor].pop()
                     tree.append(cursor)
                 else:
+                    # Pop the last cursor to avoid running it twice
+                    cursor = tree.pop()
                     # Accumulate
                     prv_cursor = -1
                     while True:
                         for i, j in ci[cursor]:
+                            # m and data are from the outer scope
                             if m[i, j]:
                                 res[cursor] += data[i, j]
+                                if method == 'mean':
+                                    modals[cursor] += 1
                         if prv_cursor != -1:
                             res[cursor] += res[prv_cursor]
+                            if method == 'mean':
+                                modals[cursor] += modals[prv_cursor]
                         prv_cursor = cursor
                         if len(tree) == 0:
                             break
                         cursor = tree.pop()
                         if len(ni_track[cursor]) > 0:
+                            # Put the cursor back in the tree
+                            tree.append(cursor)
                             res[cursor] += res[prv_cursor]
+                            if method == 'mean':
+                                modals[cursor] += modals[prv_cursor]
                             break
+
+            if method == 'mean':
+                res /= modals
 
             return res
 
