@@ -162,7 +162,16 @@ class WatershedIndex(object):
 
     To initiate with an index:
     ```
-    import bluegeo as bg;wi = bg.water.WatershedIndex('fd.tif', 'fa.tif');wi.create_index();r = wi.calculate_stats('basin.tif', method='mean');r.save('test.tif')
+    wi = WatershedIndex('fd.tif', 'fa.tif')
+    wi.create_index()
+    wi.save('filename.dmp')
+    ```
+
+    To run stats on a dataset:
+    ```
+    wi = WatershedIndex('fd.tif', 'fa.tif')
+    wi.load('filename.dmp')
+    rast = wi.calculate_stats('a_dataset.tif', method='mean')
     ```
     """
 
@@ -368,18 +377,14 @@ class WatershedIndex(object):
 
             return res
 
-        res = []
-        for i in range(len(self.contributing_index)):
-            res.append(summarize((self.contributing_index[i], self.nested_index[i])).tolist())
-
-        # p = Pool(cpu_count())
-        # res = p.map(
-        #     summarize,
-        #     [(self.contributing_index[i], self.nested_index[i]) for i in range(len(self.contributing_index))]
-        #     )
-        # p.close()
-        # p.join()
-        # res = [_res.tolist() for _res in res]
+        p = Pool(cpu_count())
+        res = p.map(
+            summarize,
+            [(self.contributing_index[i], self.nested_index[i]) for i in range(len(self.contributing_index))]
+            )
+        p.close()
+        p.join()
+        res = [_res.tolist() for _res in res]
 
         if output == 'table':
             table = []
