@@ -175,14 +175,12 @@ class WatershedIndex(object):
     To initiate with an index:
     ```
     wi = WatershedIndex('fd.tif', 'fa.tif')
-    wi.create_index()
-    wi.save('filename.dmp')
+    wi.create_index('path_to_directory')
     ```
 
     To run stats on a dataset:
     ```
-    wi = WatershedIndex('fd.tif', 'fa.tif')
-    wi.load('filename.dmp')
+    wi = WatershedIndex('fd.tif', 'fa.tif', 'path_to_directory')
     rast = wi.calculate_stats('a_dataset.tif', method='mean')
     ```
     """
@@ -418,7 +416,7 @@ class WatershedIndex(object):
             return [c[0] for c in ci], res
 
         p = Pool(cpu_count())
-        res = p.map(lambda path: summarize(self.load_gzip(path)), list(self.watersheds))
+        res = p.map(lambda path: summarize(self.load_gzip(path)), self.watersheds())
         p.close()
         p.join()
 
