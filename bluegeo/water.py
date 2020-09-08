@@ -420,7 +420,7 @@ class WatershedIndex(object):
             return summarize((ci, ni))
 
         p = dummyPool(cpu_count())
-        res = p.map(run_ws, self.watersheds())
+        res = p.imap_unordered(run_ws, self.watersheds())
         p.close()
         p.join()
 
