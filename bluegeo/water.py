@@ -5,6 +5,7 @@ Blue Geosimulation, 2018
 '''
 import os
 import pickle
+import gzip
 from multiprocessing import cpu_count
 from multiprocessing.dummy import Pool
 from tempfile import gettempdir, _get_candidate_names
@@ -186,12 +187,13 @@ class WatershedIndex(object):
     ```
     """
 
-    def __init__(self, fd, fa, minimum_area=1E6):
+    def __init__(self, fd, fa, path=None, minimum_area=1E6):
         """Initiate datasets used to build the index
 
         Args:
             fd (str or Raster): Input flow direction (SFD) dataset generated using GRASS r.watershed
             fa (str or Raster): Input flow accumulation dataset generated using GRASS r.watershed
+            path: Path to previously created index
             minimum_area (float, optional): Minimum watershed area to constrain streams
         """
         self.fd = Raster(fd)
@@ -203,25 +205,74 @@ class WatershedIndex(object):
                 'Input flow direction and flow accumulation grids must spatially match')
 
         self.streams = self.fa >= (minimum_area / (self.fa.csx * self.fa.csy))
+        self.index_path = path
 
-    def create_index(self):
+    @staticmethod
+    def dump_gzip(path, obj):
+        """gzip an object and dump to a path
+
+        Args:
+            path (str): Path of the output file
+            obj (any): Pickleable object
+        """
+        with gzip.GzipFile(path, 'w') as f:
+            pickle.dump(obj, f)
+
+    @staticmethod
+    def load_gzip(path):
+        """Load a dumped gzipped file
+
+        Args:
+            path (str): Path of the gzipped and dumped file
+        """
+        with gzip.GzipFile(path) as f:
+            obj = pickle.load(f)
+
+        return obj
+
+    def save(self, ci, ni):
+        nums = [int(p.replace('.gz', '')) for p in os.listdir(self.index_path) if 'gz' in p]
+        if len(nums) > 0:
+            num = max(nums) + 1
+        else:
+            num = 0
+            
+        self.dump_gzip(os.path.join(self.index_path, '{}.gz'.format(num)), [ci, ni])
+
+    def watersheds(self):
+        """Iterate watershed contributing index and nested index in a saved index path
+
+        Yields:
+            [tuple]: contributing index and nested index, respectively
+        """
+        if self.index_path is None:
+            raise ValueError('No index file specified')
+
+        nums = sorted([int(p.replace('.gz', '')) for p in os.listdir(self.index_path) if 'gz' in p])
+        for num in nums:
+            yield os.path.join(self.index_path, '{}.gz'.format(num))
+
+    def create_index(self, path):
         """
         Create a spatial index of all contributing grid cells
 
-        The index is carried in the form:
+        All watersheds are stored as gzipped and pickled objects, which include:
 
             _watersheds_
-            `contributing_index` holds all watersheds in the first dimension. The second dimensions includes all
-            contributing cells to a point on a stream in the form:
+            Lists of contributing cells to a point on a stream in the form:
             `contributing_index = [ stream point 0: [[i1, j1], [i2, j2]...[in, jn]],...stream point n: [[]] ]`
             where i and j are coordinates of contributing cells.
 
             _Nesting of watersheds_
+            A list of the watershed nesting hierarchy in the form:
             `nested_index = [ stream point 0: [i1, i2, i3...in],...stream point n: []]`
             where i is the index of the stream point that falls within the stream point index
         """
-        contributing_index = []
-        nested_index = []
+        if os.path.isdir(path):
+            raise NameError('The chosen file path "{}" already exists'.format(path))
+        os.mkdir(path)
+        self.index_path = path
+
         streams = self.streams.array
         visited = numpy.zeros(streams.shape, 'bool')
 
@@ -299,33 +350,8 @@ class WatershedIndex(object):
         while coord is not None:
             i, j = coord
             ci, ni = delineate(fd, streams, i, j, visited)
-
-            # Combine ci and ni into single arrays
-            contributing_index.append(ci)
-            nested_index.append(ni)
-
+            self.save(ci, ni)
             coord = next_fa()
-
-        self.contributing_index = contributing_index
-        self.nested_index = nested_index
-
-    def save(self, path):
-        """Pickle and save the index to a file
-
-        Args:
-            path (path): Path to a local file
-        """
-        with open(path, 'wb') as f:
-            pickle.dump([self.contributing_index, self.nested_index], f)
-
-    def load(self, path):
-        """Load a saved watershed index
-
-        Args:
-            path (str): Path to a saved file
-        """
-        with open(path, 'rb') as f:
-            self.contributing_index, self.nested_index = pickle.load(f)
 
     def calculate_stats(self, dataset, method='sum', output='raster'):
         """Use a generated index to calculate stats at stream locations
@@ -333,10 +359,6 @@ class WatershedIndex(object):
         Args:
             dataset (str): A path to a raster dataset
         """
-        if not hasattr(self, 'contributing_index'):
-            raise ValueError(
-                'An index must first be created or loaded before running stats')
-
         r = Raster(dataset)
         if any([r.shape != self.fa.shape,
                 r.top != self.fa.top,
@@ -393,30 +415,32 @@ class WatershedIndex(object):
             if method == 'mean':
                 res /= modals
 
-            return res
+            return [c[0] for c in ci], res
 
-        res = []
-        for i in range(len(self.contributing_index)):
-            res.append(summarize((self.contributing_index[i], self.nested_index[i])).tolist())
+        p = Pool(cpu_count())
+        res = p.map(lambda path: summarize(self.load_gzip(path)), list(self.watersheds))
+        p.close()
+        p.join()
 
         if output == 'table':
             table = []
-            for ws_i, ws in enumerate(self.contributing_index):
+            for coords, data in res:
                 y, x = indices_to_coords(
-                    ([coords[0][0] for coords in ws], [coords[0][1] for coords in ws]),
+                    ([_i for _i, _j in coords], [_j for _i, _j in coords]),
                     self.fa.top, self.fa.left, self.fa.csx, self.fa.csy
                 )
-                table += list(zip(x, y, res[ws_i]))
+                table += list(zip(x, y, data.tolist()))
             return table
+
         elif output == 'raster':
             r = r.astype('float32')
             r.nodataValues = [-9999]
             a = numpy.full(r.shape, r.nodata, 'float32')
             i, j, values = [], [], []
-            for ws_i, ws in enumerate(self.contributing_index):
-                i += [coords[0][0] for coords in ws]
-                j += [coords[0][1] for coords in ws]
-                values += res[ws_i]
+            for coords, data in res:
+                i += [_i for _i, _j in coords]
+                j += [_j for _i, _j in coords]
+                values += data.tolist()
             a[(i, j)] = values
             r[:] = a
             return r
