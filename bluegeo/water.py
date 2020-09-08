@@ -7,7 +7,7 @@ import os
 import pickle
 import gzip
 from multiprocessing import cpu_count
-from multiprocessing.dummy import Pool as dummyPool
+from multiprocessing import Pool
 from tempfile import gettempdir, _get_candidate_names
 from shutil import rmtree
 from .terrain import *
@@ -366,61 +366,8 @@ class WatershedIndex(object):
         data = r.array
         m = (data != r.nodata) & ~numpy.isnan(data) & ~numpy.isinf(data)
 
-        @jit(nopython=True, nogil=True)
-        def summarize(index):
-            ci, ni = index
-            ni_track = [[j for j in i if j != -1] for i in ni]
-
-            res = numpy.zeros(len(ci), numpy.float32)
-
-            if method == 'mean':
-                modals = numpy.zeros(len(ci), numpy.float32)
-
-            cursor = 0
-            tree = [0]
-            while len(tree) > 0:
-                if len(ni_track[cursor]) > 0:
-                    cursor = ni_track[cursor].pop()
-                    tree.append(cursor)
-                else:
-                    # Pop the last cursor to avoid running it twice
-                    cursor = tree.pop()
-                    # Accumulate
-                    prv_cursor = -1
-                    while True:
-                        for i, j in ci[cursor]:
-                            # m and data are from the outer scope
-                            if m[i, j]:
-                                res[cursor] += data[i, j]
-                                if method == 'mean':
-                                    modals[cursor] += 1
-                        if prv_cursor != -1:
-                            res[cursor] += res[prv_cursor]
-                            if method == 'mean':
-                                modals[cursor] += modals[prv_cursor]
-                        prv_cursor = cursor
-                        if len(tree) == 0:
-                            break
-                        cursor = tree.pop()
-                        if len(ni_track[cursor]) > 0:
-                            # Put the cursor back in the tree
-                            tree.append(cursor)
-                            res[cursor] += res[prv_cursor]
-                            if method == 'mean':
-                                modals[cursor] += modals[prv_cursor]
-                            break
-
-            if method == 'mean':
-                res /= modals
-
-            return [c[0] for c in ci], res
-
-        def run_ws(path):
-            ci, ni = self.load_gzip(path)
-            return summarize((ci, ni))
-
-        p = dummyPool(cpu_count())
-        res = p.imap_unordered(run_ws, self.watersheds())
+        p = Pool(cpu_count())
+        res = p.imap_unordered(wi_stats_task, [(path, method, m, data) for path in self.watersheds()])
         p.close()
         p.join()
 
@@ -446,6 +393,64 @@ class WatershedIndex(object):
             a[(i, j)] = values
             r[:] = a
             return r
+
+
+@jit(nopython=True, nogil=True)
+def wi_summarize(index):
+    m, data, method, ci, ni = index
+    ni_track = [[j for j in i if j != -1] for i in ni]
+
+    res = numpy.zeros(len(ci), numpy.float32)
+
+    if method == 'mean':
+        modals = numpy.zeros(len(ci), numpy.float32)
+
+    cursor = 0
+    tree = [0]
+    while len(tree) > 0:
+        if len(ni_track[cursor]) > 0:
+            cursor = ni_track[cursor].pop()
+            tree.append(cursor)
+        else:
+            # Pop the last cursor to avoid running it twice
+            cursor = tree.pop()
+            # Accumulate
+            prv_cursor = -1
+            while True:
+                for i, j in ci[cursor]:
+                    # m and data are from the outer scope
+                    if m[i, j]:
+                        res[cursor] += data[i, j]
+                        if method == 'mean':
+                            modals[cursor] += 1
+                if prv_cursor != -1:
+                    res[cursor] += res[prv_cursor]
+                    if method == 'mean':
+                        modals[cursor] += modals[prv_cursor]
+                prv_cursor = cursor
+                if len(tree) == 0:
+                    break
+                cursor = tree.pop()
+                if len(ni_track[cursor]) > 0:
+                    # Put the cursor back in the tree
+                    tree.append(cursor)
+                    res[cursor] += res[prv_cursor]
+                    if method == 'mean':
+                        modals[cursor] += modals[prv_cursor]
+                    break
+
+    if method == 'mean':
+        res /= modals
+
+    return [c[0] for c in ci], res
+
+
+def wi_stats_task(args):
+    path, method, m, data = args
+    with gzip.GzipFile(path) as f:
+        ci, ni = pickle.load(f)
+
+    return wi_summarize((m, data, method, ci, ni))
 
 
 def wetness(dem, minimum_area):
