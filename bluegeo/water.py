@@ -415,8 +415,11 @@ class WatershedIndex(object):
 
             return [c[0] for c in ci], res
 
+        def run_ws(path):
+            return summarize(self.load_gzip(path))
+
         p = Pool(cpu_count())
-        res = p.map(lambda path: summarize(self.load_gzip(path)), self.watersheds())
+        res = p.map(run_ws, self.watersheds())
         p.close()
         p.join()
 
