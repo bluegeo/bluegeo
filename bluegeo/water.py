@@ -7,7 +7,7 @@ import os
 import pickle
 import gzip
 from multiprocessing import cpu_count
-from multiprocessing.dummy import Pool
+from multiprocessing.dummy import Pool as dummyPool
 from tempfile import gettempdir, _get_candidate_names
 from shutil import rmtree
 from .terrain import *
@@ -415,11 +415,8 @@ class WatershedIndex(object):
 
             return [c[0] for c in ci], res
 
-        def run_ws(path):
-            return summarize(self.load_gzip(path))
-
-        p = Pool(cpu_count())
-        res = p.map(run_ws, self.watersheds())
+        p = dummyPool(cpu_count())
+        res = p.map(lambda path: summarize(self.load_gzip(path)), self.watersheds())
         p.close()
         p.join()
 
