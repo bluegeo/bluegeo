@@ -344,7 +344,7 @@ class WatershedIndex(object):
             raise ValueError(
                 'Input data must spatially match grids used to initialize this instance')
         data = r.array
-        m = (data != r.nodata) & ~np.isnan(data) & ~np.isinf(data)
+        m = (data != r.nodata) & ~numpy.isnan(data) & ~numpy.isinf(data)
 
         @jit(nopython=True, nogil=True)
         def summarize(index):
