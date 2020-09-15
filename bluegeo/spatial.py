@@ -412,7 +412,7 @@ class Raster(object):
         else:
             raise RasterError(
                 'Unknown file type, or file type not implemented yet: {}'.format(output_path.split('.')[-1])
-                )
+            )
 
     def build_new_raster(self, path, **kwargs):
         """
@@ -545,6 +545,17 @@ class Raster(object):
         outrast[:] = data
         return outrast
 
+    def fill(self, value):
+        """Fill the underlying raster with a given value
+
+        Args:
+            value (Number): Value to fill the raster with
+        """
+        if self.mode not in ['w', 'r+']:
+            raise RasterError('Raster not open for writing')
+
+        self[:] = value
+
     @property
     def size(self):
         return (float(self.itemsize) * self.shape[0] * self.shape[1] *
@@ -666,7 +677,7 @@ class Raster(object):
             'lanczos': gdalconst.GRA_Lanczos,
             'mean': gdalconst.GRA_Average,
             'mode': gdalconst.GRA_Mode
-            }
+        }
         try:
             return interp_methods[self.interpolationMethod]
         except KeyError:
@@ -773,7 +784,7 @@ class Raster(object):
             'float32': 'Float32',
             'float64': 'Float64',
             'int64': 'Int32'
-            }
+        }
         try:
             return gdal.GetDataTypeByName(datatypes[dtype])
         except KeyError:
@@ -981,7 +992,7 @@ class Raster(object):
             'nodata': self.nodata,
             'interpolationMethod': self.interpolationMethod,
             'useChunks': self.useChunks
-            }
+        }
         outds = Raster(path, mode='w', **kwargs)
         # If a Vector or Raster is specified, use it to create a mask
         if isinstance(clipper, Vector):
@@ -1227,7 +1238,7 @@ class Raster(object):
         if extension not in list(self.gdal_drivers.keys()):
             raise RasterError(
                 'Unknown file type, or file type not implemented yet: {}'.format(output_path.split('.')[-1])
-                )
+            )
         driver = gdal.GetDriverByName(self.gdal_drivers[extension])
         # Only tif currently set up, so these are the hard-coded compression and writing parameters
         if compress:
@@ -1472,7 +1483,7 @@ class Raster(object):
                 a = ds.GetRasterBand(self.band).ReadAsArray(
                     xoff=xoff, yoff=yoff, win_xsize=win_xsize,
                     win_ysize=win_ysize
-                    )
+                )
             ds = None
         else:
             with self.dataset as ds:
@@ -1726,7 +1737,7 @@ class Raster(object):
         methods = {
             'ne': 'numexpr',
             'np': 'numpy'
-            }
+        }
         if os.path.isfile(self.path):
             prestr = ('A happy Raster named %s of house %s\n' %
                       (os.path.basename(self.path), self.format.upper()))
@@ -2031,7 +2042,7 @@ class Vector(object):
                     raise VectorError(
                         'Geometry type {} not understood while creating new Vector data source.  '
                         'Use one of: {}'.format(geotype, ', '.join(geotypes))
-                        )
+                    )
 
                 # Create some attributes so Vector.empty can be called
                 self.geometryType = geotype
@@ -2868,7 +2879,7 @@ class Vector(object):
                                             _geo.type.replace('Multi', '') == out_vect.geometryType.replace('Multi', '')]
                             intersection = getattr(
                                 geometry, 'Multi' + out_vect.geometryType.replace('Multi', '')
-                                )(intersection)
+                            )(intersection)
 
                         # Write output geometry
                         out_feature = ogr.Feature(outLyrDefn)
@@ -3299,148 +3310,38 @@ class Vector(object):
             the field is returned.
         :return: Raster instance
         """
-        # Grab the Raster specs
         r = Raster(template_raster)
-        top, left, nrows, ncols, csx, csy = r.top, r.left, r.shape[0], r.shape[1], r.csx, r.csy
 
-        # Transform self if necessary
-        vector = self.transform(r.projection)
-
-        # Make sure they overlap
-        if not Extent(r).intersects(Extent(vector)):
-            return r.full(r.nodata)
-
-        # Collect a mask vector from the raster and trim by half of the smallest cell size.
-        #   This will ensure polygons that intersect the raster boundary will retain vertices at the edges
-        extent = shpwkb.loads(r.extent_to_vector()[0][0]).buffer(min(r.csx, r.csy) / -2.)
-        extent = ogr.CreateGeometryFromWkb(shpwkb.dumps(extent))
-
-        # Grab the data type from the input field
-        return_map = False
         if attribute_field is not None:
-            try:
-                dtype = [field[1] for field in vector.fieldTypes if field[0] == attribute_field][0]
-            except IndexError:
-                raise VectorError('Cannot find the field {} during rasterize'.format(attribute_field))
-            # If dtype is a string, try to cast the field into a float, else enumerate
-            write_data = vector[attribute_field]
-            if 's' in dtype.lower():
-                try:
-                    write_data = numpy.float32(write_data)
-                except:
-                    return_map = True
-                    unique_values, indices = numpy.unique(write_data, return_inverse=True)
-                    values = numpy.arange(1, unique_values.size + 1)
-                    write_data = values[indices]
-                    value_map = dict(list(zip(values, unique_values)))
-                    dtype = 'uint32'
-
-            nodata = numpy.array(r.nodata).astype(dtype)
+            burn_values = [attribute_field]
+            dtype = self[attribute_field].dtype
+            if "s" in dtype.name.lower():
+                dtype = 'float32'
+            nodata = r.nodata
         else:
+            burn_values = [1]
             nodata = 0
             dtype = 'bool'
-            write_data = numpy.ones(shape=vector.featureCount)
 
-        # Allocate output array and Raster for writing Raster values
-        outarray = numpy.full(r.shape, nodata, dtype)
+        path = generate_name(self.path, 'rasterize', 'tif')
+        r = r.astype(dtype)
+        r.nodataValues = [nodata]
+        r.fill(r.nodata)
+        r.save(path)
 
-        outrast = r.astype(dtype)
-        outrast.nodataValues = [nodata]
+        with self.layer() as lyr:
+            with Raster(path, mode='r+').dataset as ds:
+                try:
+                    gdal.RasterizeLayer(ds, [1], lyr, None, None, burn_values, ['ALL_TOUCHED=TRUE'])
+                except TypeError:
+                    raise TypeError('The input field may not be used- raster values must be numeric')
+                ds.FlushCache()
 
-        def get_next(geo, vertices, hole, geom_type):
-            """Recursive function to return lists of vertices in geometries"""
-            count = geo.GetGeometryCount()
-            if count > 0:
-                for i in range(count):
-                    _geo = geo.GetGeometryRef(i)
-                    next_is_zero = _geo.GetGeometryCount() == 0
-                    if i > 0 and 'Polygon' in geom_type and next_is_zero:
-                        hole = True
-                    get_next(_geo, vertices, hole, geom_type)
-            else:
-                vertices.append(([(geo.GetX(i), geo.GetY(i)) for i in range(geo.GetPointCount())],
-                                 hole))  # Tuple in the form ([(x1, y1),...(xn, yn)], hole or not)
-
-        def _rasterize(vertices, geom_type):
-            """Rasterize a list of vertices within the containing envelope"""
-            pixels = coords_to_indices(list(zip(*vertices)), top, left, csx, csy, r.shape)
-
-            # Remove duplicates in sequence if the geometry is not a point
-            if 'Point' not in geom_type:
-                duplicates = numpy.zeros(shape=pixels[0].shape, dtype='bool')
-                duplicates[1:] = (pixels[0][1:] == pixels[0][:-1]) & (pixels[1][1:] == pixels[1][:-1])
-                row_inds, col_inds = pixels[0][~duplicates], pixels[1][~duplicates]
-            else:
-                row_inds, col_inds = pixels[0], pixels[1]
-            del pixels
-
-            # Local window shape and pixels
-            i_insert = row_inds.min()
-            j_insert = col_inds.min()
-            nrows = row_inds.max() - i_insert + 1
-            ncols = col_inds.max() - j_insert + 1
-            row_inds -= i_insert
-            col_inds -= j_insert
-
-            if 'Point' in geom_type or len(row_inds) == 1:
-                # Simply apply the points to the output
-                out_array = numpy.zeros(shape=(nrows, ncols), dtype='bool')
-                out_array[(row_inds, col_inds)] = 1
-                return out_array, i_insert, j_insert
-            window = Image.new("1", (ncols, nrows), 0)  # Create 1-bit image
-            window_image = ImageDraw.Draw(window)  # Create imagedraw instance
-            if 'Polygon' in geom_type or 'LinearRing' in geom_type:
-                # Create a polygon mask (1) with the outline filled
-                window_image.polygon(list(zip(col_inds, row_inds)), outline=1, fill=1)
-            elif 'Line' in geom_type:
-                # Draw a line mask (1)
-                window_image.line(list(zip(col_inds, row_inds)), 1)
-
-            # Return output image as array (which needs to be reshaped) and the insertion location
-            return numpy.array(window, dtype='bool').reshape(nrows, ncols), i_insert, j_insert
-
-        # Need to track where data have been inserted to ensure holes don't overwrite data from other features
-        data_track = numpy.zeros(shape=outarray.shape, dtype='bool')
-        for feature_index, wkb in enumerate(vector[:]):
-            vertices = []
-            geo = ogr.CreateGeometryFromWkb(wkb)
-
-            # Intersect the geometry with the raster extent
-            geo = extent.Intersection(geo)
-            if geo is None or geo.IsEmpty():
-                continue
-
-            get_next(geo, vertices, False, self.geom_wkb_to_name(geo.GetGeometryType()))
-
-            # Track slices from this feature
-            mask_update = []
-
-            for points_and_hole in vertices:
-                point_set, is_hole = points_and_hole
-                window, i_insert, j_insert = _rasterize(point_set, vector.geometryType)
-                i_end = i_insert + window.shape[0]
-                j_end = j_insert + window.shape[1]
-
-                window = window & ~(data_track[i_insert:i_end, j_insert:j_end])
-
-                # Use window as mask to insert data into output
-                if is_hole:
-                    write_value = nodata
-                else:
-                    write_value = write_data[feature_index]
-                outarray[i_insert:i_end, j_insert:j_end][window] = write_value
-
-                mask_update.append((i_insert, i_end, j_insert, j_end))
-
-            # Update data track
-            for i_, _i, j_, _j in mask_update:
-                data_track[i_:_i, j_:_j][outarray[i_:_i, j_:_j] != nodata] = 1
-
-        outrast[:] = outarray
-
-        if return_map:
-            return outrast, value_map
-
+        # Return new Raster
+        outrast = Raster(path)
+        # This is temporary as an output
+        outrast.garbage = {'path': path, 'num': 1}
+        outrast.mode = 'r+'
         return outrast
 
     def __del__(self):
@@ -3548,7 +3449,7 @@ def clean_vector(vector_dataset):
 
     print('Vector clean report:\n    Evaluated {} features\n    Fixed: {}\n    Removed: {}'.format(
         feature_cnt, fix_cnt, null_cnt
-        ))
+    ))
 
     out_vectors = []
     for lyr, fields, projection in zip(layer_data, field_data, projections):
@@ -3644,7 +3545,7 @@ def perform_stats(args):
                         data.path, field,
                         ','.join([str(poly_data[i][idx]) for i in range(len(polyfields))]),
                         ','.join([str(getattr(numpy, stat)(field_data)) for stat in stats]))
-                        )
+                    )
 
 
 def vector_stats(polygons, datasets, out_csv, polyfields=[]):
@@ -3676,7 +3577,7 @@ def vector_stats(polygons, datasets, out_csv, polyfields=[]):
         _ = p.imap_unordered(
             perform_stats, [
                 (data, out_csv, zone_data, polyfields, poly_data, zones.projection, stats) for data in datasets
-                ])
+            ])
     except Exception as e:
         import sys
         p.close()
