@@ -2537,10 +2537,11 @@ class Vector(object):
         cursor = []
         for name, dtype in fields:
             name = name[:10]
+            # Ensure no duplicate fields result
             i = 0
             while name in cursor:
                 i += 1
-                name = name[:10-len(str(r))] + str(i)
+                name = name[:10-len(str(i))] + str(i)
             cursor.append(name)
             outputFields.append((name, dtype))
         return outputFields
@@ -3215,7 +3216,7 @@ class Vector(object):
                   'bool': ogr.OFTInteger,
                   'datetime64': ogr.OFTDate,
                   's': ogr.OFTString,
-                  'bytes': ogr.OFTBinary
+                  'bytes': ogr.OFTString  # Field are always encoded to strings before writing
                   }
 
         if dtype[0].lower() == 's':
@@ -3314,13 +3315,12 @@ class Vector(object):
         r = Raster(template_raster)
 
         if attribute_field is not None:
-            burn_values = [attribute_field]
-            dtype = self[attribute_field].dtype
-            if "s" in dtype.name.lower():
+            data = self[attribute_field]
+            dtype = data.dtype
+            if "s" in dtype.name.lower() or 'byte' in dtype.name.lower():
                 dtype = 'float32'
             nodata = r.nodata
         else:
-            burn_values = [1]
             nodata = 0
             dtype = 'bool'
 
@@ -3332,10 +3332,14 @@ class Vector(object):
 
         with self.layer() as lyr:
             with Raster(path, mode='r+').dataset as ds:
-                try:
-                    gdal.RasterizeLayer(ds, [1], lyr, None, None, burn_values, ['ALL_TOUCHED=TRUE'])
-                except TypeError:
-                    raise TypeError('The input field may not be used- raster values must be numeric')
+                if attribute_field is not None:
+                    gdal.RasterizeLayer(
+                        ds, [1], lyr, options=['ALL_TOUCHED=TRUE', 'ATTRIBUTE={}'.format(attribute_field)]
+                    )
+                else:
+                    gdal.RasterizeLayer(
+                        ds, [1], lyr, None, None, [1], options=['ALL_TOUCHED=TRUE']
+                    )
                 ds.FlushCache()
 
         # Return new Raster
