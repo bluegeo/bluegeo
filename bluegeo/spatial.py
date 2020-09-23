@@ -2093,7 +2093,8 @@ class Vector(object):
                 field_def = []
             else:
                 self.fieldTypes = list(
-                    zip(fields.dtype.names, (fields.dtype[i].name for i in range(len(fields.dtype)))))
+                    zip(fields.dtype.names, [fields.dtype[name].name for name in fields.dtype.names])
+                )
                 field_def = self.fieldTypes
             outVect = self.empty(spatial_reference=projection, fields=field_def)
             outVect.garbage['num'] += 1  # Delay garbage by one delete
