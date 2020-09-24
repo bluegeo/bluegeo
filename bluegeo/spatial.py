@@ -3318,6 +3318,10 @@ class Vector(object):
             data = self[attribute_field]
             dtype = data.dtype
             if "s" in dtype.name.lower() or 'byte' in dtype.name.lower():
+                try:
+                    data = data.astype('float32')
+                except ValueError:
+                    raise ValueError('Attribute field is non-numeric')
                 dtype = 'float32'
             nodata = r.nodata
         else:
