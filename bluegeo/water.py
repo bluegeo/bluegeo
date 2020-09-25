@@ -351,7 +351,7 @@ class WatershedIndex(object):
             self.save(ci, ni)
             coord = next_fa()
 
-    def calculate_stats(self, dataset, method='sum', output='raster', **kwargs):
+    def calculate_stats(self, dataset, output='table', **kwargs):
         """Use a generated index to calculate stats at stream locations
 
         Args:
@@ -373,8 +373,12 @@ class WatershedIndex(object):
 
             res = numpy.zeros(len(ci), numpy.float32)
 
-            if method == 'mean':
-                modals = numpy.zeros(len(ci), numpy.float32)
+            modals = numpy.zeros(len(ci), numpy.float32)
+
+            float_boundary = 3.4028235e+38
+
+            _min = numpy.zeros(len(ci), numpy.float32) + float_boundary
+            _max = numpy.zeros(len(ci), numpy.float32) - float_boundary
 
             cursor = 0
             tree = [0]
@@ -391,13 +395,19 @@ class WatershedIndex(object):
                         for i, j in ci[cursor]:
                             # m and data are from the outer scope
                             if m[i, j]:
+                                if data[i, j] < _min[cursor]:
+                                    _min[cursor] = data[i, j]
+                                if data[i, j] > _max[cursor]:
+                                    _max[cursor] = data[i, j]
                                 res[cursor] += data[i, j]
-                                if method == 'mean':
-                                    modals[cursor] += 1
+                                modals[cursor] += 1
                         if prv_cursor != -1:
+                            if _min[prv_cursor] < _min[cursor]:
+                                _min[cursor] = _min[prv_cursor]
+                            if _max[prv_cursor] > _max[cursor]:
+                                _max[cursor] = _max[prv_cursor]
                             res[cursor] += res[prv_cursor]
-                            if method == 'mean':
-                                modals[cursor] += modals[prv_cursor]
+                            modals[cursor] += modals[prv_cursor]
                         prv_cursor = cursor
                         if len(tree) == 0:
                             break
@@ -405,15 +415,15 @@ class WatershedIndex(object):
                         if len(ni_track[cursor]) > 0:
                             # Put the cursor back in the tree
                             tree.append(cursor)
+                            if _min[prv_cursor] < _min[cursor]:
+                                _min[cursor] = _min[prv_cursor]
+                            if _max[prv_cursor] > _max[cursor]:
+                                _max[cursor] = _max[prv_cursor]
                             res[cursor] += res[prv_cursor]
-                            if method == 'mean':
-                                modals[cursor] += modals[prv_cursor]
+                            modals[cursor] += modals[prv_cursor]
                             break
 
-            if method == 'mean':
-                res /= modals
-
-            return [c[0] for c in ci], res
+            return [c[0] for c in ci], _min, _max, res, res / modals
 
         def run_ws(path):
             ci, ni = self.load_gzip(path)
@@ -422,7 +432,7 @@ class WatershedIndex(object):
         if kwargs.get('apply_async', False):
             # This seems to fail for large datasets
             p = dummyPool(cpu_count())
-            res = p.imap_unordered(run_ws, self.watersheds())
+            res = p.imap(run_ws, self.watersheds())
             p.close()
             p.join()
         else:
@@ -430,26 +440,35 @@ class WatershedIndex(object):
 
         if output == 'table':
             table = []
-            for coords, data in res:
+            for coords, _min, _max, _sum, _mean in res:
                 y, x = indices_to_coords(
                     ([_i for _i, _j in coords], [_j for _i, _j in coords]),
                     self.fa.top, self.fa.left, self.fa.csx, self.fa.csy
                 )
-                table += list(zip(x, y, data.tolist()))
+                table += list(zip(x, y, _min.tolist(), _max.tolist(), _sum.tolist(), _mean.tolist()))
             return table
 
         elif output == 'raster':
-            r = r.astype('float32')
-            r.nodataValues = [-9999]
-            a = numpy.full(r.shape, r.nodata, 'float32')
+            rs = {}
             i, j, values = [], [], []
-            for coords, data in res:
+
+            for coords, _, _, _, _ in res:
                 i += [_i for _i, _j in coords]
                 j += [_j for _i, _j in coords]
-                values += data.tolist()
-            a[(i, j)] = values
-            r[:] = a
-            return r
+
+            for ind, stat in enumerate(['min', 'max', 'sum', 'mean']):
+                r = r.astype('float32')
+                r.nodataValues = [-9999]
+                a = numpy.full(r.shape, r.nodata, 'float32')
+                
+                for data in res:
+                    values += data[ind + 1].tolist()
+
+                a[(i, j)] = values
+                r[:] = a
+                rs[stat] = r
+                
+            return rs
 
 
 def wetness(dem, minimum_area):
