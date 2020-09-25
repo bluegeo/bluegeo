@@ -365,6 +365,7 @@ class WatershedIndex(object):
                 'Input data must spatially match grids used to initialize this instance')
         data = r.array
         m = (data != r.nodata) & ~numpy.isnan(data) & ~numpy.isinf(data)
+        float_boundary = numpy.finfo('float32').max
 
         @jit(nopython=True, nogil=True)
         def summarize(index):
@@ -374,8 +375,6 @@ class WatershedIndex(object):
             res = numpy.zeros(len(ci), numpy.float32)
 
             modals = numpy.zeros(len(ci), numpy.float32)
-
-            float_boundary = 3.4028235e+38
 
             _min = numpy.zeros(len(ci), numpy.float32) + float_boundary
             _max = numpy.zeros(len(ci), numpy.float32) - float_boundary
@@ -423,7 +422,13 @@ class WatershedIndex(object):
                             modals[cursor] += modals[prv_cursor]
                             break
 
-            return [c[0] for c in ci], _min, _max, res, res / modals
+            _max[_max == -float_boundary] *= -1
+            nodata = modals == 0
+            res[nodata] = float_boundary
+            _mean = numpy.zeros(len(ci), numpy.float32) + float_boundary
+            _mean[~nodata] = res[~nodata] / modals[~nodata]
+
+            return [c[0] for c in ci], _min, _max, res, _mean
 
         def run_ws(path):
             ci, ni = self.load_gzip(path)
@@ -436,7 +441,9 @@ class WatershedIndex(object):
             p.close()
             p.join()
         else:
-            res = [run_ws(path) for path in self.watersheds()]
+            res = []
+            for path in self.watersheds():
+                res.append(run_ws(path))
 
         if output == 'table':
             table = []
@@ -445,7 +452,16 @@ class WatershedIndex(object):
                     ([_i for _i, _j in coords], [_j for _i, _j in coords]),
                     self.fa.top, self.fa.left, self.fa.csx, self.fa.csy
                 )
-                table += list(zip(x, y, _min.tolist(), _max.tolist(), _sum.tolist(), _mean.tolist()))
+                _min = _min.tolist()
+                _min[_min == numpy.finfo('float32').max] = ""
+                _max = _max.tolist()
+                _max[_max == numpy.finfo('float32').max] = ""
+                _sum = _sum.tolist()
+                _sum[_sum == numpy.finfo('float32').max] = ""
+                _mean = _mean.tolist()
+                _mean[_mean == numpy.finfo('float32').max] = ""
+
+                table += list(zip(x, y, _min, _max, _sum, _mean))
             return table
 
         elif output == 'raster':
@@ -458,7 +474,7 @@ class WatershedIndex(object):
 
             for ind, stat in enumerate(['min', 'max', 'sum', 'mean']):
                 r = r.astype('float32')
-                r.nodataValues = [-9999]
+                r.nodataValues = [float_boundary]
                 a = numpy.full(r.shape, r.nodata, 'float32')
                 
                 for data in res:
