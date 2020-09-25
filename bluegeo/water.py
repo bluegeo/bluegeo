@@ -372,12 +372,11 @@ class WatershedIndex(object):
             ci, ni = index
             ni_track = [[j for j in i if j != -1] for i in ni]
 
-            res = numpy.zeros(len(ci), numpy.float32)
-
             modals = numpy.zeros(len(ci), numpy.float32)
 
             _min = numpy.zeros(len(ci), numpy.float32) + float_boundary
             _max = numpy.zeros(len(ci), numpy.float32) - float_boundary
+            _sum = numpy.zeros(len(ci), numpy.float32)
 
             cursor = 0
             tree = [0]
@@ -398,14 +397,14 @@ class WatershedIndex(object):
                                     _min[cursor] = data[i, j]
                                 if data[i, j] > _max[cursor]:
                                     _max[cursor] = data[i, j]
-                                res[cursor] += data[i, j]
+                                _sum[cursor] += data[i, j]
                                 modals[cursor] += 1
                         if prv_cursor != -1:
                             if _min[prv_cursor] < _min[cursor]:
                                 _min[cursor] = _min[prv_cursor]
                             if _max[prv_cursor] > _max[cursor]:
                                 _max[cursor] = _max[prv_cursor]
-                            res[cursor] += res[prv_cursor]
+                            _sum[cursor] += _sum[prv_cursor]
                             modals[cursor] += modals[prv_cursor]
                         prv_cursor = cursor
                         if len(tree) == 0:
@@ -418,17 +417,17 @@ class WatershedIndex(object):
                                 _min[cursor] = _min[prv_cursor]
                             if _max[prv_cursor] > _max[cursor]:
                                 _max[cursor] = _max[prv_cursor]
-                            res[cursor] += res[prv_cursor]
+                            _sum[cursor] += _sum[prv_cursor]
                             modals[cursor] += modals[prv_cursor]
                             break
 
             _max[_max == -float_boundary] *= -1
             nodata = modals == 0
-            res[nodata] = float_boundary
+            _sum[nodata] = float_boundary
             _mean = numpy.zeros(len(ci), numpy.float32) + float_boundary
-            _mean[~nodata] = res[~nodata] / modals[~nodata]
+            _mean[~nodata] = _sum[~nodata] / modals[~nodata]
 
-            return [c[0] for c in ci], _min, _max, res, _mean
+            return [c[0] for c in ci], _min, _max, _sum, _mean
 
         def run_ws(path):
             ci, ni = self.load_gzip(path)
