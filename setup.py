@@ -41,7 +41,7 @@ requires = [
     'llvmlite==0.32.0',  # Once LLVM 9+ works, remove (installed implicitly with numba)
     'numba==0.49.1',  # Once LLVM 9+ works, remove version
     'rtree',
-    'gdal',
+    # 'gdal',  # Install with other GIS dependencies
     'dask[complete]',
     # 'grass-session'  Add once PR approved
 ]

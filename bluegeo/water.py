@@ -203,10 +203,12 @@ class WatershedIndex(object):
                 'Input flow direction and flow accumulation grids must spatially match')
 
         self.streams = self.fa >= (minimum_area / (self.fa.csx * self.fa.csy))
-        self.index_path = path
 
-    @staticmethod
-    def dump_gzip(path, obj):
+        self.index = []
+        if path is not None:
+            self.load(path)
+
+    def save(self, path):
         """gzip an object and dump to a path
 
         Args:
@@ -214,43 +216,18 @@ class WatershedIndex(object):
             obj (any): Pickleable object
         """
         with gzip.GzipFile(path, 'w') as f:
-            pickle.dump(obj, f)
+            pickle.dump(self.index, f)
 
-    @staticmethod
-    def load_gzip(path):
+    def load(self, path):
         """Load a dumped gzipped file
 
         Args:
             path (str): Path of the gzipped and dumped file
         """
         with gzip.GzipFile(path) as f:
-            obj = pickle.load(f)
+            self.index = pickle.load(f)
 
-        return obj
-
-    def save(self, ci, ni):
-        nums = [int(p.replace('.gz', '')) for p in os.listdir(self.index_path) if 'gz' in p]
-        if len(nums) > 0:
-            num = max(nums) + 1
-        else:
-            num = 0
-            
-        self.dump_gzip(os.path.join(self.index_path, '{}.gz'.format(num)), [ci, ni])
-
-    def watersheds(self):
-        """Iterate watershed contributing index and nested index in a saved index path
-
-        Yields:
-            [tuple]: contributing index and nested index, respectively
-        """
-        if self.index_path is None:
-            raise ValueError('No index file specified')
-
-        nums = sorted([int(p.replace('.gz', '')) for p in os.listdir(self.index_path) if 'gz' in p])
-        for num in nums:
-            yield os.path.join(self.index_path, '{}.gz'.format(num))
-
-    def create_index(self, path):
+    def create_index(self):
         """
         Create a spatial index of all contributing grid cells
 
@@ -266,11 +243,6 @@ class WatershedIndex(object):
             `nested_index = [ stream point 0: [i1, i2, i3...in],...stream point n: []]`
             where i is the index of the stream point that falls within the stream point index
         """
-        if os.path.isdir(path):
-            raise NameError('The chosen file path "{}" already exists'.format(path))
-        os.mkdir(path)
-        self.index_path = path
-
         streams = self.streams.array
         visited = numpy.zeros(streams.shape, 'bool')
 
@@ -345,13 +317,16 @@ class WatershedIndex(object):
 
         # Run the alg
         coord = next_fa()
+        watersheds = []
         while coord is not None:
             i, j = coord
             ci, ni = delineate(fd, streams, i, j, visited)
-            self.save(ci, ni)
+            watersheds.append((ci, ni))
             coord = next_fa()
 
-    def calculate_stats(self, dataset, output='table', **kwargs):
+        self.index = watersheds
+
+    def calculate_stats(self, dataset, output='table'):
         """Use a generated index to calculate stats at stream locations
 
         Args:
@@ -369,14 +344,10 @@ class WatershedIndex(object):
 
         @jit(nopython=True, nogil=True)
         def summarize(index):
-            ci, ni = index
+            ci, ni, _min, _max, _sum, _mean = index
             ni_track = [[j for j in i if j != -1] for i in ni]
 
             modals = numpy.zeros(len(ci), numpy.float32)
-
-            _min = numpy.zeros(len(ci), numpy.float32) + float_boundary
-            _max = numpy.zeros(len(ci), numpy.float32) - float_boundary
-            _sum = numpy.zeros(len(ci), numpy.float32)
 
             cursor = 0
             tree = [0]
@@ -424,25 +395,38 @@ class WatershedIndex(object):
             _max[_max == -float_boundary] *= -1
             nodata = modals == 0
             _sum[nodata] = float_boundary
-            _mean = numpy.zeros(len(ci), numpy.float32) + float_boundary
             _mean[~nodata] = _sum[~nodata] / modals[~nodata]
 
             return [c[0] for c in ci], _min, _max, _sum, _mean
 
-        def run_ws(path):
-            ci, ni = self.load_gzip(path)
-            return summarize((ci, ni))
+        from multiprocessing.dummy import Pool as DummyPool
+        from multiprocessing import cpu_count
 
-        if kwargs.get('apply_async', False):
-            # This seems to fail for large datasets
-            p = dummyPool(cpu_count())
-            res = p.imap(run_ws, self.watersheds())
+        def run_async(args):
+            ci, ni = args
+            _min = numpy.zeros(len(ci), numpy.float32) + float_boundary
+            _max = numpy.zeros(len(ci), numpy.float32) - float_boundary
+            _sum = numpy.zeros(len(ci), numpy.float32)
+            _mean = numpy.zeros(len(ci), numpy.float32) + float_boundary
+            return summarize((ci, ni, _min, _max, _sum, _mean))
+
+        p = DummyPool(cpu_count())
+        try:
+            res = p.imap_async(run_async, [(ci, ni) for ci, ni in self.index])
             p.close()
             p.join()
-        else:
-            res = []
-            for path in self.watersheds():
-                res.append(run_ws(path))
+        except Exception as e:
+            p.close()
+            p.join()
+            raise e
+
+        # res = []
+        # for ci, ni in self.index:
+        #     _min = numpy.zeros(len(ci), numpy.float32) + float_boundary
+        #     _max = numpy.zeros(len(ci), numpy.float32) - float_boundary
+        #     _sum = numpy.zeros(len(ci), numpy.float32)
+        #     _mean = numpy.zeros(len(ci), numpy.float32) + float_boundary
+        #     res.append(summarize((ci, ni, _min, _max, _sum, _mean)))
 
         if output == 'table':
             table = []
@@ -452,13 +436,13 @@ class WatershedIndex(object):
                     self.fa.top, self.fa.left, self.fa.csx, self.fa.csy
                 )
                 _min = _min.tolist()
-                _min[_min == numpy.finfo('float32').max] = ""
+                _min = [val if val != numpy.finfo('float32').max else "" for val in _min]
                 _max = _max.tolist()
-                _max[_max == numpy.finfo('float32').max] = ""
+                _max = [val if val != numpy.finfo('float32').max else "" for val in _max]
                 _sum = _sum.tolist()
-                _sum[_sum == numpy.finfo('float32').max] = ""
+                _sum = [val if val != numpy.finfo('float32').max else "" for val in _sum]
                 _mean = _mean.tolist()
-                _mean[_mean == numpy.finfo('float32').max] = ""
+                _mean = [val if val != numpy.finfo('float32').max else "" for val in _mean]
 
                 table += list(zip(x, y, _min, _max, _sum, _mean))
             return table
@@ -475,14 +459,14 @@ class WatershedIndex(object):
                 r = r.astype('float32')
                 r.nodataValues = [float_boundary]
                 a = numpy.full(r.shape, r.nodata, 'float32')
-                
+
                 for data in res:
                     values += data[ind + 1].tolist()
 
                 a[(i, j)] = values
                 r[:] = a
                 rs[stat] = r
-                
+
             return rs
 
 
