@@ -342,7 +342,7 @@ class WatershedIndex(object):
         m = (data != r.nodata) & ~numpy.isnan(data) & ~numpy.isinf(data)
         float_boundary = numpy.finfo('float32').max
 
-        @jit(nopython=True, nogil=True)
+        # @jit(nopython=True, nogil=True)
         def summarize(index):
             ci, ni, _min, _max, _sum, _mean = index
             ni_track = [[j for j in i if j != -1] for i in ni]
