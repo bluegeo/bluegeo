@@ -326,7 +326,7 @@ class WatershedIndex(object):
 
         self.index = watersheds
 
-    def calculate_stats(self, dataset, output='table'):
+    def calculate_stats(self, dataset, output='table', **kwargs):
         """Use a generated index to calculate stats at stream locations
 
         Args:
@@ -399,10 +399,7 @@ class WatershedIndex(object):
 
             return [c[0] for c in ci], _min, _max, _sum, _mean
 
-        from multiprocessing.dummy import Pool as DummyPool
-        from multiprocessing import cpu_count
-
-        def run_async(args):
+        def run_summarize(args):
             ci, ni = args
             _min = numpy.zeros(len(ci), numpy.float32) + float_boundary
             _max = numpy.zeros(len(ci), numpy.float32) - float_boundary
@@ -410,23 +407,24 @@ class WatershedIndex(object):
             _mean = numpy.zeros(len(ci), numpy.float32) + float_boundary
             return summarize((ci, ni, _min, _max, _sum, _mean))
 
-        p = DummyPool(cpu_count())
-        try:
-            res = p.map(run_async, [(ci, ni) for ci, ni in self.index])
-            p.close()
-            p.join()
-        except Exception as e:
-            p.close()
-            p.join()
-            raise e
+        if kwargs.get('run_async', False):
+            from multiprocessing.dummy import Pool as DummyPool
+            from multiprocessing import cpu_count
 
-        # res = []
-        # for ci, ni in self.index:
-        #     _min = numpy.zeros(len(ci), numpy.float32) + float_boundary
-        #     _max = numpy.zeros(len(ci), numpy.float32) - float_boundary
-        #     _sum = numpy.zeros(len(ci), numpy.float32)
-        #     _mean = numpy.zeros(len(ci), numpy.float32) + float_boundary
-        #     res.append(summarize((ci, ni, _min, _max, _sum, _mean)))
+            p = DummyPool(cpu_count())
+            try:
+                res = p.map(run_summarize, [(ci, ni) for ci, ni in self.index])
+                p.close()
+                p.join()
+            except Exception as e:
+                p.close()
+                p.join()
+                raise e
+
+        else:
+            res = []
+            for ci, ni in self.index:
+                res.append(run_summarize((ci, ni)))
 
         if output == 'table':
             table = []
