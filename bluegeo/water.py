@@ -412,7 +412,7 @@ class WatershedIndex(object):
 
         p = DummyPool(cpu_count())
         try:
-            res = p.imap_async(run_async, [(ci, ni) for ci, ni in self.index])
+            res = p.map(run_async, [(ci, ni) for ci, ni in self.index])
             p.close()
             p.join()
         except Exception as e:
