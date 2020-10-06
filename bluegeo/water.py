@@ -5,11 +5,12 @@ Blue Geosimulation, 2018
 '''
 import os
 import pickle
-import gzip
 from multiprocessing import cpu_count
 from multiprocessing.dummy import Pool as dummyPool
 from tempfile import gettempdir, _get_candidate_names
 from shutil import rmtree
+
+from numba.cuda import args
 from .terrain import *
 from .filters import *
 from .measurement import *
@@ -215,7 +216,7 @@ class WatershedIndex(object):
             path (str): Path of the output file
             obj (any): Pickleable object
         """
-        with gzip.GzipFile(path, 'w') as f:
+        with open(path, 'wb') as f:
             pickle.dump(self.index, f)
 
     def load(self, path):
@@ -224,7 +225,7 @@ class WatershedIndex(object):
         Args:
             path (str): Path of the gzipped and dumped file
         """
-        with gzip.GzipFile(path) as f:
+        with open(path, 'rb') as f:
             self.index = pickle.load(f)
 
     def create_index(self):
@@ -263,11 +264,15 @@ class WatershedIndex(object):
                           [8, 0, 4],
                           [1, 2, 3]]
 
-            ci = [[(i, j)]]  # Elements contributing to each coordinate
+            # Elements contributing to each coordinate - the first element is always on the stream
+            ci = [[(i, j)]]
             # Used to track elements still requiring evaluation of neighbours
             ci_e = [0]
             # Contributing indexes to ni. Use -1 to initiate the list with a type
             ni = [[-1]]
+
+            # Mark the seed element as visited
+            visited[i, j] = True
 
             cursor = 0
             while True:
@@ -282,25 +287,28 @@ class WatershedIndex(object):
                         break
                     continue
 
-                # Mark as visited
-                visited[i, j] = True
-
                 # Test the current element at location (i, j)
                 stream_elems = []
                 for row_offset in range(-1, 2):
                     for col_offset in range(-1, 2):
-                        if visited[i + row_offset, j + col_offset]:
+                        t_i, t_j = i + row_offset, j + col_offset
+                        if visited[t_i, t_j]:
                             continue
-                        if fd[i + row_offset, j + col_offset] == directions[row_offset + 1][col_offset + 1]:
-                            # The element at this offset contributes to the element being tested
-                            if streams[i + row_offset, j + col_offset]:
+                        # Check if the element at this offset contributes to the element being tested
+                        if fd[t_i, t_j] == directions[row_offset + 1][col_offset + 1]:
+                            # This element has now been visited
+                            visited[t_i, t_j] = True
+
+                            if streams[t_i, t_j]:
                                 # This element comprises a stream - add as a nested element
                                 stream_elems.append(
-                                    (i + row_offset, j + col_offset))
+                                    (t_i, t_j)
+                                )
                             else:
                                 # Add to contributing stack, and the testing queue
                                 ci[cursor].append(
-                                    (i + row_offset, j + col_offset))
+                                    (t_i, t_j)
+                                )
 
                 # Add nested locations and propagate past any stream elements
                 this_index = cursor
@@ -313,7 +321,7 @@ class WatershedIndex(object):
                     ci_e.append(0)
                     ni.append([-1])
 
-            return ci, ni
+            return ci, [[j for j in i if j != -1] for i in ni]
 
         # Run the alg
         coord = next_fa()
@@ -326,7 +334,7 @@ class WatershedIndex(object):
 
         self.index = watersheds
 
-    def calculate_stats(self, dataset, output='table', **kwargs):
+    def calculate_stats(self, dataset, output='table'):
         """Use a generated index to calculate stats at stream locations
 
         Args:
@@ -342,89 +350,57 @@ class WatershedIndex(object):
         m = (data != r.nodata) & ~numpy.isnan(data) & ~numpy.isinf(data)
         float_boundary = numpy.finfo('float32').max
 
-        # @jit(nopython=True, nogil=True)
-        def summarize(index):
-            ci, ni, _min, _max, _sum, _mean = index
-            ni_track = [[j for j in i if j != -1] for i in ni]
+        def add_stats(i, prv_i, elems, _min, _max, _sum, modals):
+            elems = tuple(numpy.array(elems).T)
+            sample = data[elems]
+            sample = sample[m[elems]]
 
-            modals = numpy.zeros(len(ci), numpy.float32)
+            if sample.size > 0:
+                s_min = sample.min()
+                _min[i] = min([_min[i], s_min])
 
-            cursor = 0
-            tree = [0]
-            while len(tree) > 0:
-                if len(ni_track[cursor]) > 0:
-                    cursor = ni_track[cursor].pop()
-                    tree.append(cursor)
-                else:
-                    # Pop the last cursor to avoid running it twice
-                    cursor = tree.pop()
-                    # Accumulate
-                    prv_cursor = -1
-                    while True:
-                        for i, j in ci[cursor]:
-                            # m and data are from the outer scope
-                            if m[i, j]:
-                                if data[i, j] < _min[cursor]:
-                                    _min[cursor] = data[i, j]
-                                if data[i, j] > _max[cursor]:
-                                    _max[cursor] = data[i, j]
-                                _sum[cursor] += data[i, j]
-                                modals[cursor] += 1
-                        if prv_cursor != -1:
-                            if _min[prv_cursor] < _min[cursor]:
-                                _min[cursor] = _min[prv_cursor]
-                            if _max[prv_cursor] > _max[cursor]:
-                                _max[cursor] = _max[prv_cursor]
-                            _sum[cursor] += _sum[prv_cursor]
-                            modals[cursor] += modals[prv_cursor]
-                        prv_cursor = cursor
-                        if len(tree) == 0:
-                            break
-                        cursor = tree.pop()
-                        if len(ni_track[cursor]) > 0:
-                            # Put the cursor back in the tree
-                            tree.append(cursor)
-                            if _min[prv_cursor] < _min[cursor]:
-                                _min[cursor] = _min[prv_cursor]
-                            if _max[prv_cursor] > _max[cursor]:
-                                _max[cursor] = _max[prv_cursor]
-                            _sum[cursor] += _sum[prv_cursor]
-                            modals[cursor] += modals[prv_cursor]
-                            break
+                s_max = sample.max()
+                _max[i] = max([_max[i], s_max])
 
-            _max[_max == -float_boundary] *= -1
-            nodata = modals == 0
-            _sum[nodata] = float_boundary
-            _mean[~nodata] = _sum[~nodata] / modals[~nodata]
+                _sum[i] += sample.sum()
+                modals[i] += sample.size
+                
+            if prv_i is not None:
+                _min[prv_i] = min([_min[prv_i], _min[i]])
+                _max[prv_i] = max([_max[prv_i], _max[i]])
+                _sum[prv_i] += _sum[i]
+                modals[prv_i] += modals[i]
 
-            return [c[0] for c in ci], _min, _max, _sum, _mean
-
-        def run_summarize(args):
+        def summarize(args):
             ci, ni = args
+
+            # Assign output datasets
             _min = numpy.zeros(len(ci), numpy.float32) + float_boundary
             _max = numpy.zeros(len(ci), numpy.float32) - float_boundary
             _sum = numpy.zeros(len(ci), numpy.float32)
+            modals = numpy.zeros(len(ci), numpy.float32)
+
+            stack = [0]
+            cursor = 0
+            while cursor is not None:
+                try:
+                    cursor = ni[cursor].pop()
+                    stack.append(cursor)
+                except IndexError:
+                    del stack[-1]
+                    next_cursor = stack[-1] if len(stack) > 0 else None
+                    add_stats(cursor, next_cursor, ci[cursor], _min, _max, _sum, modals)
+                    cursor = next_cursor
+
+            nodata = modals == 0
             _mean = numpy.zeros(len(ci), numpy.float32) + float_boundary
-            return summarize((ci, ni, _min, _max, _sum, _mean))
+            _mean[~nodata] = _sum[~nodata] / modals[~nodata]
+            _max[_max == -float_boundary] *= -1
+            _sum[nodata] = float_boundary
 
-        if kwargs.get('run_async', False):
-            from multiprocessing.dummy import Pool as DummyPool
-            from multiprocessing import cpu_count
+            return [c[0] for c in ci], _min, _max, _sum, _mean
 
-            p = DummyPool(cpu_count())
-            try:
-                res = p.map(run_summarize, [(ci, ni) for ci, ni in self.index])
-                p.close()
-                p.join()
-            except Exception as e:
-                p.close()
-                p.join()
-                raise e
-
-        else:
-            res = []
-            for ci, ni in self.index:
-                res.append(run_summarize((ci, ni)))
+        res = [summarize((ci, ni)) for ci, ni in self.index]
 
         if output == 'table':
             table = []
@@ -447,21 +423,23 @@ class WatershedIndex(object):
 
         elif output == 'raster':
             rs = {}
-            i, j, values = [], [], []
+            i, j = [], []
 
             for coords, _, _, _, _ in res:
                 i += [_i for _i, _j in coords]
                 j += [_j for _i, _j in coords]
+            coords = (numpy.array(i), numpy.array(j))
 
             for ind, stat in enumerate(['min', 'max', 'sum', 'mean']):
                 r = r.astype('float32')
                 r.nodataValues = [float_boundary]
                 a = numpy.full(r.shape, r.nodata, 'float32')
 
+                values = []
                 for data in res:
                     values += data[ind + 1].tolist()
 
-                a[(i, j)] = values
+                a[coords] = values
                 r[:] = a
                 rs[stat] = r
 
