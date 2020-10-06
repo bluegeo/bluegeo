@@ -203,7 +203,7 @@ class WatershedIndex(object):
             raise ValueError(
                 'Input flow direction and flow accumulation grids must spatially match')
 
-        self.streams = self.fa >= (minimum_area / (self.fa.csx * self.fa.csy))
+        self.minimum_area = minimum_area
 
         self.index = []
         if path is not None:
@@ -244,7 +244,7 @@ class WatershedIndex(object):
             `nested_index = [ stream point 0: [i1, i2, i3...in],...stream point n: []]`
             where i is the index of the stream point that falls within the stream point index
         """
-        streams = self.streams.array
+        streams = (self.fa >= (self.minimum_area / (self.fa.csx * self.fa.csy))).array
         visited = numpy.zeros(streams.shape, 'bool')
 
         fd = self.fd.array
@@ -334,7 +334,7 @@ class WatershedIndex(object):
 
         self.index = watersheds
 
-    def calculate_stats(self, dataset, output='table'):
+    def calculate_stats(self, dataset, output='table', **kwargs):
         """Use a generated index to calculate stats at stream locations
 
         Args:
@@ -400,7 +400,18 @@ class WatershedIndex(object):
 
             return [c[0] for c in ci], _min, _max, _sum, _mean
 
-        res = [summarize((ci, ni)) for ci, ni in self.index]
+        if kwargs.get('apply_async', False):
+            p = dummyPool(cpu_count())
+            try:
+                res = p.map(summarize, [(ci, ni) for ci, ni in self.index])
+                p.close()
+                p.join()
+            except Exception as e:
+                p.close()
+                p.join()
+                raise e
+        else:
+            res = [summarize((ci, ni)) for ci, ni in self.index]
 
         if output == 'table':
             table = []
