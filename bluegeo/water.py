@@ -14,7 +14,7 @@ from numba.cuda import args
 from .terrain import *
 from .filters import *
 from .measurement import *
-from .util import indices_to_coords
+from .util import indices_to_coords, transform_points
 from . import bluegrass
 from scipy.ndimage import binary_dilation, distance_transform_edt
 from scipy.ndimage import label as ndi_label
@@ -420,6 +420,9 @@ class WatershedIndex(object):
                     ([_i for _i, _j in coords], [_j for _i, _j in coords]),
                     self.fa.top, self.fa.left, self.fa.csx, self.fa.csy
                 )
+                if kwargs.get('output_sr', None) is not None:
+                    pts = transform_points(list(zip(x, y)), self.fa.projection, kwargs.get('output_sr'))
+                    x, y = [pt[0] for pt in pts], [pt[1] for pt in pts]
                 _min = _min.tolist()
                 _min = [val if val != numpy.finfo('float32').max else "" for val in _min]
                 _max = _max.tolist()

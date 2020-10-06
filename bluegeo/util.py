@@ -85,6 +85,9 @@ def transform_points(points, inproj, outproj):
     outsr = osr.SpatialReference()
     outsr.ImportFromWkt(parse_projection(outproj))
 
+    # Ensure resulting axes are still in the order x, y
+    outsr.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+
     coordTransform = osr.CoordinateTransformation(insr, outsr)
     return [coordTransform.TransformPoint(x, y)[:2] for x, y in points]
 
