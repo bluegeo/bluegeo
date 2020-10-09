@@ -11,6 +11,7 @@ from osgeo import osr
 class BlueUtilError(Exception):
     pass
 
+
 def generate_name(parent_path, suffix, extension):
     """Generate a unique file name"""
     if parent_path is None:

@@ -25,6 +25,27 @@ class BlueGrassError(Exception):
     pass
 
 
+def mkgrid(template_raster, output_shp, boundary=None):
+    """Create a vector fishnet using v.mkgrid to the spec of an input raster
+
+    Args:
+        template_raster ([str, Raster]): Path to a raster to use as a template
+    """
+    rast = Raster(template_raster)
+
+    with Session(gisdb=TEMP_DIR or gettempdir(), location="location", create_opts=template_raster):
+        grass.run_command('v.mkgrid', map='fishnet',
+                          grid=rast.shape,
+                          position='coor',
+                          coordinates=(rast.left, rast.bottom),
+                          box=(rast.csx, rast.csy)
+                          )
+        grass.run_command('v.out.ogr', input='fishnet', output=output_shp, format='ESRI_Shapefile')
+
+    if boundary is not None:
+        Vector(output_shp).intersect(boundary).save(output_shp)
+
+
 # r. functions
 def watershed(dem, flow_direction='SFD', accumulation_path=None, direction_path=None, positive_fd=True,
               change_nodata=True, memory_manage=False):
