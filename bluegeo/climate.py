@@ -1,7 +1,5 @@
 """
 Downscale climate data using a grid or an input file with points
-
-blueGeo, 2018
 """
 
 import numpy

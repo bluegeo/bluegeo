@@ -159,7 +159,7 @@ class topo(Raster):
         def eval_roughness(a):
             # Generate nodata mask and get views
             view = util.get_window_views(a, size)
-            ic, jc = (size[0] - 1) / 2, (size[1] - 1) / 2
+            ic, jc = int((size[0] - 1) // 2), int((size[1] - 1) // 2)
             nd = self.nodata
             mask = view[ic][jc] == nd
 

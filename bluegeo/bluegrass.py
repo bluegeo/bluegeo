@@ -36,9 +36,6 @@ def mkgrid(template_raster, output_shp, boundary=None):
     with Session(gisdb=TEMP_DIR or gettempdir(), location="location", create_opts=template_raster):
         grass.run_command('v.mkgrid', map='fishnet',
                           grid=rast.shape,
-                          position='coor',
-                          coordinates=(rast.left, rast.bottom),
-                          box=(rast.csx, rast.csy)
                           )
         grass.run_command('v.out.ogr', input='fishnet', output=output_shp, format='ESRI_Shapefile')
 
