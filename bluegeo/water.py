@@ -364,7 +364,7 @@ class WatershedIndex(object):
 
                 _sum[i] += sample.sum()
                 modals[i] += sample.size
-                
+
             if prv_i is not None:
                 _min[prv_i] = min([_min[prv_i], _min[i]])
                 _max[prv_i] = max([_max[prv_i], _max[i]])
@@ -437,25 +437,27 @@ class WatershedIndex(object):
 
         elif output == 'raster':
             rs = {}
-            i, j = [], []
+            i, j, _min, _max, _sum, _mean = [], [], [], [], [], []
 
-            for coords, _, _, _, _ in res:
+            for coords, min_subset, max_subset, sum_subset, mean_subset in res:
                 i += [_i for _i, _j in coords]
                 j += [_j for _i, _j in coords]
-            coords = (numpy.array(i), numpy.array(j))
 
-            for ind, stat in enumerate(['min', 'max', 'sum', 'mean']):
-                r = r.astype('float32')
-                r.nodataValues = [float_boundary]
-                a = numpy.full(r.shape, r.nodata, 'float32')
+                _min += min_subset.tolist()
+                _max += max_subset.tolist()
+                _sum += sum_subset.tolist()
+                _mean += mean_subset.tolist()
 
-                values = []
-                for data in res:
-                    values += data[ind + 1].tolist()
+            coords = (numpy.array(i, dtype='uint64'), numpy.array(j, dtype='uint64'))
 
-                a[coords] = values
-                r[:] = a
-                rs[stat] = r
+            for stat, data in zip(['min', 'max', 'sum', 'mean'], [_min, _max, _sum, _mean]):
+                out_r = r.astype('float32')
+                out_r.nodataValues = [float_boundary]
+                a = numpy.full(out_r.shape, float_boundary, 'float32')
+
+                a[coords] = data
+                out_r[:] = a
+                rs[stat] = out_r
 
             return rs
 
