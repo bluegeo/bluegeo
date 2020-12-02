@@ -252,14 +252,6 @@ class topo(Raster):
 
         # Allocate output
         outrast = selfChangeExtent.empty()
-        
-        print("Reading data and generating masks")
-        selfData = selfChangeExtent.array
-        targetData = inrast.array
-        targetDataMask = targetData != inrast.nodata
-        selfDataMask = selfData != selfChangeExtent.nodata
-        points = selfDataMask & targetDataMask
-        xi = numpy.where(targetDataMask & ~selfDataMask)
 
         def nearest(points, missing):
             distance = numpy.ones(shape=selfChangeExtent.shape, dtype='bool')
@@ -324,12 +316,28 @@ class topo(Raster):
             return iterator
 
         if interpolation == 'nearest':
+            print("Reading data and generating masks")
+            selfData = selfChangeExtent.array
+            targetData = inrast.array
+            targetDataMask = targetData != inrast.nodata
+            selfDataMask = selfData != selfChangeExtent.nodata
+            points = selfDataMask & targetDataMask
+            xi = numpy.where(targetDataMask & ~selfDataMask)
             if points.sum() == 0:
                 raise TopoError("No overlapping regions found during align")
             grad = (selfData - targetData)[nearest(points, xi)]
             selfData[xi] = targetData[xi] + grad
 
         elif interpolation == 'idw':
+            print("Reading raster data")
+            selfData = selfChangeExtent.array
+            targetData = inrast.array
+
+            print("Generating Masks")
+            m = targetData != inrast.nodata
+            points = m & (selfData != selfChangeExtent.nodata)
+            xi = numpy.where(m & (selfData == selfChangeExtent.nodata))
+
             print("Creating grids")
             # Only include regions on the edge
             points = numpy.where(
@@ -337,14 +345,13 @@ class topo(Raster):
             )
             if points[0].size == 0:
                 raise TopoError("No overlapping regions found during align")
-            del targetDataMask, selfDataMask
-            # Points in form ((x, y), (x, y))
+            # Points in form ((x, y), (x, y)...)
             pointGrid = numpy.fliplr(
                 numpy.array(util.indices_to_coords(points, selfChangeExtent.top,
                                                     selfChangeExtent.left, selfChangeExtent.csx,
                                                     selfChangeExtent.csy)).T
             )
-            # Interpolation grid in form ((x, y), (x, y))
+            # Interpolation grid in form ((x, y), (x, y)...)
             xGrid = numpy.fliplr(
                 numpy.array(util.indices_to_coords(xi, selfChangeExtent.top, selfChangeExtent.left,
                                                     selfChangeExtent.csx, selfChangeExtent.csy)).T
@@ -361,6 +368,13 @@ class topo(Raster):
             selfData[xi] = targetData[xi] + output
 
         elif interpolation == 'progressive':
+            print("Reading data and generating masks")
+            selfData = selfChangeExtent.array
+            targetData = inrast.array
+            targetDataMask = targetData != inrast.nodata
+            selfDataMask = selfData != selfChangeExtent.nodata
+            points = selfDataMask & targetDataMask
+            xi = numpy.where(targetDataMask & ~selfDataMask)
 
             def mean_filter(a, mask):
                 # Add mask to local dictionary
