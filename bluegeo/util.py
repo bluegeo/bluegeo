@@ -3,6 +3,7 @@
 import math
 import numpy
 import os
+import json
 from tempfile import _get_candidate_names, gettempdir
 from scipy import ndimage
 from osgeo import osr
@@ -20,7 +21,6 @@ def generate_name(parent_path, suffix, extension):
     else:
         path_dir = os.path.dirname(parent_path)
         path_str = os.path.basename(parent_path)
-
 
     path = ('%s_%s_%s.%s' %
             (''.join(path_str.split('.')[:-1])[:20], suffix,
@@ -257,7 +257,6 @@ def stride_hood(a, window=(3, 3)):
     return a
 
 
-
 def mode(ndarray, axis=0):
     # Check inputs
     ndarray = numpy.asarray(ndarray)
@@ -309,3 +308,22 @@ def mode(ndarray, axis=0):
     index = numpy.ogrid[slices]
     index.insert(axis, numpy.argmax(counts, axis=axis))
     return sort[index], counts[index]
+
+
+def geojson_from_points(points, attrs=None):
+    gj = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": list(pt)
+                },
+                "properties": attr if attr else {}
+            }
+            for pt, attr in zip(points, attrs)
+        ]
+    }
+
+    return json.dumps(gj)

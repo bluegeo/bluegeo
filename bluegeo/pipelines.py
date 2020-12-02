@@ -3,7 +3,9 @@ from ftplib import FTP
 import zipfile as zf
 import os
 import tempfile
-import urllib.request, urllib.parse, urllib.error
+import urllib.request
+import urllib.parse
+import urllib.error
 import re
 from collections import defaultdict
 import pandas
@@ -220,3 +222,47 @@ class Hydat(object):
         # Cast to numeric fields where necessary
 
         # Interpolate missing data
+
+
+def collect_nhn_files(
+    index_vector, output_dir, index_field='DATASETNAM',
+    ftp_url='ftp.maps.canada.ca',
+    ftp_base_path='/pub/nrcan_rncan/vector/geobase_nhn_rhn/shp_en'
+):
+    v = Vector(index_vector)
+    ids = numpy.unique(v[index_field])
+
+    ftp = FTP(ftp_url)
+    ftp.login()
+    ftp.cwd(ftp_base_path)
+
+    zip_paths = []
+    for i, id in enumerate(ids):
+        id = id.decode('utf-8')
+        num = id[:2]
+        try:
+            ftp.cwd(num)
+        except:
+            print("Warning: cannot access {}".format(num))
+            continue
+
+        print("Downloading {} of {}: {}".format(i + 1, len(ids), id))
+        object_name = 'nhn_rhn_{}_shp_en.zip'.format(id.lower())
+        filename = os.path.join(output_dir, object_name)
+        with open(filename, 'wb') as f:
+            try:
+                ftp.retrbinary('RETR {}'.format(object_name), f.write)
+            except:
+                raise IOError('Unable to download file {}'.format(object_name))
+
+        ftp.cwd('..')
+        zip_paths.append(filename)
+
+    ftp.quit()
+
+    for zp in zip_paths:
+        with zf.ZipFile(zp, 'r') as z:
+            print("Extracting {}".format(zp))
+            z.extractall()
+        os.remove(zp)
+
