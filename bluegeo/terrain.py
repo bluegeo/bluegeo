@@ -253,6 +253,38 @@ class topo(Raster):
         # Allocate output
         outrast = selfChangeExtent.empty()
 
+        def read_data(input, second):
+            print("Reading raster data")
+            selfData = input.array
+            targetData = second.array
+
+            print("Generating Masks")
+            m = targetData != second.nodata
+            points = m & (selfData != input.nodata)
+            xi = numpy.where(m & (selfData == input.nodata))
+
+            print("Creating grids")
+            # Only include regions on the edge
+            points = numpy.where(
+                ~ndimage.binary_erosion(points, structure=numpy.ones(shape=(3, 3), dtype='bool')) & points
+            )
+            if points[0].size == 0:
+                raise TopoError("No overlapping regions found during align")
+            # Points in form ((x, y), (x, y)...)
+            pointGrid = numpy.fliplr(
+                numpy.array(util.indices_to_coords(points, input.top,
+                                                    input.left, input.csx,
+                                                    input.csy)).T
+            )
+            # Interpolation grid in form ((x, y), (x, y)...)
+            xGrid = numpy.fliplr(
+                numpy.array(util.indices_to_coords(xi, input.top, input.left,
+                                                    input.csx, input.csy)).T
+            )
+            grad = selfData[points] - targetData[points]
+
+            return selfData, targetData, xi, pointGrid, xGrid, grad
+
         def nearest(points, missing):
             distance = numpy.ones(shape=selfChangeExtent.shape, dtype='bool')
             distance[points] = 0
@@ -327,36 +359,16 @@ class topo(Raster):
                 raise TopoError("No overlapping regions found during align")
             grad = (selfData - targetData)[nearest(points, xi)]
             selfData[xi] = targetData[xi] + grad
+            
+        elif interpolation == 'rbf':
+            selfData, targetData, xi, pointGrid, xGrid, grad = read_data(selfChangeExtent, inrast)
+            rbfi = interpolate.Rbf(pointGrid[:, 0], pointGrid[:, 1], grad)
+            interp = rbfi(xGrid[:, 0], xGrid[:, 1])
+
+            selfData[xi] = targetData[xi] + interp
 
         elif interpolation == 'idw':
-            print("Reading raster data")
-            selfData = selfChangeExtent.array
-            targetData = inrast.array
-
-            print("Generating Masks")
-            m = targetData != inrast.nodata
-            points = m & (selfData != selfChangeExtent.nodata)
-            xi = numpy.where(m & (selfData == selfChangeExtent.nodata))
-
-            print("Creating grids")
-            # Only include regions on the edge
-            points = numpy.where(
-                ~ndimage.binary_erosion(points, structure=numpy.ones(shape=(3, 3), dtype='bool')) & points
-            )
-            if points[0].size == 0:
-                raise TopoError("No overlapping regions found during align")
-            # Points in form ((x, y), (x, y)...)
-            pointGrid = numpy.fliplr(
-                numpy.array(util.indices_to_coords(points, selfChangeExtent.top,
-                                                    selfChangeExtent.left, selfChangeExtent.csx,
-                                                    selfChangeExtent.csy)).T
-            )
-            # Interpolation grid in form ((x, y), (x, y)...)
-            xGrid = numpy.fliplr(
-                numpy.array(util.indices_to_coords(xi, selfChangeExtent.top, selfChangeExtent.left,
-                                                    selfChangeExtent.csx, selfChangeExtent.csy)).T
-            )
-            grad = selfData[points] - targetData[points]
+            selfData, targetData, xi, pointGrid, xGrid, grad = read_data(selfChangeExtent, inrast)
 
             iterator = inverse_distance(pointGrid, xGrid, grad)
 
