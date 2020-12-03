@@ -7,6 +7,8 @@ Blue Geosimulation, 2017
 from .spatial import *
 from . import util
 import math
+from multiprocessing import cpu_count
+from multiprocessing.dummy import Pool as DummyPool
 from numba.core.decorators import jit
 from scipy import ndimage, interpolate
 
@@ -294,48 +296,27 @@ class topo(Raster):
             distance = (distance[0][missing], distance[1][missing])
             return distance
 
-        def inverse_distance(pointGrid, xGrid, values):
-
-            @jit(nopython=True, nogil=True)
-            def idw(args):
-                points, xi, grad, output, mask = args
-                i_shape = xi.shape[0]
-                point_shape = points.shape[0]
-                for i in range(i_shape):
-                    num = 0.0
-                    denom = 0.0
-                    for j in range(point_shape):
-                        w = 1 / numpy.sqrt(
-                            ((points[j, 0] - xi[i, 0]) ** 2) + ((points[j, 1] - xi[i, 1]) ** 2)
-                        ) ** 2
-                        denom += w
-                        num += w * grad[j]
-                    output[i] = num / denom
-                return output, mask
-
+        def inverse_distance(x, y, z, pred_x, pred_y):
             # Compute chunk size from memory specification and neighbours
             from multiprocessing import Pool, cpu_count
-            chunkSize = int(round(xGrid.shape[0] / (cpu_count() * 4)))
+            chunkSize = int(round(pred_x.shape[0] / (cpu_count() * 4)))
             if chunkSize < 1:
                 chunkSize = 1
-            chunkRange = list(range(0, xGrid.shape[0] + chunkSize, chunkSize))
+            chunkRange = list(range(0, pred_x.shape[0] + chunkSize, chunkSize))
 
-            iterator = []
-            totalCalcs = 0
-            for fr, to in zip(chunkRange[:-1], chunkRange[1:-1] + [xGrid.shape[0]]):
-                xChunk = xGrid[fr:to]
-                totalCalcs += pointGrid.shape[0] * xChunk.shape[0]
-                iterator.append(
-                    (pointGrid, xChunk, values, numpy.zeros(shape=(to - fr,), dtype='float32'), (fr, to))
-                )
-            print("Requires {} calculations".format(totalCalcs))
+            def iterator():
+                totalCalcs = 0
+                for fr, to in zip(chunkRange[:-1], chunkRange[1:-1] + [pred_x.shape[0]]):
+                    xChunk = pred_x[fr:to]
+                    totalCalcs += x.shape[0] * xChunk.shape[0]
+                    yield (x, y, z, pred_x, pred_y, numpy.zeros(shape=(to - fr,), dtype='float32'), (fr, to))
 
             import time
             now = time.time()
             print("Interpolating")
-            p = Pool(cpu_count())
+            p = DummyPool(cpu_count())
             try:
-                iterator = list(p.imap_unordered(idw, iterator))
+                iterator = list(p.imap_unordered(idw, iterator()))
             except Exception as e:
                 import sys
                 p.close()
@@ -359,6 +340,36 @@ class topo(Raster):
                 raise TopoError("No overlapping regions found during align")
             grad = (selfData - targetData)[nearest(points, xi)]
             selfData[xi] = targetData[xi] + grad
+
+        elif interpolation == 'RectBivariateSpline':
+            selfData = selfChangeExtent.array
+            targetData = inrast.array
+
+            m = targetData != inrast.nodata
+            points = m & (selfData != selfChangeExtent.nodata)
+            xi = numpy.where(m & (selfData == selfChangeExtent.nodata))
+
+            # Only include regions on the edge
+            block = ~ndimage.binary_erosion(points, structure=numpy.ones(shape=(3, 3), dtype='bool')) & points
+            points = numpy.where(block)
+            if points[0].size == 0:
+                raise TopoError("No overlapping regions found during align")
+            x = numpy.arange(0, (points[0].max() + 1) - points[0].min())
+            y = numpy.arange(0, (points[1].max() + 1) - points[1].min())
+            z = selfData - targetData
+            z[~block] = numpy.nan
+            z = z[points[0].min():points[0].max() + 1, points[1].min():points[1].max() + 1]
+
+            rbs = interpolate.RectBivariateSpline(x, y, z)
+            interp = rbs(xi[0], xi[1])
+
+            selfData[xi] = targetData[xi] + interp
+
+        elif interpolation == 'linear':
+            selfData, targetData, xi, pointGrid, xGrid, grad = read_data(selfChangeExtent, inrast)
+            interp = interpolate.griddata(pointGrid, grad, xGrid)
+
+            selfData[xi] = targetData[xi] + interp
             
         elif interpolation == 'rbf':
             selfData, targetData, xi, pointGrid, xGrid, grad = read_data(selfChangeExtent, inrast)
@@ -368,16 +379,26 @@ class topo(Raster):
             selfData[xi] = targetData[xi] + interp
 
         elif interpolation == 'idw':
-            selfData, targetData, xi, pointGrid, xGrid, grad = read_data(selfChangeExtent, inrast)
+            selfData = selfChangeExtent.array
+            targetData = inrast.array
 
-            iterator = inverse_distance(pointGrid, xGrid, grad)
+            m = targetData != inrast.nodata
+            points = m & (selfData != selfChangeExtent.nodata)
+            # Only include regions on the edge
+            y, x = numpy.where(~ndimage.binary_erosion(points, structure=numpy.ones(shape=(3, 3), dtype='bool')) & points)
+            y, x = y.astype('uint32'), x.astype('uint32')
+            z = selfData[(y, x)] - targetData[(y, x)]
+
+            pred_y, pred_x = numpy.where(m & (selfData == selfChangeExtent.nodata))
+            pred_y, pred_x = pred_y.astype('uint32'), pred_x.astype('uint32')
+            iterator = inverse_distance(x, y, z, pred_x, pred_y)
 
             # Add output to selfData
-            output = numpy.zeros(shape=xi[0].shape, dtype='float32')
+            output = numpy.zeros(shape=pred_x.shape, dtype='float32')
             for i in iterator:
                 output[i[1][0]:i[1][1]] = i[0]
 
-            selfData[xi] = targetData[xi] + output
+            selfData[(pred_y, pred_x)] = targetData[(pred_y, pred_x)] + output
 
         elif interpolation == 'progressive':
             print("Reading data and generating masks")
@@ -651,3 +672,21 @@ def bare_earth(surface, max_area=65., slope_threshold=50.):
     out = surface.copy()
     out[:] = new_surface[1:-1, 1:-1]
     return out
+
+
+@jit(nopython=True, nogil=True)
+def idw(args):
+    x, y, z, pred_x, pred_y, output, mask = args
+    i_shape = pred_x.shape[0]
+    point_shape = x.shape[0]
+    for i in range(i_shape):
+        num = 0.0
+        denom = 0.0
+        for j in range(point_shape):
+            w = 1 / numpy.sqrt(
+                ((x[j] - pred_x[i]) ** 2.) + ((y[j] - pred_y[i]) ** 2.)
+            ) ** 2
+            denom += w
+            num += w * z[j]
+        output[i] = num / denom
+    return output, mask
