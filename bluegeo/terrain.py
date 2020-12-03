@@ -254,38 +254,14 @@ class topo(Raster):
 
         # Allocate output
         outrast = selfChangeExtent.empty()
-
-        def read_data(input, second):
-            print("Reading raster data")
-            selfData = input.array
-            targetData = second.array
-
-            print("Generating Masks")
-            m = targetData != second.nodata
-            points = m & (selfData != input.nodata)
-            xi = numpy.where(m & (selfData == input.nodata))
-
-            print("Creating grids")
-            # Only include regions on the edge
-            points = numpy.where(
-                ~ndimage.binary_erosion(points, structure=numpy.ones(shape=(3, 3), dtype='bool')) & points
-            )
-            if points[0].size == 0:
-                raise TopoError("No overlapping regions found during align")
-            # Points in form ((x, y), (x, y)...)
-            pointGrid = numpy.fliplr(
-                numpy.array(util.indices_to_coords(points, input.top,
-                                                    input.left, input.csx,
-                                                    input.csy)).T
-            )
-            # Interpolation grid in form ((x, y), (x, y)...)
-            xGrid = numpy.fliplr(
-                numpy.array(util.indices_to_coords(xi, input.top, input.left,
-                                                    input.csx, input.csy)).T
-            )
-            grad = selfData[points] - targetData[points]
-
-            return selfData, targetData, xi, pointGrid, xGrid, grad
+        
+        print("Reading data and generating masks")
+        selfData = selfChangeExtent.array
+        targetData = inrast.array
+        targetDataMask = targetData != inrast.nodata
+        selfDataMask = selfData != selfChangeExtent.nodata
+        points = selfDataMask & targetDataMask
+        xi = numpy.where(targetDataMask & ~selfDataMask)
 
         def nearest(points, missing):
             distance = numpy.ones(shape=selfChangeExtent.shape, dtype='bool')
@@ -296,25 +272,45 @@ class topo(Raster):
             distance = (distance[0][missing], distance[1][missing])
             return distance
 
-        def inverse_distance(x, y, z, pred_x, pred_y):
+        def inverse_distance(pointGrid, xGrid, values):
+
+            @jit(nopython=True, nogil=True)
+            def idw(args):
+                points, xi, grad, output, mask = args
+                i_shape = xi.shape[0]
+                point_shape = points.shape[0]
+                for i in range(i_shape):
+                    num = 0.0
+                    denom = 0.0
+                    for j in range(point_shape):
+                        w = 1 / numpy.sqrt(
+                            ((points[j, 0] - xi[i, 0]) ** 2) + ((points[j, 1] - xi[i, 1]) ** 2)
+                        ) ** 2
+                        denom += w
+                        num += w * grad[j]
+                    output[i] = num / denom
+                return output, mask
+
             # Compute chunk size from memory specification and neighbours
             from multiprocessing import Pool, cpu_count
-            chunkSize = int(round(pred_x.shape[0] / (cpu_count() * 4)))
+            chunkSize = int(round(xGrid.shape[0] / (cpu_count() * 4)))
             if chunkSize < 1:
                 chunkSize = 1
-            chunkRange = list(range(0, pred_x.shape[0] + chunkSize, chunkSize))
+            chunkRange = list(range(0, xGrid.shape[0] + chunkSize, chunkSize))
 
             iterator = []
             totalCalcs = 0
-            for fr, to in zip(chunkRange[:-1], chunkRange[1:-1] + [pred_x.shape[0]]):
-                xChunk = pred_x[fr:to]
-                totalCalcs += x.shape[0] * xChunk.shape[0]
-                iterator.append( (x, y, z, pred_x, pred_y, numpy.zeros(shape=(to - fr,), dtype='float32'), (fr, to)) )
-            print('IDW requires {} calculations'.format(totalCalcs))
+            for fr, to in zip(chunkRange[:-1], chunkRange[1:-1] + [xGrid.shape[0]]):
+                xChunk = xGrid[fr:to]
+                totalCalcs += pointGrid.shape[0] * xChunk.shape[0]
+                iterator.append(
+                    (pointGrid, xChunk, values, numpy.zeros(shape=(to - fr,), dtype='float32'), (fr, to))
+                )
+            print("Requires {} calculations".format(totalCalcs))
 
             import time
             now = time.time()
-            # p = DummyPool(cpu_count())
+            print("Interpolating")
             p = Pool(cpu_count())
             try:
                 iterator = list(p.imap_unordered(idw, iterator))
@@ -330,85 +326,43 @@ class topo(Raster):
             return iterator
 
         if interpolation == 'nearest':
-            print("Reading data and generating masks")
-            selfData = selfChangeExtent.array
-            targetData = inrast.array
-            targetDataMask = targetData != inrast.nodata
-            selfDataMask = selfData != selfChangeExtent.nodata
-            points = selfDataMask & targetDataMask
-            xi = numpy.where(targetDataMask & ~selfDataMask)
             if points.sum() == 0:
                 raise TopoError("No overlapping regions found during align")
             grad = (selfData - targetData)[nearest(points, xi)]
             selfData[xi] = targetData[xi] + grad
 
-        elif interpolation == 'RectBivariateSpline':
-            selfData = selfChangeExtent.array
-            targetData = inrast.array
-
-            m = targetData != inrast.nodata
-            points = m & (selfData != selfChangeExtent.nodata)
-            xi = numpy.where(m & (selfData == selfChangeExtent.nodata))
-
+        elif interpolation == 'idw':
+            print("Creating grids")
             # Only include regions on the edge
-            block = ~ndimage.binary_erosion(points, structure=numpy.ones(shape=(3, 3), dtype='bool')) & points
-            points = numpy.where(block)
+            points = numpy.where(
+                ~ndimage.binary_erosion(points, structure=numpy.ones(shape=(3, 3), dtype='bool')) & points
+            )
             if points[0].size == 0:
                 raise TopoError("No overlapping regions found during align")
-            x = numpy.arange(0, (points[0].max() + 1) - points[0].min())
-            y = numpy.arange(0, (points[1].max() + 1) - points[1].min())
-            z = selfData - targetData
-            z[~block] = numpy.nan
-            z = z[points[0].min():points[0].max() + 1, points[1].min():points[1].max() + 1]
+            del targetDataMask, selfDataMask
+            # Points in form ((x, y), (x, y))
+            pointGrid = numpy.fliplr(
+                numpy.array(util.indices_to_coords(points, selfChangeExtent.top,
+                                                    selfChangeExtent.left, selfChangeExtent.csx,
+                                                    selfChangeExtent.csy)).T
+            )
+            # Interpolation grid in form ((x, y), (x, y))
+            xGrid = numpy.fliplr(
+                numpy.array(util.indices_to_coords(xi, selfChangeExtent.top, selfChangeExtent.left,
+                                                    selfChangeExtent.csx, selfChangeExtent.csy)).T
+            )
+            grad = selfData[points] - targetData[points]
 
-            rbs = interpolate.RectBivariateSpline(x, y, z)
-            interp = rbs(xi[0], xi[1])
-
-            selfData[xi] = targetData[xi] + interp
-
-        elif interpolation == 'linear':
-            selfData, targetData, xi, pointGrid, xGrid, grad = read_data(selfChangeExtent, inrast)
-            interp = interpolate.griddata(pointGrid, grad, xGrid)
-
-            selfData[xi] = targetData[xi] + interp
-            
-        elif interpolation == 'rbf':
-            selfData, targetData, xi, pointGrid, xGrid, grad = read_data(selfChangeExtent, inrast)
-            rbfi = interpolate.Rbf(pointGrid[:, 0], pointGrid[:, 1], grad)
-            interp = rbfi(xGrid[:, 0], xGrid[:, 1])
-
-            selfData[xi] = targetData[xi] + interp
-
-        elif interpolation == 'idw':
-            selfData = selfChangeExtent.array
-            targetData = inrast.array
-
-            m = targetData != inrast.nodata
-            points = m & (selfData != selfChangeExtent.nodata)
-            # Only include regions on the edge
-            y, x = numpy.where(~ndimage.binary_erosion(points, structure=numpy.ones(shape=(3, 3), dtype='bool')) & points)
-            y, x = y.astype('uint32'), x.astype('uint32')
-            z = selfData[(y, x)] - targetData[(y, x)]
-
-            pred_y, pred_x = numpy.where(m & (selfData == selfChangeExtent.nodata))
-            pred_y, pred_x = pred_y.astype('uint32'), pred_x.astype('uint32')
-            iterator = inverse_distance(x, y, z, pred_x, pred_y)
+            iterator = inverse_distance(pointGrid, xGrid, grad)
 
             # Add output to selfData
-            output = numpy.zeros(shape=pred_x.shape, dtype='float32')
+            output = numpy.zeros(shape=xi[0].shape, dtype='float32')
             for i in iterator:
                 output[i[1][0]:i[1][1]] = i[0]
 
-            selfData[(pred_y, pred_x)] = targetData[(pred_y, pred_x)] + output
+            selfData[xi] = targetData[xi] + output
 
         elif interpolation == 'progressive':
-            print("Reading data and generating masks")
-            selfData = selfChangeExtent.array
-            targetData = inrast.array
-            targetDataMask = targetData != inrast.nodata
-            selfDataMask = selfData != selfChangeExtent.nodata
-            points = selfDataMask & targetDataMask
-            xi = numpy.where(targetDataMask & ~selfDataMask)
 
             def mean_filter(a, mask):
                 # Add mask to local dictionary
@@ -459,61 +413,6 @@ class topo(Raster):
 
         outrast[:] = selfData
         return outrast
-
-
-@jit(nopython=True, nogil=True)
-def idw(args):
-    points, xi, values, output, mask = args
-    i_shape = xi.shape[0]
-    point_shape = points.shape[0]
-    for i in range(i_shape):
-        num = 0.0
-        denom = 0.0
-        for j in range(point_shape):
-            w = 1 / numpy.sqrt(
-                ((points[j, 0] - xi[i, 0]) ** 2) + ((points[j, 1] - xi[i, 1]) ** 2)
-            ) ** 2
-            denom += w
-            num += w * values[j]
-        if denom != 0:
-            output[i] = num / denom
-    return output, mask
-
-
-def inverse_distance(pointGrid, xGrid, values):
-    # Compute chunk size from memory specification and neighbours
-    from multiprocessing import Pool, cpu_count
-    chunkSize = int(round(xGrid.shape[0] / (cpu_count() * 4)))
-    if chunkSize < 1:
-        chunkSize = 1
-    chunkRange = list(range(0, xGrid.shape[0] + chunkSize, chunkSize))
-
-    iterator = []
-    totalCalcs = 0
-    for fr, to in zip(chunkRange[:-1], chunkRange[1:-1] + [xGrid.shape[0]]):
-        xChunk = xGrid[fr:to]
-        totalCalcs += pointGrid.shape[0] * xChunk.shape[0]
-        iterator.append(
-            (pointGrid, xChunk, values, numpy.zeros(shape=(to - fr,), dtype='float32'), (fr, to))
-        )
-    print("Requires {} calculations".format(totalCalcs))
-
-    import time
-    now = time.time()
-    print("Interpolating")
-    p = Pool(cpu_count())
-    try:
-        iterator = list(p.imap_unordered(idw, iterator))
-    except Exception as e:
-        import sys
-        p.close()
-        p.join()
-        raise e.with_traceback(sys.exc_info()[2])
-    else:
-        p.close()
-        p.join()
-    print("Completed interpolation in %s minutes" % (round((time.time() - now) / 60, 3)))
-    return iterator
 
 
 def correct_surface(surface, points, field):
