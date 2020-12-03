@@ -7,7 +7,7 @@ Blue Geosimulation, 2017
 from .spatial import *
 from . import util
 import math
-from multiprocessing import cpu_count
+from multiprocessing import Pool, cpu_count
 from multiprocessing.dummy import Pool as DummyPool
 from numba.core.decorators import jit
 from scipy import ndimage, interpolate
@@ -304,19 +304,20 @@ class topo(Raster):
                 chunkSize = 1
             chunkRange = list(range(0, pred_x.shape[0] + chunkSize, chunkSize))
 
-            def iterator():
-                totalCalcs = 0
-                for fr, to in zip(chunkRange[:-1], chunkRange[1:-1] + [pred_x.shape[0]]):
-                    xChunk = pred_x[fr:to]
-                    totalCalcs += x.shape[0] * xChunk.shape[0]
-                    yield (x, y, z, pred_x, pred_y, numpy.zeros(shape=(to - fr,), dtype='float32'), (fr, to))
+            iterator = []
+            totalCalcs = 0
+            for fr, to in zip(chunkRange[:-1], chunkRange[1:-1] + [pred_x.shape[0]]):
+                xChunk = pred_x[fr:to]
+                totalCalcs += x.shape[0] * xChunk.shape[0]
+                iterator.append( (x, y, z, pred_x, pred_y, numpy.zeros(shape=(to - fr,), dtype='float32'), (fr, to)) )
+            print('IDW requires {} calculations'.format(totalCalcs))
 
             import time
             now = time.time()
-            print("Interpolating")
-            p = DummyPool(cpu_count())
+            # p = DummyPool(cpu_count())
+            p = Pool(cpu_count())
             try:
-                iterator = list(p.imap_unordered(idw, iterator()))
+                iterator = list(p.imap_unordered(idw, iterator))
             except Exception as e:
                 import sys
                 p.close()
