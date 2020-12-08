@@ -473,33 +473,30 @@ def wetness(dem, minimum_area):
     return normalize(inverse(cost_surface(bluegrass.stream_order(dem, minimum_area), topo(dem).slope())))
 
 
-def convergence(size=(11, 11), fd=None):
+def convergence(fd, size=(11, 11)):
     """
-    ! Not functional- was removed from a class and needs work !
-
     Compute the relative convergence of flow vectors (uses directions 1 to
     8, which are derived from flow direction)
 
-    TODO: needs to be fixed because moved out of class method
-    :param size:
-    :param fd:
-    :return:
+    :param size: Neighbourhood size
+    :param fd: Flow Direction Grid
+    :return: Raster
     """
-    def eval_conv(a):
+    def eval_conv(a, csx, csy):
         nd = fd.nodata
         mask = (a > 0) & (a != nd)
 
         # Convert a into angles
-        x, y = numpy.mgrid[0:self.csy * 2:3j, 0:self.csx * 2:3j]
-        ang = (numpy.arctan2(y - self.csy, x - self.csx) * -1) + numpy.pi
+        x, y = numpy.mgrid[0:csy * 2:3j, 0:csx * 2:3j]
+        ang = (numpy.arctan2(y - csy, x - csx) * -1) + numpy.pi
         a = ne.evaluate('where(mask,a-1,0)')
         a = ang[(0, 0, 0, 1, 2, 2, 2, 1), (2, 1, 0, 0, 0, 1, 2, 2)][a]
         a[~mask] = nd
 
         # Get neighbours as views and create output
         b = util.window_local_dict(util.get_window_views(a, size), 'a')
-        x, y = numpy.mgrid[0:(a.shape[0] - 1) * self.csy:a.shape[0] * 1j,
-                           0:(a.shape[1] - 1) * self.csx:a.shape[1] * 1j]
+        x, y = numpy.mgrid[0:(a.shape[0] - 1) * csy:a.shape[0] * 1j,
+                           0:(a.shape[1] - 1) * csx:a.shape[1] * 1j]
         b.update(util.window_local_dict(util.get_window_views(x, size), 'x'))
         b.update(util.window_local_dict(util.get_window_views(y, size), 'y'))
         pi = numpy.pi
@@ -522,25 +519,21 @@ def convergence(size=(11, 11), fd=None):
         conv[b['a%s' % c] == nd] = nd
         return conv
 
-    # Calculate fa if not specified
-    if fd is None:
-        fa, fd = self.route()
-    else:
-        fd = Raster(fd)
-        if 'int' not in fd.dtype:
-            fd = fd.astype('int32')
+    fd = Raster(fd)
+    if 'int' not in fd.dtype:
+        fd = fd.astype('int32')
     # Allocate output
-    conv = self.empty()
+    conv = fd.astype('float32')
     if fd.useChunks:
         # Iterate chunks and calculate convergence
         for a, s in fd.iterchunks(expand=size):
             s_ = util.truncate_slice(s, size)
-            conv[s_] = eval_conv(a).astype('float32')
+            conv[s_] = eval_conv(a, fd.csx, fd.csy).astype('float32')
     else:
         # Calculate over all data
-        conv[:] = eval_conv(fd.array)
+        conv[:] = eval_conv(fd.array, fd.csx, fd.csy)
 
-    return watershed(conv, tempdir=self.tempdir)
+    return conv
 
 
 def stream_slope(dem, streams, units='degrees'):

@@ -260,9 +260,9 @@ def collect_nhn_files(
 
     ftp.quit()
 
-    for zp in zip_paths:
-        with zf.ZipFile(zp, 'r') as z:
-            print("Extracting {}".format(zp))
-            z.extractall()
-        os.remove(zp)
+    # for zp in zip_paths:
+    #     with zf.ZipFile(zp, 'r') as z:
+    #         print("Extracting {}".format(zp))
+    #         z.extractall()
+    #     os.remove(zp)
 
