@@ -501,7 +501,7 @@ def convergence(fd, size=(11, 11)):
         b.update(util.window_local_dict(util.get_window_views(y, size), 'y'))
         pi = numpy.pi
         b.update({'pi': pi, 'nd': nd})
-        c = '%s_%s' % ((size[0] - 1) / 2, (size[1] - 1) / 2)
+        c = '%s_%s' % ((size[0] - 1) // 2, (size[1] - 1) // 2)
         conv = numpy.zeros(shape=b['a%s' % c].shape, dtype='float32')
 
         # Iterate neighbours and compute convergence
