@@ -153,11 +153,13 @@ def delineate_watershed(fd, i, j):
     stack = [(i, j)]
     watershed = numpy.zeros(fd.shape, numpy.bool_)
     while len(stack) > 0:
+        cont = True
         try:
             i, j = stack[0]
             del stack[0]
         except:
-            break
+            cont = False
+        if not cont: break
         watershed[i, j] = True
         for row_offset in range(-1, 2):
             for col_offset in range(-1, 2):

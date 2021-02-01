@@ -4,6 +4,7 @@ Terrain and Hydrologic routing analysis
 Blue Geosimulation, 2017
 '''
 
+from scipy.interpolate.ndgriddata import griddata
 from .spatial import *
 from . import util
 import math
@@ -331,7 +332,7 @@ class topo(Raster):
             grad = (selfData - targetData)[nearest(points, xi)]
             selfData[xi] = targetData[xi] + grad
 
-        elif interpolation == 'idw':
+        elif interpolation in ['idw', 'linear']:
             print("Creating grids")
             # Only include regions on the edge
             points = numpy.where(
@@ -340,26 +341,31 @@ class topo(Raster):
             if points[0].size == 0:
                 raise TopoError("No overlapping regions found during align")
             del targetDataMask, selfDataMask
-            # Points in form ((x, y), (x, y))
-            pointGrid = numpy.fliplr(
-                numpy.array(util.indices_to_coords(points, selfChangeExtent.top,
-                                                    selfChangeExtent.left, selfChangeExtent.csx,
-                                                    selfChangeExtent.csy)).T
-            )
-            # Interpolation grid in form ((x, y), (x, y))
-            xGrid = numpy.fliplr(
-                numpy.array(util.indices_to_coords(xi, selfChangeExtent.top, selfChangeExtent.left,
-                                                    selfChangeExtent.csx, selfChangeExtent.csy)).T
-            )
-            grad = selfData[points] - targetData[points]
 
-            iterator = inverse_distance(pointGrid, xGrid, grad)
+            if interpolation == 'idw':
+                # Points in form ((x, y), (x, y))
+                pointGrid = numpy.fliplr(
+                    numpy.array(util.indices_to_coords(points, selfChangeExtent.top,
+                                                        selfChangeExtent.left, selfChangeExtent.csx,
+                                                        selfChangeExtent.csy)).T
+                )
+                # Interpolation grid in form ((x, y), (x, y))
+                xGrid = numpy.fliplr(
+                    numpy.array(util.indices_to_coords(xi, selfChangeExtent.top, selfChangeExtent.left,
+                                                        selfChangeExtent.csx, selfChangeExtent.csy)).T
+                )
+                grad = selfData[points] - targetData[points]
+
+                iterator = inverse_distance(pointGrid, xGrid, grad)
+
+                output = numpy.zeros(shape=xi[0].shape, dtype='float32')
+                for i in iterator:
+                    output[i[1][0]:i[1][1]] = i[0]
+
+            else:
+                output = griddata(list(zip(points[0], points[1])), selfData[points] - targetData[points], list(zip(xi[0], xi[1])))
 
             # Add output to selfData
-            output = numpy.zeros(shape=xi[0].shape, dtype='float32')
-            for i in iterator:
-                output[i[1][0]:i[1][1]] = i[0]
-
             selfData[xi] = targetData[xi] + output
 
         elif interpolation == 'progressive':
